@@ -71,44 +71,54 @@ All data stays local by default. Sensor data, behavior patterns, ANIMA's memorie
 ## Architecture (Phase 0 — Current)
 
 ```
-+---------------------------------------------------------+
-|  ANIMA Platform                                         |
-|                                                         |
-|  +---------+  +--------------+  +-------------------+  |
-|  |Heartbeat|  | Agentic Loop |  |   Agent Manager   |  |
-|  | Engine  |--|  (LLM+Tools) |--|internal/cli/shell |  |
-|  | 15s/5m  |  |  multi-turn  |  | parallel spawn    |  |
-|  +----+----+  +------+-------+  +-------------------+  |
-|       |              |                                  |
-|  +----+----+  +------+-------+  +-------------------+  |
-|  |Snapshot |  |  13 Tools    |  |    Dashboard      |  |
-|  | Cache   |  | shell/files/ |  |  WebSocket SPA    |  |
-|  |CPU/Mem/ |  | web/agents/  |  | http://...:8420   |  |
-|  |  Disk   |  | claude_code  |  +-------------------+  |
-|  +---------+  +--------------+                          |
-|                                                         |
-|  +----------+  +---------+  +------------------------+  |
-|  | SQLite   |  |Emotion  |  |   Agent Persona        | |
-|  | Memory   |  | State   |  |  agents/eva/soul.md    | |
-|  |chat/usage|  | 4D+decay|  |  agents/eva/feelings   | |
-|  +----------+  +---------+  +------------------------+  |
-+---------------------------------------------------------+
++-----------------------------------------------------------------+
+|  ANIMA Platform (73 .py files, ~8000 LOC)                       |
+|                                                                 |
+|  +---------+  +----------------+  +-------------------+         |
+|  |Heartbeat|  | Agentic Loop   |  |   Agent Manager   |         |
+|  | Engine  |--| Rule Engine    |--|internal/cli/shell |         |
+|  | 15s/5m  |  | first, then LLM|  | parallel spawn    |         |
+|  +----+----+  +-------+--------+  +-------------------+         |
+|       |               |                                         |
+|  +----+----+  +-------+--------+  +-------------------+         |
+|  |Snapshot |  |   20 Tools     |  |    Dashboard      |         |
+|  | Cache   |  | shell/files/   |  |  WebSocket SPA    |         |
+|  |CPU/Mem/ |  | search/edit/   |  | http://...:8420   |         |
+|  |  Disk   |  | web/agents/    |  +-------------------+         |
+|  +---------+  | scheduler      |                                |
+|               +----------------+                                |
+|                                                                 |
+|  +----------+  +---------+  +----------+  +-----------------+  |
+|  | SQLite   |  |Emotion  |  |  Cron    |  | Agent Persona   |  |
+|  | Memory   |  | State   |  |Scheduler |  | agents/eva/     |  |
+|  |chat/usage|  | 4D+decay|  |persistent|  | soul.md         |  |
+|  +----------+  +---------+  +----------+  +-----------------+  |
+|                                                                 |
+|  +----------+  +------------------+                             |
+|  |  Skill   |  | Noise Filtering  |                             |
+|  |  System  |  | at heartbeat     |                             |
+|  | OpenClaw |  | level            |                             |
+|  +----------+  +------------------+                             |
++-----------------------------------------------------------------+
 ```
 
 ## Phase 0 — What's Implemented Now
 
-ANIMA Phase 0 is a fully functional single-node autonomous AI system:
+ANIMA Phase 0 is a fully functional single-node autonomous AI system with 73 Python files (~8000 LOC) and 70 passing unit tests.
 
-**AgenticLoop** — An LLM-native agentic loop. The LLM receives the full context (system state, events, memory, tools) and decides what to do in a multi-turn reasoning cycle. Not a rigid PODAR pipeline, but a flexible agent that thinks and acts in natural loops.
+**Hybrid Rule Engine + LLM Architecture** — The cognitive loop tries the rule engine FIRST for cheap events (greetings, file changes, system alerts) before calling the LLM. This saves ~80% of LLM calls. For complex events, the LLM receives full context (system state, events, memory, tools) and decides what to do in a multi-turn reasoning cycle.
 
-**13 Built-in Tools:**
+**20 Built-in Tools** (+ dynamic skill-generated tools):
 
 | Tool | Description | Risk |
 |------|-------------|------|
-| `shell` | Execute shell commands | HIGH |
-| `read_file` | Read file contents | SAFE |
+| `shell` | Execute shell commands (Python on PATH) | HIGH |
+| `read_file` | Read file contents (with offset/limit) | SAFE |
 | `write_file` | Write file contents | MEDIUM |
+| `edit_file` | Precise string-based editing | MEDIUM |
 | `list_directory` | List directory contents | SAFE |
+| `glob_search` | File pattern matching (\*\*/\*.py) | SAFE |
+| `grep_search` | Regex content search with context | SAFE |
 | `system_info` | CPU, memory, disk, OS info | SAFE |
 | `get_datetime` | Current date/time | SAFE |
 | `save_note` | Save observation to notes | LOW |
@@ -118,6 +128,14 @@ ANIMA Phase 0 is a fully functional single-node autonomous AI system:
 | `check_agent` | Check sub-agent status | SAFE |
 | `wait_agent` | Wait for sub-agent completion | SAFE |
 | `list_agents` | List all agent sessions | SAFE |
+| `schedule_job` | Schedule a cron task | LOW |
+| `list_jobs` | List scheduled jobs | SAFE |
+| `cancel_job` | Cancel a scheduled job | LOW |
+| `enable_job` | Enable/disable a scheduled job | LOW |
+
+**Cron Scheduler** — Persistent cron jobs that fire events into the cognitive loop. Jobs survive restarts (persisted to `data/scheduler.json`). Integrated into heartbeat tick (checked every 15s).
+
+**Skill System** — Auto-discovers skills from `skills/` directory. Compatible with OpenClaw's `_meta.json` format. Generates tool specs and registers cron jobs from skill metadata. External skill dirs configurable via `config/default.yaml`.
 
 **Multi-Agent Orchestration:**
 
@@ -130,7 +148,7 @@ Eva (main loop)
 
 - Internal agents run independent LLM reasoning loops with full tool access
 - Tools execute in parallel via `asyncio.gather`
-- Main event loop stays non-blocking
+- Main event loop stays non-blocking (`get_timeout(2.0)` instead of blocking forever)
 
 **Dashboard** — 4-page SPA at `http://localhost:8420`:
 - Overview: heartbeat pulse, system metrics, emotion bars, activity feed
@@ -138,7 +156,7 @@ Eva (main loop)
 - Usage: token tracking by model/provider/day
 - Settings: hot-switch models, auth info, tool list, controls
 
-**Other systems:** OAuth auto-discovery (Claude Code local credentials), persistent memory (SQLite), 4D emotion state (engagement/confidence/curiosity/concern with decay), pluggable agent personas (ships with EVA).
+**Other systems:** OAuth auto-discovery (Claude Code local credentials), persistent memory (SQLite), 4D emotion state (engagement/confidence/curiosity/concern with decay), pluggable agent personas (ships with EVA), noise filtering at heartbeat level, budget calculation with real model pricing (Haiku $0.25/$1.25, Sonnet $3/$15, Opus $15/$75 per 1M tokens), self-thoughts stored in conversation buffer.
 
 ## Quick Start
 
@@ -194,50 +212,60 @@ pytest tests/test_oauth_live.py  # Live API test
 
 ```
 anima/
-├── anima/                    # Platform source
+├── anima/                    # Platform source (73 .py files, ~8000 LOC)
 │   ├── core/
-│   │   ├── cognitive.py      # AgenticLoop — LLM-native agentic loop
-│   │   ├── agents.py         # Multi-agent manager (internal/claude_code/shell)
-│   │   ├── heartbeat.py      # Three-tier heartbeat (15s/5m/1h)
+│   │   ├── cognitive.py      # AgenticLoop — hybrid rule-engine + LLM
+│   │   ├── agents.py         # Multi-agent manager with internal LLM sub-agents
+│   │   ├── heartbeat.py      # Three-tier heartbeat + cron scheduler integration
+│   │   ├── scheduler.py      # Persistent cron job scheduler
 │   │   ├── event_queue.py    # Async priority queue
-│   │   └── rule_engine.py    # Deterministic rules for low-level events
+│   │   └── rule_engine.py    # Zero-cost deterministic rules
 │   ├── llm/
 │   │   ├── providers.py      # Anthropic API (OAuth + API Key, direct HTTP)
-│   │   ├── router.py         # Tier1/Tier2 routing with fallback
-│   │   ├── prompts.py        # Dynamic prompt builder
-│   │   └── usage.py          # Usage tracking (persisted to SQLite)
+│   │   ├── router.py         # Tier1/Tier2 routing with real-pricing budget
+│   │   ├── prompts.py        # Event-specific lean prompt builder
+│   │   └── usage.py          # Usage tracking with auth mode detection
 │   ├── memory/
 │   │   ├── store.py          # SQLite backend (chat, usage, audit, snapshots)
 │   │   └── working.py        # Importance-based working memory
 │   ├── perception/
 │   │   ├── system_monitor.py # CPU/memory/disk sampling
-│   │   ├── file_watcher.py   # File change detection (polling)
+│   │   ├── file_watcher.py   # File change detection with noise filtering
 │   │   ├── diff_engine.py    # Field-level threshold diffs
 │   │   └── snapshot_cache.py # Heartbeat-to-cognitive bridge
 │   ├── tools/
-│   │   ├── builtin/          # 13 tools: shell, files, web, agents, claude_code
-│   │   ├── executor.py       # Tool execution with safety checks
-│   │   ├── registry.py       # Tool registration
-│   │   └── safety.py         # Command risk assessment
+│   │   ├── builtin/          # 20 tools: shell, files, search, edit, web, agents, scheduler
+│   │   ├── executor.py       # Parallel tool execution with safety checks
+│   │   ├── registry.py       # Tool registration + skill tool loading
+│   │   └── safety.py         # Command risk assessment (5-level)
+│   ├── skills/
+│   │   └── loader.py         # Skill discovery (OpenClaw-compatible _meta.json)
 │   ├── emotion/state.py      # 4D emotion state with decay
-│   ├── dashboard/            # Web UI (aiohttp + WebSocket SPA)
+│   ├── dashboard/            # 4-page SPA (aiohttp + WebSocket)
 │   ├── ui/terminal.py        # Rich terminal with markdown rendering
-│   ├── models/               # Data models (Event, MemoryItem, ToolSpec)
+│   ├── models/               # Data models (Event, MemoryItem, ToolSpec, Decision)
 │   └── main.py               # Orchestration + graceful shutdown
 ├── agents/                   # Agent personas (pluggable)
 │   └── eva/
 │       ├── soul.md           # Personality and speech patterns
-│       ├── feelings.md       # Emotional memory
+│       ├── feelings.md       # Emotional memory (gitignored)
 │       └── config.yaml       # Agent-specific config overrides
+├── skills/                   # Native ANIMA skills (auto-discovered)
 ├── config/
 │   └── default.yaml          # Runtime configuration
 ├── prompts/                  # Platform prompt templates
 ├── data/                     # Runtime data (gitignored)
+│   ├── anima.db              # SQLite (chat, usage, audit)
+│   ├── scheduler.json        # Persistent cron jobs
+│   ├── workspace/            # Agent's working directory
+│   ├── uploads/              # User-uploaded files
+│   └── logs/                 # Log files
 ├── docs/
 │   └── deep_analysis_v3.md   # Full technical design document
-├── tests/                    # 70 tests
+├── tests/                    # 70 unit tests
 ├── .env.example              # Auth configuration template
-└── pyproject.toml            # Package config
+├── LICENSE                   # MIT
+└── pyproject.toml
 ```
 
 ## Creating a New Agent Persona
@@ -252,6 +280,39 @@ Create `agents/my_agent/soul.md` with personality definition, then set in `confi
 agent:
   name: "my_agent"
 ```
+
+## Phase 0 vs OpenClaw / Claude Code
+
+An honest assessment of where ANIMA stands relative to the ecosystem:
+
+### Caught up
+
+| Capability | ANIMA Phase 0 | OpenClaw | Claude Code |
+|------------|---------------|----------|-------------|
+| Agentic LLM loop | Hybrid rule-engine + LLM | LLM-only | LLM-only |
+| Tool count | 20 built-in + skill-generated | ~15 | ~20 native |
+| File search (Glob) | `glob_search` | N/A | Glob |
+| Content search (Grep) | `grep_search` | N/A | Grep |
+| Precise editing | `edit_file` | N/A | Edit |
+| Multi-agent | Internal LLM sub-agents + Claude Code + Shell | Single agent | Single agent |
+| Cron scheduling | Persistent, heartbeat-integrated | N/A | N/A |
+| Skill system | OpenClaw-compatible `_meta.json` | Native skills | N/A |
+| Parallel tool execution | `asyncio.gather` | Sequential | Parallel |
+| Cost optimization | Rule engine (~80% LLM savings) + noise filtering | N/A | N/A |
+
+### Still missing (Phase 1-4 roadmap items)
+
+| Capability | Target Phase | Description |
+|------------|-------------|-------------|
+| Self-evolution | Phase 4 | Agent writes its own tools, modifies its own code |
+| API gateway | Phase 1 | External API for third-party integrations |
+| Multi-instance agents | Phase 1-3 | Multiple ANIMA nodes discovering each other via mDNS |
+| Multi-channel comms | Phase 1 | Slack, Discord, Telegram, etc. |
+| GUI operation | Phase 2 | Screen capture + mouse/keyboard control |
+| Self-healing mesh | Phase 3 | 5-level hot repair + node takeover |
+| Embodiment | Phase 6 | Robot integration (PiDog) |
+
+ANIMA's unique advantage is architectural: the heartbeat-driven event loop means autonomous behavior is native, not bolted on. The features above are planned extensions of this foundation, not fundamental redesigns.
 
 ## Roadmap
 

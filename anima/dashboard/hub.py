@@ -28,6 +28,8 @@ class DashboardHub:
         self.tool_registry = None
         self.usage_tracker = None
         self.agent_manager = None
+        self.scheduler = None
+        self.skill_loader = None
         self.config: dict = {}
         self._start_time = time.time()
         self._chat_history: list[dict] = []
@@ -83,6 +85,9 @@ class DashboardHub:
             "chat_history": self._chat_history[-50:],
             "activity": self._activity_log[-50:],
         }
+        snapshot["scheduler"] = self.scheduler.list_jobs() if self.scheduler else []
+        snapshot["skills"] = self.skill_loader.list_skills() if self.skill_loader else []
+
         # Include agent session data
         snapshot["agents"] = (
             self.agent_manager.get_hierarchy()

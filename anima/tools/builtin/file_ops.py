@@ -7,8 +7,17 @@ from pathlib import Path
 from anima.models.tool_spec import ToolSpec, RiskLevel
 
 
-async def _read_file(path: str, max_lines: int = 200) -> str:
-    """Read file contents."""
+async def _read_file(
+    path: str,
+    max_lines: int = 2000,
+    offset: int = 0,
+    limit: int | None = None,
+) -> str | dict:
+    """Read file contents.
+
+    When *offset* or *limit* are provided, returns a dict with metadata;
+    otherwise returns plain text for backward compatibility.
+    """
     p = Path(path)
     if not p.exists():
         raise FileNotFoundError(f"File not found: {path}")
@@ -16,8 +25,22 @@ async def _read_file(path: str, max_lines: int = 200) -> str:
         raise ValueError(f"Not a file: {path}")
     text = p.read_text(encoding="utf-8", errors="replace")
     lines = text.splitlines()
-    if len(lines) > max_lines:
-        return "\n".join(lines[:max_lines]) + f"\n... ({len(lines) - max_lines} more lines)"
+    total_lines = len(lines)
+
+    # If caller explicitly requested a slice, return structured result
+    if offset > 0 or limit is not None:
+        effective_limit = limit if limit is not None else max_lines
+        end = min(total_lines, offset + effective_limit)
+        selected = lines[offset:end]
+        return {
+            "content": "\n".join(selected),
+            "total_lines": total_lines,
+            "showing": f"lines {offset + 1}-{end}",
+        }
+
+    # Default behaviour — plain text, capped at max_lines
+    if total_lines > max_lines:
+        return "\n".join(lines[:max_lines]) + f"\n... ({total_lines - max_lines} more lines)"
     return text
 
 
@@ -46,7 +69,20 @@ def get_file_tools() -> list[ToolSpec]:
                 "type": "object",
                 "properties": {
                     "path": {"type": "string", "description": "File path to read"},
-                    "max_lines": {"type": "integer", "default": 200},
+                    "max_lines": {
+                        "type": "integer",
+                        "default": 2000,
+                        "description": "Maximum lines to read (default 2000)",
+                    },
+                    "offset": {
+                        "type": "integer",
+                        "default": 0,
+                        "description": "Line number to start reading from (0-based)",
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Maximum number of lines to return when using offset",
+                    },
                 },
                 "required": ["path"],
             },

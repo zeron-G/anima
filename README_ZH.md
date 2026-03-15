@@ -135,20 +135,23 @@
 
 ## 当前实现 (Phase 0)
 
-Phase 0 已实现的是一个完整的单节点自主 AI 系统。
+Phase 0 已实现一个完整的单节点自主 AI 系统，包含 73 个 Python 文件（约 8000 行代码），70 个单元测试全部通过。
 
-### AgenticLoop 架构
+### 混合规则引擎 + LLM 架构
 
-当前的认知循环采用 **LLM-native agentic loop** 设计，而非最初设计文档中描述的 PODAR 管线。LLM 接收完整上下文（系统状态、事件、记忆、工具列表），在多轮推理循环中自主决定下一步行动。这比刚性的管线更灵活，能更好地利用 LLM 的推理能力。
+认知循环采用**规则引擎优先**的混合设计：对低成本事件（问候、文件变化、系统告警）先走规则引擎处理，节省约 80% 的 LLM 调用。只有复杂事件才进入 LLM 多轮推理循环，LLM 接收完整上下文（系统状态、事件、记忆、工具列表），自主决定下一步行动。
 
-### 工具系统（13 个内置工具）
+### 工具系统（20 个内置工具 + 技能动态生成工具）
 
 | 工具 | 描述 | 风险等级 |
 |------|------|----------|
-| `shell` | 执行 Shell 命令 | 高 |
-| `read_file` | 读取文件内容 | 安全 |
+| `shell` | 执行 Shell 命令（Python on PATH） | 高 |
+| `read_file` | 读取文件内容（支持 offset/limit） | 安全 |
 | `write_file` | 写入文件内容 | 中 |
+| `edit_file` | 精确字符串替换编辑 | 中 |
 | `list_directory` | 列出目录内容 | 安全 |
+| `glob_search` | 文件模式匹配（\*\*/\*.py） | 安全 |
+| `grep_search` | 正则内容搜索（带上下文） | 安全 |
 | `system_info` | CPU、内存、磁盘、系统信息 | 安全 |
 | `get_datetime` | 获取当前日期时间 | 安全 |
 | `save_note` | 保存观察笔记 | 低 |
@@ -158,8 +161,20 @@ Phase 0 已实现的是一个完整的单节点自主 AI 系统。
 | `check_agent` | 检查子智能体状态 | 安全 |
 | `wait_agent` | 等待子智能体完成 | 安全 |
 | `list_agents` | 列出所有智能体会话 | 安全 |
+| `schedule_job` | 调度 Cron 任务 | 低 |
+| `list_jobs` | 列出已调度任务 | 安全 |
+| `cancel_job` | 取消已调度任务 | 低 |
+| `enable_job` | 启用/禁用已调度任务 | 低 |
 
-工具执行器内置安全检查层（`safety.py`），对 Shell 命令进行风险评估。
+工具执行器内置安全检查层（`safety.py`，5 级风险评估），支持并行执行（`asyncio.gather`）。
+
+### Cron 调度器
+
+持久化 Cron 任务，向认知循环注入事件。任务在重启后自动恢复（持久化到 `data/scheduler.json`）。集成到心跳 tick 中（每 15 秒检查一次）。
+
+### 技能系统
+
+从 `skills/` 目录自动发现技能，兼容 OpenClaw 的 `_meta.json` 格式。自动生成工具规格并从技能元数据注册 Cron 任务。外部技能目录可通过 `config/default.yaml` 配置。
 
 ### 多智能体编排
 
@@ -172,7 +187,7 @@ Eva（主循环）
 
 - 内部智能体运行独立的 LLM 推理循环，可使用 ANIMA 的所有工具
 - 工具并行执行（`asyncio.gather`）
-- 事件循环不阻塞——主智能体在子智能体工作时保持响应
+- 事件循环不阻塞——使用 `get_timeout(2.0)` 替代永久阻塞，后台智能体任务可以完成
 
 ### 监控看板
 
@@ -196,9 +211,12 @@ Eva（主循环）
 ### 记忆与情感
 
 - **持久记忆**：SQLite 后端，存储聊天记录、使用量统计、审计日志、系统快照
-- **工作记忆**：基于重要度的工作记忆管理
+- **工作记忆**：基于重要度的工作记忆管理，自思维存入对话缓冲（智能体记住自己的观察）
 - **情感状态**：四维情感模型（engagement/confidence/curiosity/concern），带时间衰减
 - **智能体人格**：可插拔设计，内置 EVA（傲娇芭蕾天使 AI 伴侣）
+- **噪声过滤**：心跳层级噪声过滤（事件到达队列前即过滤）
+- **预算计算**：使用真实模型定价（Haiku $0.25/$1.25, Sonnet $3/$15, Opus $15/$75 每百万 Token）
+- **认证追踪**：用量记录正确标记认证模式（"oauth" 或 "apikey"）
 
 ---
 
@@ -251,51 +269,96 @@ pytest tests/test_oauth_live.py  # 实时 API 测试
 
 ```
 anima/
-├── anima/                    # 平台源码
+├── anima/                    # 平台源码（73 个 .py 文件，约 8000 行代码）
 │   ├── core/
-│   │   ├── cognitive.py      # AgenticLoop — LLM 原生智能体循环
-│   │   ├── agents.py         # 多智能体管理器（内部/Claude Code/Shell）
-│   │   ├── heartbeat.py      # 三级心跳引擎（15s/5min/1h）
+│   │   ├── cognitive.py      # AgenticLoop — 混合规则引擎 + LLM
+│   │   ├── agents.py         # 多智能体管理器（含内部 LLM 子智能体）
+│   │   ├── heartbeat.py      # 三级心跳引擎 + Cron 调度器集成
+│   │   ├── scheduler.py      # 持久化 Cron 任务调度器
 │   │   ├── event_queue.py    # 异步优先级事件队列
-│   │   └── rule_engine.py    # 低级事件确定性规则引擎
+│   │   └── rule_engine.py    # 零成本确定性规则引擎
 │   ├── llm/
 │   │   ├── providers.py      # Anthropic API（OAuth + API Key，直连 HTTP）
-│   │   ├── router.py         # Tier1/Tier2 路由 + 降级策略
-│   │   ├── prompts.py        # 动态提示词构建器（按事件类型裁剪）
-│   │   └── usage.py          # 用量追踪（持久化到 SQLite）
+│   │   ├── router.py         # Tier1/Tier2 路由（真实定价预算）
+│   │   ├── prompts.py        # 按事件类型的精简提示词构建器
+│   │   └── usage.py          # 用量追踪（含认证模式检测）
 │   ├── memory/
 │   │   ├── store.py          # SQLite 后端（聊天、用量、审计、快照）
 │   │   └── working.py        # 基于重要度的工作记忆
 │   ├── perception/
 │   │   ├── system_monitor.py # CPU/内存/磁盘采样
-│   │   ├── file_watcher.py   # 文件变化检测（轮询）
+│   │   ├── file_watcher.py   # 文件变化检测（含噪声过滤）
 │   │   ├── diff_engine.py    # 字段级阈值 diff
 │   │   └── snapshot_cache.py # 心跳到认知的桥接
 │   ├── tools/
-│   │   ├── builtin/          # 13 个内置工具
-│   │   ├── executor.py       # 工具执行器 + 安全检查
-│   │   ├── registry.py       # 工具注册
-│   │   └── safety.py         # 命令风险评估
+│   │   ├── builtin/          # 20 个工具：shell/文件/搜索/编辑/web/智能体/调度器
+│   │   ├── executor.py       # 并行工具执行 + 安全检查
+│   │   ├── registry.py       # 工具注册 + 技能工具加载
+│   │   └── safety.py         # 命令风险评估（5 级）
+│   ├── skills/
+│   │   └── loader.py         # 技能发现（兼容 OpenClaw _meta.json）
 │   ├── emotion/state.py      # 四维情感状态 + 衰减
-│   ├── dashboard/            # Web 看板（aiohttp + WebSocket SPA）
+│   ├── dashboard/            # 4 页 SPA（aiohttp + WebSocket）
 │   ├── ui/terminal.py        # Rich 终端 + Markdown 渲染
-│   ├── models/               # 数据模型（Event, MemoryItem, ToolSpec）
+│   ├── models/               # 数据模型（Event, MemoryItem, ToolSpec, Decision）
 │   └── main.py               # 编排 + 优雅关闭
 ├── agents/                   # 智能体人格（可插拔）
 │   └── eva/
 │       ├── soul.md           # 人格定义和语言风格
-│       ├── feelings.md       # 情感记忆
+│       ├── feelings.md       # 情感记忆（gitignored）
 │       └── config.yaml       # 智能体专属配置覆盖
+├── skills/                   # 原生 ANIMA 技能（自动发现）
 ├── config/
 │   └── default.yaml          # 运行时配置
 ├── prompts/                  # 平台提示词模板
-├── data/                     # 运行时数据（gitignore）
+├── data/                     # 运行时数据（gitignored）
+│   ├── anima.db              # SQLite（聊天、用量、审计）
+│   ├── scheduler.json        # 持久化 Cron 任务
+│   ├── workspace/            # 智能体工作目录
+│   ├── uploads/              # 用户上传文件
+│   └── logs/                 # 日志文件
 ├── docs/
 │   └── deep_analysis_v3.md   # 完整技术设计文档
-├── tests/                    # 70 个测试
+├── tests/                    # 70 个单元测试
 ├── .env.example              # 认证配置模板
-└── pyproject.toml            # 包配置
+├── LICENSE                   # MIT
+└── pyproject.toml
 ```
+
+---
+
+## Phase 0 vs OpenClaw / Claude Code
+
+对 ANIMA 当前位置的诚实评估：
+
+### 已追平的能力
+
+| 能力 | ANIMA Phase 0 | OpenClaw | Claude Code |
+|------|---------------|----------|-------------|
+| 智能体循环 | 混合规则引擎 + LLM | 纯 LLM | 纯 LLM |
+| 工具数量 | 20 内置 + 技能动态生成 | ~15 | ~20 原生 |
+| 文件搜索（Glob） | `glob_search` | 无 | Glob |
+| 内容搜索（Grep） | `grep_search` | 无 | Grep |
+| 精确编辑 | `edit_file` | 无 | Edit |
+| 多智能体 | 内部 LLM 子智能体 + Claude Code + Shell | 单智能体 | 单智能体 |
+| Cron 调度 | 持久化，心跳集成 | 无 | 无 |
+| 技能系统 | 兼容 OpenClaw `_meta.json` | 原生技能 | 无 |
+| 并行工具执行 | `asyncio.gather` | 串行 | 并行 |
+| 成本优化 | 规则引擎（节省约 80% LLM 调用）+ 噪声过滤 | 无 | 无 |
+
+### 仍然缺失（Phase 1-4 路线图项目）
+
+| 能力 | 目标阶段 | 描述 |
+|------|----------|------|
+| 自进化 | Phase 4 | 智能体自主编写工具、修改自身代码 |
+| API 网关 | Phase 1 | 面向第三方的外部 API 集成 |
+| 多实例智能体 | Phase 1-3 | 多个 ANIMA 节点通过 mDNS 互相发现 |
+| 多渠道通信 | Phase 1 | Slack、Discord、Telegram 等 |
+| GUI 操作 | Phase 2 | 屏幕截图 + 鼠标键盘控制 |
+| 自愈 Mesh | Phase 3 | 五级热修复 + 节点接管 |
+| 具身化 | Phase 6 | 机器人集成（PiDog） |
+
+ANIMA 的独特优势在于架构：心跳驱动的事件循环意味着自主行为是原生的，而非后加的。上述缺失功能是这一基础的规划扩展，而非基础重设计。
 
 ---
 
@@ -423,7 +486,7 @@ agent:
 
 ## 许可证
 
-项目处于活跃开发阶段。许可证待定。
+MIT License。详见 [LICENSE](LICENSE)。
 
 ---
 

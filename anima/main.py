@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import signal
+from pathlib import Path
 
 from anima.config import load_config, get
 from anima.utils.logging import setup_logging, get_logger
@@ -52,8 +53,14 @@ async def run() -> None:
 
     from anima.core.agents import AgentManager
     from anima.tools.builtin.agent_tools import set_agent_manager
+    from anima.core.scheduler import Scheduler
+    from anima.tools.builtin.scheduler_tools import set_scheduler as set_scheduler_ref
+    from anima.skills.loader import SkillLoader
 
     # Initialize subsystems
+    scheduler = Scheduler()
+    set_scheduler_ref(scheduler)
+
     agent_manager = AgentManager(max_concurrent=5)
     set_agent_manager(agent_manager)
 
@@ -72,6 +79,26 @@ async def run() -> None:
         registry=tool_registry,
         max_risk=get("tools.safety.max_risk_level", 3),
     )
+
+    # Discover and register skills from ANIMA's own skills/ directory only.
+    # External skill dirs (e.g. OpenClaw) can be added via config, NOT auto-discovered.
+    # OpenClaw has its own agent managing its skills — ANIMA should not interfere.
+    skill_loader = SkillLoader()
+    extra_skill_dirs = get("skills.extra_dirs", [])
+    for d in extra_skill_dirs:
+        p = Path(d)
+        if p.exists():
+            skill_loader.add_skill_dir(p)
+    skills = skill_loader.discover()
+    for tool in skill_loader.generate_tools():
+        tool_registry.register(tool)
+    for cron_job in skill_loader.get_cron_jobs():
+        if cron_job["cron_expr"]:
+            scheduler.add_job(
+                name=cron_job["name"],
+                cron_expr=cron_job["cron_expr"],
+                prompt=f"Run skill command: cd {cron_job['cwd']} && {cron_job['command']}",
+            )
 
     rule_engine = RuleEngine()
     llm_router = LLMRouter(
@@ -96,6 +123,8 @@ async def run() -> None:
         prompt_builder=prompt_builder,
         config=config,
     )
+
+    heartbeat.set_scheduler(scheduler)
 
     cognitive = AgenticLoop(
         event_queue=event_queue,
@@ -126,6 +155,8 @@ async def run() -> None:
     llm_router.set_usage_tracker(usage_tracker)
     dashboard_hub.usage_tracker = usage_tracker
     dashboard_hub.agent_manager = agent_manager
+    dashboard_hub.scheduler = scheduler
+    dashboard_hub.skill_loader = skill_loader
     dashboard_hub.config = config
 
     dashboard_port = get("dashboard.port", 8420)

@@ -117,19 +117,32 @@ class LLMRouter:
             log.error("Tier1 (tools) also failed: %s", e)
             return None
 
+    # Per-1M-token pricing
+    _PRICING = {
+        "haiku": (0.25, 1.25),    # input, output per 1M
+        "sonnet": (3.0, 15.0),
+        "opus": (15.0, 75.0),
+    }
+
     def check_budget(self) -> bool:
-        """Check if we're within daily budget."""
+        """Check if we're within daily budget using real pricing."""
         today = self._today()
         if today != self._day_start:
             self._usage.clear()
             self._day_start = today
-        # Rough cost estimate: $0.001 per 1K tokens
-        total_tokens = sum(
-            u.get("prompt_tokens", 0) + u.get("completion_tokens", 0)
-            for u in self._usage
-        )
-        estimated_cost = total_tokens / 1000 * 0.001
-        return estimated_cost < self._daily_budget
+        total_cost = 0.0
+        for u in self._usage:
+            model = u.get("model", "").lower()
+            inp = u.get("prompt_tokens", 0)
+            out = u.get("completion_tokens", 0)
+            # Match pricing by model name
+            price = self._PRICING.get("sonnet")  # default
+            for key, rates in self._PRICING.items():
+                if key in model:
+                    price = rates
+                    break
+            total_cost += (inp * price[0] + out * price[1]) / 1_000_000
+        return total_cost < self._daily_budget
 
     def get_usage_stats(self) -> dict:
         total_prompt = sum(u.get("prompt_tokens", 0) for u in self._usage)
@@ -150,6 +163,9 @@ class LLMRouter:
 
         # Persist to SQLite via tracker
         if self._usage_tracker:
+            from anima.llm.providers import _get_token, _is_oauth_token
+            token = _get_token()
+            auth = "oauth" if _is_oauth_token(token) else "apikey"
             model = resp.get("model", self._tier1_model if tier == 1 else self._tier2_model)
             tier_name = f"tier{tier}"
             try:
@@ -158,7 +174,7 @@ class LLMRouter:
                     tier=tier_name,
                     prompt_tokens=usage.get("prompt_tokens", 0),
                     completion_tokens=usage.get("completion_tokens", 0),
-                    auth_mode="auto",
+                    auth_mode=auth,
                 )
             except Exception as e:
                 log.debug("Usage tracking failed: %s", e)

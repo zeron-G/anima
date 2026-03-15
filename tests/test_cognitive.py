@@ -46,10 +46,11 @@ async def test_handle_event_from_cache(cognitive_deps):
     statuses = []
     al.set_status_callback(lambda s: statuses.append(s))
 
-    event = Event(type=EventType.USER_MESSAGE, payload={"text": "hello"})
+    event = Event(type=EventType.USER_MESSAGE, payload={"text": "What is the meaning of life?"})
     await al._process_event(event)
 
     # Should have emitted at least thinking + error/idle statuses
+    # (rule engine won't match this, so it goes to LLM)
     stages = [s.get("stage") for s in statuses]
     assert "thinking" in stages
 

@@ -20,6 +20,9 @@ from anima.perception.snapshot_cache import SnapshotCache
 from anima.perception.system_monitor import sample_system_state
 from anima.utils.logging import get_logger
 
+# Import here to satisfy type hints; actual instance injected via set_scheduler()
+from anima.core.scheduler import Scheduler
+
 log = get_logger("heartbeat")
 
 
@@ -68,6 +71,7 @@ class HeartbeatEngine:
         self._tick_count = 0
         self._tick_callback = None  # Dashboard heartbeat visualization
         self._tick_history: list[dict] = []  # Last 30 tick records
+        self._scheduler: Scheduler | None = None
 
         # File watcher
         watch_paths = get("perception.watch_paths", ["."])
@@ -77,6 +81,10 @@ class HeartbeatEngine:
     def set_tick_callback(self, callback) -> None:
         """Set callback for heartbeat tick visualization."""
         self._tick_callback = callback
+
+    def set_scheduler(self, scheduler: Scheduler) -> None:
+        """Set the cron scheduler instance."""
+        self._scheduler = scheduler
 
     async def start(self) -> None:
         """Start all heartbeat loops."""
@@ -151,15 +159,35 @@ class HeartbeatEngine:
                 source="heartbeat",
             ))
 
+        # Filter noise BEFORE pushing to queue — don't waste LLM calls on cache/log changes
         if changes:
-            await self._event_queue.put(Event(
-                type=EventType.FILE_CHANGE,
-                payload={"changes": changes},
-                priority=EventPriority.NORMAL,
-                source="heartbeat",
-            ))
+            real_changes = [
+                c for c in changes
+                if not any(skip in c.get("path", "") for skip in
+                          ("__pycache__", ".pyc", "data/notes/", "data/logs/",
+                           "anima.db", ".egg-info", ".pytest_cache"))
+            ]
+            if real_changes:
+                await self._event_queue.put(Event(
+                    type=EventType.FILE_CHANGE,
+                    payload={"changes": real_changes},
+                    priority=EventPriority.NORMAL,
+                    source="heartbeat",
+                ))
 
         self._last_snapshot = snapshot
+
+        # Check scheduled jobs (cron)
+        if self._scheduler:
+            due_jobs = self._scheduler.get_due_jobs()
+            for job in due_jobs:
+                await self._event_queue.put(Event(
+                    type=EventType.SCHEDULED_TASK,
+                    payload={"job_id": job.id, "job_name": job.name, "prompt": job.prompt},
+                    priority=EventPriority.NORMAL,
+                    source="scheduler",
+                ))
+                log.info("Scheduled job fired: %s (%s)", job.name, job.cron_expr)
 
         # Emit tick record for dashboard visualization
         tick_record = {

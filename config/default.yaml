@@ -82,6 +82,12 @@ tools:
     max_risk_level: 3       # 0=safe, 1=low, 2=medium, 3=high, X=blocked
     require_confirm_level: 3
 
+# Skills — external skill directories (opt-in, not auto-discovered)
+# OpenClaw skills are NOT loaded by default. Add the path here to enable:
+#   - "/path/to/openclaw/workspace/skills"
+skills:
+  extra_dirs: []
+
 # Dashboard
 dashboard:
   port: 8420

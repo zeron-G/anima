@@ -20,6 +20,7 @@ class EventType(IntEnum):
     STARTUP = auto()        # First boot — introduce, scan, set goals
     SELF_THINKING = auto()  # Periodic proactive thought (LLM heartbeat)
     FOLLOW_UP = auto()      # Agent wants to continue working on something
+    SCHEDULED_TASK = auto()  # Cron scheduler fired a job
 
 
 class EventPriority(IntEnum):

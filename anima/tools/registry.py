@@ -39,6 +39,9 @@ class ToolRegistry:
         from anima.tools.builtin.web_fetch import get_web_fetch_tool
         from anima.tools.builtin.claude_code import get_claude_code_tool
         from anima.tools.builtin.agent_tools import get_agent_tools
+        from anima.tools.builtin.search import get_search_tools
+        from anima.tools.builtin.edit import get_edit_tool
+        from anima.tools.builtin.scheduler_tools import get_scheduler_tools
 
         self.register(get_shell_tool())
         for tool in get_file_tools():
@@ -49,4 +52,9 @@ class ToolRegistry:
         self.register(get_web_fetch_tool())
         self.register(get_claude_code_tool())
         for tool in get_agent_tools():
+            self.register(tool)
+        for tool in get_search_tools():
+            self.register(tool)
+        self.register(get_edit_tool())
+        for tool in get_scheduler_tools():
             self.register(tool)
