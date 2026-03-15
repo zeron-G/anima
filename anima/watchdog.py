@@ -423,10 +423,22 @@ def run_watchdog(dry_run: bool = False) -> None:
             if time.time() - last_error_check > error_check_interval:
                 last_error_check = time.time()
 
-                # Check heartbeat
+                # Check heartbeat — kill if stale for 3+ consecutive checks (3 min)
                 if not _check_heartbeat():
-                    _log("ANIMA heartbeat stale — may be hung")
-                    # Don't kill yet, just log. If it's truly hung, it'll crash eventually.
+                    stale_count = getattr(run_watchdog, '_stale_count', 0) + 1
+                    run_watchdog._stale_count = stale_count
+                    _log(f"ANIMA heartbeat stale ({stale_count}/3)")
+                    if stale_count >= 3:
+                        _log("Heartbeat stale for 3+ minutes — killing hung process")
+                        proc.kill()
+                        try:
+                            proc.wait(timeout=10)
+                        except Exception:
+                            pass
+                        run_watchdog._stale_count = 0
+                        break  # Exit monitor loop → restart
+                else:
+                    run_watchdog._stale_count = 0
 
                 # Check for repeated errors
                 error_info = _detect_error_pattern()

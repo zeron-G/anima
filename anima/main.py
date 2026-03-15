@@ -486,16 +486,20 @@ async def run() -> bool:
             await memory_sync.stop()
         await gossip_mesh.stop()
 
-    # 4. Wait for tasks
+    # 4. Cancel all remaining async tasks
+    for t in tasks:
+        t.cancel()
+    # Also cancel network_tasks if it exists
+    for task in asyncio.all_tasks():
+        if task.get_name() in ("network_tasks", "reload_watcher"):
+            task.cancel()
     try:
         await asyncio.wait_for(
             asyncio.gather(*tasks, return_exceptions=True),
             timeout=timeout,
         )
-    except asyncio.TimeoutError:
+    except (asyncio.TimeoutError, asyncio.CancelledError):
         log.warning("Shutdown timeout — forcing exit.")
-        for t in tasks:
-            t.cancel()
 
     # 5. Clean up reload watcher
     reload_watcher.cancel()
