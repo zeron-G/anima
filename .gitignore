@@ -1,0 +1,51 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+.eggs/
+*.egg
+
+# Virtual environments
+.venv/
+venv/
+
+# Runtime data (generated at runtime, not source)
+data/anima.db
+data/chroma/
+data/logs/*
+data/notes/*
+data/workspace/*
+data/uploads/*
+data/user_profile.md
+!data/**/.gitkeep
+!data/user_profile.md.example
+
+# Secrets — NEVER commit
+.env
+.env.*
+!.env.example
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Test / build cache
+.pytest_cache/
+htmlcov/
+.coverage
+
+# Agent private memory — local only
+agents/*/feelings.md
+agents/*/memory.md
+agents/*/diary.md

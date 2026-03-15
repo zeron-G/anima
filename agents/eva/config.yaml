@@ -1,0 +1,10 @@
+# Eva agent-specific configuration overrides
+# These override values in config/default.yaml when Eva is the active agent
+
+# Eva's emotion baseline — higher curiosity and engagement
+emotion:
+  baseline:
+    engagement: 0.6
+    confidence: 0.6
+    curiosity: 0.8
+    concern: 0.2

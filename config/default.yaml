@@ -1,0 +1,96 @@
+# ANIMA Phase 0 Configuration
+
+# Active agent — loads persona from agents/<name>/
+agent:
+  name: "eva"
+
+heartbeat:
+  script_interval_s: 15
+  llm_interval_s: 300       # 5 minutes
+  major_interval_s: 3600    # 1 hour
+
+# LLM heartbeat trigger conditions
+llm_trigger:
+  min_significant_diffs: 3
+  significance_threshold: 0.3
+  max_consecutive_skips: 3
+
+# Field-level diff thresholds
+diff_rules:
+  cpu_percent:
+    threshold: 15
+  memory_percent:
+    threshold: 10
+  disk_percent:
+    threshold: 5
+  file_changes:
+    threshold: 0      # any file change
+  process_count:
+    threshold: 5
+
+# LLM routing — latest model IDs (2025-06)
+# Available: claude-opus-4-6, claude-sonnet-4-6, claude-haiku-4-5-20251001
+llm:
+  tier1:
+    model: "claude-sonnet-4-6"
+    max_tokens: 4096
+  tier2:
+    model: "claude-haiku-4-5-20251001"
+    max_tokens: 2048
+  # Opus — used when explicitly requested (e.g. complex reasoning)
+  opus:
+    model: "claude-opus-4-6"
+    max_tokens: 8192
+  budget:
+    daily_limit_usd: 5.0
+
+# Decision significance thresholds
+decision:
+  low_threshold: 0.3       # below → rule engine
+  high_threshold: 0.7      # above → Tier1
+
+# Memory
+memory:
+  working_capacity: 20
+  db_path: "data/anima.db"
+
+# Perception
+perception:
+  watch_paths:
+    - "."
+  watch_extensions:
+    - ".py"
+    - ".md"
+    - ".yaml"
+    - ".yml"
+    - ".json"
+    - ".txt"
+  snapshot_history_size: 10
+
+# Emotion
+emotion:
+  decay_rate: 0.05          # per script heartbeat
+  baseline:
+    engagement: 0.5
+    confidence: 0.6
+    curiosity: 0.7
+    concern: 0.2
+
+# Tools
+tools:
+  safety:
+    max_risk_level: 3       # 0=safe, 1=low, 2=medium, 3=high, X=blocked
+    require_confirm_level: 3
+
+# Dashboard
+dashboard:
+  port: 8420
+
+# Shutdown
+shutdown:
+  timeout_s: 5
+
+# Logging
+logging:
+  level: "INFO"
+  file: "data/logs/anima.log"
