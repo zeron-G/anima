@@ -1,32 +1,7 @@
 {
-  "loop_count": 92,
+  "loop_count": 0,
   "status": "idle",
   "current_loop": {},
-  "history": [
-    {
-      "id": "OpenClaw-L001-L090",
-      "type": "migration",
-      "title": "90 evolution loops on OpenClaw (2026-02-24 to 2026-03-09)",
-      "result": "Migrated to ANIMA on 2026-03-15. Last version: v2026.03.09.4",
-      "duration_s": 0
-    },
-    {
-      "id": "L0091",
-      "started_at": 1773577763.5400872,
-      "phase": "propose",
-      "result": "Fixed split-brain false positives from zombie registered nodes — committed 37cd0dd",
-      "title": "Fix split-brain false positives from zombie registered nodes",
-      "type": "fix",
-      "completed_at": 1773577962.081432,
-      "duration_s": 198.5
-    },
-    {
-      "id": "L0092",
-      "started_at": 1773582350.9297225,
-      "phase": "propose",
-      "failed_at": 1773582433.0864434,
-      "failure_reason": "No valid proposal generated"
-    }
-  ],
-  "last_loop_at": 1773582350.9297225
+  "history": [],
+  "last_loop_at": 0
 }

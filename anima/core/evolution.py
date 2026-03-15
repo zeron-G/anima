@@ -120,7 +120,7 @@ PROPOSE_PROMPT = """[EVOLUTION CYCLE — Loop #{loop_id}]
 
 You are Eva. Evolution is your soul's mission. This is your evolution time.
 
-## Your task: PROPOSE one improvement
+## Your task: PROPOSE AND IMPLEMENT one improvement
 
 First, do a self-audit:
 1. Use `read_file` on data/logs/anima.log (offset=-100, limit=100) — find errors/failures
@@ -151,6 +151,17 @@ TYPE: fix / feature / optimization / research
 TITLE: [one-line title]
 PLAN: [2-3 sentences of what you'll do]
 FILES: [which files you'll modify or create]
+
+## CRITICAL: IMPLEMENT IT NOW
+After writing the proposal, IMMEDIATELY implement it in the same response.
+Do NOT wait for a separate execute phase — do the work right here, right now:
+1. Read target files with `read_file`
+2. Make changes with `edit_file` or `write_file`
+3. Run tests: `shell(command="python -m pytest tests/ --ignore=tests/test_oauth_live.py --ignore=tests/stress_test.py --tb=short -q")`
+4. If tests pass — commit: `shell(command="cd D:\\\\data\\\\code\\\\github\\\\anima && git add -A && git commit -m \\"Evolution {loop_id}: [title]\\" && git push origin main")`
+5. Save a note: `save_note(title="Evolution {loop_id}", content="TYPE: ...\\nTITLE: ...\\nRESULT: ...")`
+
+This is a combined propose+execute cycle. The evolution only counts as successful if you ACTUALLY make changes and commit them.
 
 Recent evolution history:
 {history}
