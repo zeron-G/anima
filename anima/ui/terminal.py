@@ -43,6 +43,8 @@ class TerminalUI:
         """Display agent's output to the user. Thread-safe.
 
         Renders markdown (bold, code blocks, lists) via rich.Markdown.
+        Handles Unicode encoding errors gracefully (Windows GBK terminals
+        can't display some emoji like 🩰 U+1FA70).
         """
         # Use Markdown renderer if text contains markdown indicators
         if any(c in text for c in ("**", "```", "- ", "# ")):
@@ -61,7 +63,20 @@ class TerminalUI:
                 sys.stdout.write("\r\033[K")
                 sys.stdout.flush()
 
-            self._console.print(panel)
+            try:
+                self._console.print(panel)
+            except UnicodeEncodeError:
+                # Windows terminal can't encode some Unicode chars (emoji etc.)
+                # Strip them and retry
+                safe_text = text.encode("gbk", errors="replace").decode("gbk", errors="replace")
+                try:
+                    self._console.print(Panel(
+                        Text(safe_text), title=self._agent_name,
+                        border_style=style, padding=(0, 1),
+                    ))
+                except Exception:
+                    # Last resort — plain print
+                    print(f"[{self._agent_name}] {safe_text}")
 
             if self._waiting_for_input:
                 # Restore the prompt

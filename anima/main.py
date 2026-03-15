@@ -388,7 +388,12 @@ async def run() -> bool:
 
     # Wire output callback: cognitive → terminal + dashboard + channels
     def on_agent_output(text: str, source: str = "") -> None:
-        terminal.display(text)
+        # Terminal display — must not block Discord/dashboard
+        try:
+            terminal.display(text)
+        except Exception as e:
+            log.warning("Terminal display failed: %s", e)
+
         dashboard_hub.add_chat_message("agent", text)
 
         # Route response back to the originating channel
