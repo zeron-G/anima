@@ -18,13 +18,25 @@ _PYTHON_PATH = sys.executable
 _EXTRA_PATH = os.path.dirname(_PYTHON_PATH)
 
 
-def _run_shell_sync(command: str, timeout: int = 30) -> dict:
+def _run_shell_sync(command: str, timeout: int = 30, working_directory: str | None = None) -> dict:
     """Execute a shell command synchronously (runs in thread)."""
     env = os.environ.copy()
     path = env.get("PATH", "")
     if _EXTRA_PATH not in path:
         env["PATH"] = _EXTRA_PATH + os.pathsep + path
     env["PYTHONIOENCODING"] = "utf-8"
+
+    # Resolve working directory
+    cwd = None
+    if working_directory:
+        cwd = os.path.expandvars(os.path.expanduser(working_directory))
+        if not os.path.isdir(cwd):
+            return {
+                "returncode": -1,
+                "stdout": "",
+                "stderr": f"working_directory does not exist: {cwd}",
+                "error": f"working_directory does not exist: {cwd}",
+            }
 
     try:
         result = subprocess.run(
@@ -33,6 +45,7 @@ def _run_shell_sync(command: str, timeout: int = 30) -> dict:
             capture_output=True,
             timeout=timeout,
             env=env,
+            cwd=cwd,
         )
         stdout_str = result.stdout.decode("utf-8", errors="replace").strip()
         stderr_str = result.stderr.decode("utf-8", errors="replace").strip()
@@ -53,10 +66,10 @@ def _run_shell_sync(command: str, timeout: int = 30) -> dict:
         return {"returncode": -1, "stdout": "", "stderr": str(e), "error": str(e)}
 
 
-async def _run_shell(command: str, timeout: int = 30) -> dict:
+async def _run_shell(command: str, timeout: int = 30, working_directory: str | None = None) -> dict:
     """Execute a shell command (async wrapper, runs in thread)."""
     return await asyncio.get_event_loop().run_in_executor(
-        None, _run_shell_sync, command, timeout
+        None, _run_shell_sync, command, timeout, working_directory
     )
 
 
@@ -73,6 +86,7 @@ def get_shell_tool() -> ToolSpec:
             "properties": {
                 "command": {"type": "string", "description": "The shell command to execute"},
                 "timeout": {"type": "integer", "description": "Timeout in seconds (default 30)", "default": 30},
+                "working_directory": {"type": "string", "description": "Optional working directory to run the command in"},
             },
             "required": ["command"],
         },

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import inspect
+
 from anima.tools.registry import ToolRegistry
 from anima.tools.safety import assess_command_risk
 from anima.models.tool_spec import RiskLevel
@@ -56,7 +58,25 @@ class ToolExecutor:
             return {"success": False, "error": f"Tool {tool_name} has no handler"}
 
         try:
-            result = await spec.handler(**args)
+            # Filter args to only those accepted by the handler (defensive against LLM hallucinating params)
+            filtered_args = args
+            if spec.handler is not None:
+                try:
+                    sig = inspect.signature(spec.handler)
+                    valid_params = set(sig.parameters.keys())
+                    has_var_keyword = any(
+                        p.kind == inspect.Parameter.VAR_KEYWORD
+                        for p in sig.parameters.values()
+                    )
+                    if not has_var_keyword:
+                        unknown = set(args.keys()) - valid_params
+                        if unknown:
+                            log.warning("Tool %s: dropping unknown args %s", tool_name, unknown)
+                            filtered_args = {k: v for k, v in args.items() if k in valid_params}
+                except (ValueError, TypeError):
+                    pass  # Can't inspect — pass args as-is
+
+            result = await spec.handler(**filtered_args)
             # For shell commands, check returncode
             if isinstance(result, dict) and "returncode" in result and result["returncode"] != 0:
                 log.debug("Tool %s exited with code %d", tool_name, result["returncode"])

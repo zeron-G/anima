@@ -1,7 +1,19 @@
 {
-  "loop_count": 0,
-  "status": "idle",
-  "current_loop": {},
-  "history": [],
-  "last_loop_at": 0
+  "loop_count": 2,
+  "status": "proposing",
+  "current_loop": {
+    "id": "L0002",
+    "started_at": 1773587192.0840619,
+    "phase": "propose"
+  },
+  "history": [
+    {
+      "id": "L0001",
+      "started_at": 1773586262.1010094,
+      "phase": "propose",
+      "failed_at": 1773586290.6245685,
+      "failure_reason": "No valid proposal generated"
+    }
+  ],
+  "last_loop_at": 1773587192.0840619
 }
