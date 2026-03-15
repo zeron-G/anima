@@ -248,14 +248,22 @@ class AgenticLoop:
             event_type_name,
             tools_description=self._build_tools_description() if needs_tools else "",
             system_state=system_state,
-            emotion_state=self._emotion.to_dict() if event_type_name == "USER_MESSAGE" else None,
+            emotion_state=self._emotion.to_dict() if event_type_name in ("USER_MESSAGE", "SELF_THINKING") else None,
             working_memory_summary=self._get_memory_summary() if event_type_name == "USER_MESSAGE" else "",
             recent_self_thoughts=recent_self_thoughts,
         )
 
+        # Strip internal metadata fields (e.g. is_self_thought) before sending to API
+        _API_KEYS = {"role", "content"}
+
+        def _clean_msg(m: dict) -> dict:
+            return {k: v for k, v in m.items() if k in _API_KEYS}
+
         messages: list[dict] = [{"role": "system", "content": system_prompt}]
         if event_type_name == "USER_MESSAGE":
-            messages.extend(self._conversation[-self._max_conversation_turns:])
+            messages.extend(
+                _clean_msg(m) for m in self._conversation[-self._max_conversation_turns:]
+            )
         messages.append({"role": "user", "content": user_message})
 
         tools = self._get_tool_schemas() if needs_tools else []
