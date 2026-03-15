@@ -384,17 +384,24 @@ class AgenticLoop:
     #  Evolution hot-reload                                                #
     # ------------------------------------------------------------------ #
 
-    def _maybe_trigger_reload(self, evolution_title: str) -> None:
-        """Check if evolution modified .py files and trigger hot-reload if so.
+    # Core modules that require full restart if modified
+    _CORE_MODULES = {
+        "anima/core/cognitive.py", "anima/core/heartbeat.py",
+        "anima/main.py", "anima/core/event_queue.py",
+        "anima/core/reload.py", "anima/__main__.py",
+    }
 
-        Only reloads when Python source code was changed. Config/prompt/doc
-        changes don't need a reload since they're read fresh each time.
+    def _maybe_trigger_reload(self, evolution_title: str) -> None:
+        """Hot-reload after evolution.
+
+        Strategy:
+        - Tools/prompts/config → importlib.reload + re-register (instant, no restart)
+        - Core modules (cognitive/heartbeat/main) → full restart via checkpoint
         """
         import subprocess
         from anima.config import project_root
 
         try:
-            # Check git diff for .py file changes since last non-evolution commit
             result = subprocess.run(
                 ["git", "diff", "HEAD~1", "--name-only", "--diff-filter=AM"],
                 capture_output=True, text=True, timeout=10,
@@ -407,17 +414,25 @@ class AgenticLoop:
                 log.info("Evolution completed (no .py changes) — no reload needed")
                 return
 
-            log.info("Evolution modified %d Python files — requesting reload: %s",
-                     len(py_changed), py_changed[:5])
+            # Check if any core module was modified
+            core_changed = [f for f in py_changed if f in self._CORE_MODULES]
 
-            tick_count = self._heartbeat._tick_count if self._heartbeat else 0
-            self._reload_manager.request_reload(
-                reason=f"Evolution: {evolution_title}",
-                conversation=self._conversation,
-                emotion_state=self._emotion.to_dict(),
-                tick_count=tick_count,
-                evolution_title=evolution_title,
-            )
+            if core_changed:
+                # Core module changed → full restart required
+                log.info("Core module changed (%s) — full restart required", core_changed)
+                tick_count = self._heartbeat._tick_count if self._heartbeat else 0
+                self._reload_manager.request_reload(
+                    reason=f"Evolution: {evolution_title}",
+                    conversation=self._conversation,
+                    emotion_state=self._emotion.to_dict(),
+                    tick_count=tick_count,
+                    evolution_title=evolution_title,
+                )
+            else:
+                # Non-core changes → in-process hot-reload
+                count = self._tool_registry.reload_tools()
+                log.info("Hot-reloaded %d tools in-process (no restart): %s",
+                         count, [f.split("/")[-1] for f in py_changed])
         except Exception as e:
             log.error("Reload check failed: %s", e)
 
