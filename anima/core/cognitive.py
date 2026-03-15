@@ -207,14 +207,16 @@ class AgenticLoop:
         needs_tools = event_type_name in ("USER_MESSAGE", "STARTUP", "SELF_THINKING", "SCHEDULED_TASK", "TASK_DELEGATE")
 
         # For SELF_THINKING: extract recent self-thought snippets to avoid repetition
+        # Only pull entries tagged as self-thoughts (not user-facing replies)
         recent_self_thoughts: list[str] | None = None
         if event_type_name == "SELF_THINKING":
             recent_self_thoughts = [
                 m["content"][:150]
-                for m in self._conversation[-20:]
-                if m.get("role") == "assistant" and "[self-thought]" not in m.get("content", "")
+                for m in self._conversation[-30:]
+                if m.get("role") == "assistant"
+                and m.get("is_self_thought")
                 and m.get("content", "").strip()
-            ][-4:]  # last 4 assistant responses
+            ][-5:]  # last 5 self-thoughts
 
         system_prompt = self._prompt_builder.build_for_event(
             event_type_name,
@@ -285,8 +287,12 @@ class AgenticLoop:
 
                 # Store ALL events in conversation buffer (including self-thoughts)
                 # so agent remembers "what was I just doing?"
+                # Tag self-thoughts so recent_self_thoughts extractor can find them
                 self._conversation.append({"role": "user", "content": user_message})
-                self._conversation.append({"role": "assistant", "content": content or "(no response)"})
+                conv_entry: dict = {"role": "assistant", "content": content or "(no response)"}
+                if is_self:
+                    conv_entry["is_self_thought"] = True
+                self._conversation.append(conv_entry)
                 self._trim_conversation()
                 break
 
@@ -303,7 +309,18 @@ class AgenticLoop:
                 self._emit_status({"stage": "executing", "detail": f"{name}({json.dumps(args, ensure_ascii=False)[:60]})", "tool": name})
                 result = await self._tool_executor.execute(name, args)
                 result_text = self._format_result(name, result)
-                log.info("Tool %s %s", name, "succeeded" if result.get("success") else "failed")
+                if result.get("success"):
+                    log.info("Tool %s succeeded", name)
+                else:
+                    err = result.get("error", "unknown error")
+                    # Include key args in the log for easier debugging
+                    args_hint = ""
+                    if name == "shell" and "command" in args:
+                        args_hint = f" | cmd={args['command'][:80]!r}"
+                    elif args:
+                        first_key = next(iter(args))
+                        args_hint = f" | {first_key}={str(args[first_key])[:60]!r}"
+                    log.warning("Tool %s failed: %s%s", name, err, args_hint)
                 self._emit_status({"stage": "tool_done", "detail": f"{name}: {'ok' if result.get('success') else 'failed'}", "tool": name})
                 return {"type": "tool_result", "tool_use_id": tc.get("id", name), "content": result_text}
 
