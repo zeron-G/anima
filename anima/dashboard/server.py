@@ -37,6 +37,8 @@ class DashboardServer:
         self._app.router.add_post("/api/config", self._handle_config)
         self._app.router.add_post("/api/upload", self._handle_upload)
         self._app.router.add_get("/api/uploads", self._handle_list_uploads)
+        self._app.router.add_post("/api/tts", self._handle_tts)
+        self._app.router.add_get("/api/voice/{filename}", self._handle_voice_file)
 
     async def start(self) -> None:
         self._runner = web.AppRunner(self._app)
@@ -206,6 +208,38 @@ class DashboardServer:
             if f.is_file():
                 files.append({"name": f.name, "path": str(f), "size": f.stat().st_size})
         return web.json_response({"files": files})
+
+    # ── TTS ──
+
+    async def _handle_tts(self, request: web.Request) -> web.Response:
+        """Synthesize text to speech. Returns URL to audio file."""
+        data = await request.json()
+        text = data.get("text", "").strip()
+        if not text:
+            return web.json_response({"error": "empty text"}, status=400)
+
+        emotion = ""
+        if self._hub.emotion_state:
+            dominant = self._hub.emotion_state.dominant()
+            emotion = dominant if dominant != "engagement" else ""
+
+        from anima.voice.tts import synthesize
+        path = await synthesize(text, emotion=emotion)
+        if path and path.exists():
+            return web.json_response({"ok": True, "url": f"/api/voice/{path.name}"})
+        return web.json_response({"error": "synthesis failed"}, status=500)
+
+    async def _handle_voice_file(self, request: web.Request) -> web.Response:
+        """Serve a generated voice audio file."""
+        from anima.config import data_dir
+        filename = request.match_info["filename"]
+        # Security: only serve from voice dir, no path traversal
+        if ".." in filename or "/" in filename or "\\" in filename:
+            return web.Response(status=403)
+        path = data_dir() / "voice" / filename
+        if not path.exists():
+            return web.Response(status=404)
+        return web.FileResponse(path, headers={"Content-Type": "audio/mpeg"})
 
     # ── WebSocket push loop ──
 

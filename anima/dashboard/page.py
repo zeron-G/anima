@@ -133,6 +133,15 @@ body { background:var(--bg); color:var(--text); font-family:'Segoe UI',system-ui
 .chat-side-body { flex:1; overflow-y:auto; padding:8px; font-size:12px; font-family:'Cascadia Code','Fira Code',monospace; }
 .chat-toggle { cursor:pointer; font-size:16px; color:var(--text2); }
 .chat-toggle:hover { color:var(--text); }
+/* Live2D */
+.live2d-container { height:200px; background:var(--surface2); border-bottom:1px solid var(--border); position:relative; overflow:hidden; flex-shrink:0; }
+.live2d-container canvas { width:100% !important; height:100% !important; }
+/* Voice buttons */
+.voice-btn { background:transparent; border:none; color:var(--text2); padding:8px 10px; cursor:pointer; display:flex; align-items:center; border-right:1px solid var(--border); transition:.2s; }
+.voice-btn:hover { color:var(--accent); background:var(--surface2); }
+.voice-btn.active { color:var(--green); background:var(--surface2); }
+.voice-btn.recording { color:var(--red); animation:pulse 1s infinite; }
+@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.5} }
 .typing-indicator { display:none; align-items:center; gap:6px; padding:6px 14px; font-size:12px; color:var(--text2); flex-shrink:0; }
 .typing-dot { width:6px; height:6px; background:var(--text2); border-radius:50%; animation:typingBounce 1.2s infinite; }
 .typing-dot:nth-child(2) { animation-delay:.2s; }
@@ -377,10 +386,20 @@ body { background:var(--bg); color:var(--text); font-family:'Segoe UI',system-ui
   <div class="page" id="page-chat">
     <div class="chat-layout" id="chat-layout">
       <div class="chat-main">
+        <!-- Live2D avatar area -->
+        <div class="live2d-container" id="live2d-container">
+          <canvas id="live2d-canvas"></canvas>
+        </div>
         <div class="chat-messages" id="chat-messages">
           <div class="msg system">Connected to ANIMA. Type a message below.</div>
         </div>
         <div class="chat-input">
+          <button class="voice-btn" id="voice-toggle" title="Toggle voice (TTS)">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 5L6 9H2v6h4l5 4V5z"/><path d="M19.07 4.93a10 10 0 010 14.14M15.54 8.46a5 5 0 010 7.07"/></svg>
+          </button>
+          <button class="voice-btn" id="mic-btn" title="Voice input (STT)">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z"/><path d="M19 10v2a7 7 0 01-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
+          </button>
           <input type="text" id="chat-input" placeholder="Type a message..." autocomplete="off" />
           <label class="upload-btn" title="Upload file">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48"/></svg>
@@ -399,6 +418,13 @@ body { background:var(--bg); color:var(--text); font-family:'Segoe UI',system-ui
       </div>
     </div>
   </div>
+  <!-- Live2D SDK -->
+  <script src="https://cubism.live2d.com/sdk-web/cubismcore/live2dcubismcore.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/gh/dylanNew/live2d/webgl/Live2D/lib/live2d.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/pixi.js@7.x/dist/pixi.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/pixi-live2d-display@0.4.0/dist/index.min.js"></script>
+  <!-- TTS audio element -->
+  <audio id="tts-audio" style="display:none"></audio>
 
   <!-- ══ USAGE PAGE ══ -->
   <div class="page" id="page-usage">
@@ -641,6 +667,8 @@ function render(d) {
   else if (currentPage === 'usage') renderUsage(d);
   else if (currentPage === 'network') renderNetwork(d);
   else if (currentPage === 'settings') renderSettings(d);
+  // Update Live2D expression from emotion
+  if (d.emotion) updateLive2DExpression(d.emotion);
 }
 
 // ── Header (always rendered) ──
@@ -1215,6 +1243,183 @@ document.querySelectorAll('#usage-table th[data-col]').forEach(function(th) {
     renderUsageTable();
   });
 });
+
+// ── TTS (Text-to-Speech) ──
+var ttsEnabled = false;
+var ttsAudio = null;
+
+document.getElementById('voice-toggle').addEventListener('click', function() {
+  ttsEnabled = !ttsEnabled;
+  this.classList.toggle('active', ttsEnabled);
+  if (!ttsEnabled && ttsAudio) {
+    ttsAudio.pause();
+  }
+});
+
+function playTTS(text) {
+  if (!ttsEnabled || !text || text.length < 5) return;
+  fetch('/api/tts', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({text: text})
+  }).then(function(r) { return r.json(); }).then(function(d) {
+    if (d.ok && d.url) {
+      ttsAudio = document.getElementById('tts-audio');
+      ttsAudio.src = d.url;
+      ttsAudio.play().catch(function() {});
+      // Trigger Live2D talking animation
+      if (window.live2dModel) {
+        try { window.live2dModel.motion('Tap'); } catch(e) {}
+      }
+    }
+  }).catch(function() {});
+}
+
+// Hook TTS into chat rendering — play new agent messages
+var _origLastChatLen = 0;
+var _ttsObserver = setInterval(function() {
+  if (!ttsEnabled || !lastData) return;
+  var history = lastData.chat_history || [];
+  if (history.length > _origLastChatLen) {
+    var newMsg = history[history.length - 1];
+    if (newMsg && newMsg.role === 'agent') {
+      playTTS(newMsg.content);
+    }
+    _origLastChatLen = history.length;
+  }
+}, 2000);
+
+// ── STT (Speech-to-Text) via Web Speech API ──
+var sttActive = false;
+var recognition = null;
+
+if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
+  var SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  recognition = new SpeechRecognition();
+  recognition.continuous = false;
+  recognition.interimResults = true;
+  recognition.lang = 'zh-CN';
+
+  recognition.onresult = function(event) {
+    var transcript = '';
+    for (var i = event.resultIndex; i < event.results.length; i++) {
+      transcript += event.results[i][0].transcript;
+    }
+    document.getElementById('chat-input').value = transcript;
+    if (event.results[event.results.length - 1].isFinal) {
+      sendChat();
+      sttActive = false;
+      document.getElementById('mic-btn').classList.remove('recording');
+    }
+  };
+
+  recognition.onend = function() {
+    sttActive = false;
+    document.getElementById('mic-btn').classList.remove('recording');
+  };
+
+  recognition.onerror = function() {
+    sttActive = false;
+    document.getElementById('mic-btn').classList.remove('recording');
+  };
+}
+
+document.getElementById('mic-btn').addEventListener('click', function() {
+  if (!recognition) {
+    alert('Speech recognition not supported in this browser. Use Chrome or Edge.');
+    return;
+  }
+  if (sttActive) {
+    recognition.stop();
+    sttActive = false;
+    this.classList.remove('recording');
+  } else {
+    recognition.start();
+    sttActive = true;
+    this.classList.add('recording');
+  }
+});
+
+// ── Live2D Avatar ──
+// Uses pixi-live2d-display with a free model
+var live2dReady = false;
+
+function initLive2D() {
+  if (typeof PIXI === 'undefined' || typeof PIXI.live2d === 'undefined') {
+    // SDK not loaded yet, retry
+    setTimeout(initLive2D, 1000);
+    return;
+  }
+
+  var canvas = document.getElementById('live2d-canvas');
+  var container = document.getElementById('live2d-container');
+  if (!canvas || !container) return;
+
+  try {
+    var app = new PIXI.Application({
+      view: canvas,
+      autoStart: true,
+      backgroundAlpha: 0,
+      resizeTo: container,
+    });
+
+    // Free Hiyori model from Live2D samples
+    var modelUrl = 'https://cdn.jsdelivr.net/gh/guansss/pixi-live2d-display/test/assets/haru/haru_greeter_t03.model3.json';
+
+    PIXI.live2d.Live2DModel.from(modelUrl).then(function(model) {
+      app.stage.addChild(model);
+      // Scale and position
+      var scale = Math.min(container.clientWidth / model.width, container.clientHeight / model.height) * 0.8;
+      model.scale.set(scale);
+      model.x = container.clientWidth / 2;
+      model.y = container.clientHeight;
+      model.anchor.set(0.5, 1);
+
+      window.live2dModel = model;
+      live2dReady = true;
+
+      // Click interaction
+      model.on('hit', function(hitAreas) {
+        if (hitAreas.includes('Body')) {
+          model.motion('Tap');
+        }
+      });
+    }).catch(function(e) {
+      console.log('Live2D model load failed:', e);
+      container.style.display = 'none';
+    });
+  } catch(e) {
+    console.log('Live2D init failed:', e);
+    container.style.display = 'none';
+  }
+}
+
+// Update Live2D expression based on emotion state
+function updateLive2DExpression(emotion) {
+  if (!live2dReady || !window.live2dModel) return;
+  var model = window.live2dModel;
+  try {
+    var dominant = 'neutral';
+    if (emotion) {
+      var max = 0;
+      for (var k in emotion) {
+        if (emotion[k] > max) { max = emotion[k]; dominant = k; }
+      }
+    }
+    // Map emotion to expression index
+    var exprMap = {
+      'curiosity': 1,
+      'engagement': 2,
+      'confidence': 3,
+      'concern': 4,
+    };
+    var idx = exprMap[dominant] || 0;
+    model.expression(idx);
+  } catch(e) {}
+}
+
+// Init Live2D after page load
+setTimeout(initLive2D, 2000);
 
 // ── Start ──
 connect();
