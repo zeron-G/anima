@@ -55,6 +55,26 @@ def _clean_text(text: str) -> str:
     return text
 
 
+def _synthesize_sync(clean: str, voice: str, out_path: Path) -> bool:
+    """Run edge-tts in its own event loop (thread-safe)."""
+    import asyncio
+    import edge_tts
+
+    async def _do():
+        communicate = edge_tts.Communicate(clean, voice)
+        await communicate.save(str(out_path))
+
+    loop = asyncio.new_event_loop()
+    try:
+        loop.run_until_complete(_do())
+        return out_path.exists() and out_path.stat().st_size > 0
+    except Exception as e:
+        log.error("TTS synthesis failed: %s", e)
+        return False
+    finally:
+        loop.close()
+
+
 async def synthesize(
     text: str,
     voice: str = DEFAULT_VOICE,
@@ -62,7 +82,8 @@ async def synthesize(
 ) -> Path | None:
     """Generate TTS audio file. Returns path to mp3 or None on failure.
 
-    Uses caching — same text+voice produces same file (no re-synthesis).
+    Runs edge-tts in a separate thread with its own event loop
+    to avoid conflicts with the main aiohttp loop.
     """
     try:
         import edge_tts
@@ -74,11 +95,9 @@ async def synthesize(
     if not clean or len(clean) < 2:
         return None
 
-    # Truncate very long text
     if len(clean) > 500:
         clean = clean[:500] + "..."
 
-    # Cache key
     cache_key = hashlib.md5(f"{clean}:{voice}:{emotion}".encode()).hexdigest()[:12]
     VOICE_DIR.mkdir(parents=True, exist_ok=True)
     out_path = VOICE_DIR / f"tts_{cache_key}.mp3"
@@ -86,24 +105,20 @@ async def synthesize(
     if out_path.exists():
         return out_path
 
+    import asyncio
+    ok = await asyncio.get_event_loop().run_in_executor(
+        None, _synthesize_sync, clean, voice, out_path
+    )
+
+    if ok:
+        log.debug("TTS synthesized: %s (%d bytes)", out_path.name, out_path.stat().st_size)
+        return out_path
+
     try:
-        # Build SSML style if emotion is specified
-        style = EMOTION_STYLES.get(emotion, "")
-
-        communicate = edge_tts.Communicate(clean, voice)
-        await communicate.save(str(out_path))
-
-        if out_path.exists() and out_path.stat().st_size > 0:
-            log.debug("TTS synthesized: %s (%d bytes)", out_path.name, out_path.stat().st_size)
-            return out_path
-        return None
-    except Exception as e:
-        log.error("TTS synthesis failed: %s", e)
-        try:
-            out_path.unlink(missing_ok=True)
-        except Exception:
-            pass
-        return None
+        out_path.unlink(missing_ok=True)
+    except Exception:
+        pass
+    return None
 
 
 def cleanup_cache(max_files: int = 100) -> None:

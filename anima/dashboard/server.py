@@ -217,21 +217,34 @@ class DashboardServer:
 
     async def _handle_tts(self, request: web.Request) -> web.Response:
         """Synthesize text to speech. Returns URL to audio file."""
-        data = await request.json()
-        text = data.get("text", "").strip()
-        if not text:
-            return web.json_response({"error": "empty text"}, status=400)
+        try:
+            data = await request.json()
+            text = data.get("text", "").strip()
+            if not text:
+                return web.json_response({"error": "empty text"}, status=400)
 
-        emotion = ""
-        if self._hub.emotion_state:
-            dominant = self._hub.emotion_state.dominant()
-            emotion = dominant if dominant != "engagement" else ""
+            emotion = ""
+            try:
+                if self._hub.emotion_state:
+                    dominant = self._hub.emotion_state.dominant()
+                    emotion = dominant if dominant != "engagement" else ""
+            except Exception:
+                pass
 
-        from anima.voice.tts import synthesize
-        path = await synthesize(text, emotion=emotion)
-        if path and path.exists():
-            return web.json_response({"ok": True, "url": f"/api/voice/{path.name}"})
-        return web.json_response({"error": "synthesis failed"}, status=500)
+            # Run TTS in thread to avoid event loop conflicts with edge-tts
+            import asyncio
+            from anima.voice.tts import synthesize, _clean_text
+            clean = _clean_text(text)
+            if not clean or len(clean) < 2:
+                return web.json_response({"error": "text too short"}, status=400)
+
+            path = await synthesize(clean, emotion=emotion)
+            if path and path.exists():
+                return web.json_response({"ok": True, "url": f"/api/voice/{path.name}"})
+            return web.json_response({"error": "synthesis failed"}, status=500)
+        except Exception as e:
+            log.error("TTS handler error: %s", e)
+            return web.json_response({"error": str(e)}, status=500)
 
     async def _handle_voice_file(self, request: web.Request) -> web.Response:
         """Serve a generated voice audio file."""
