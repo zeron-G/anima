@@ -112,11 +112,11 @@ async def test_all_tools_registered(full_system):
     tr = full_system["tr"]
     tools = tr.list_tools()
     tool_names = {t.name for t in tools}
-    assert len(tools) >= 20
-    # Critical tools
+    assert len(tools) >= 25
     for expected in ["shell", "read_file", "write_file", "edit_file",
                      "glob_search", "grep_search", "web_fetch",
-                     "spawn_agent", "schedule_job", "claude_code"]:
+                     "spawn_agent", "schedule_job", "claude_code",
+                     "github", "send_email", "read_email", "remote_exec"]:
         assert expected in tool_names, f"Missing tool: {expected}"
 
 

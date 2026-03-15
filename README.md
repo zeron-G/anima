@@ -72,7 +72,7 @@ All data stays local by default. Sensor data, behavior patterns, ANIMA's memorie
 
 ```
 +-----------------------------------------------------------------+
-|  ANIMA Platform (73 .py files, ~8000 LOC)                       |
+|  ANIMA Platform (95 .py files, ~11,000 LOC)                      |
 |                                                                 |
 |  +---------+  +----------------+  +-------------------+         |
 |  |Heartbeat|  | Agentic Loop   |  |   Agent Manager   |         |
@@ -81,12 +81,14 @@ All data stays local by default. Sensor data, behavior patterns, ANIMA's memorie
 |  +----+----+  +-------+--------+  +-------------------+         |
 |       |               |                                         |
 |  +----+----+  +-------+--------+  +-------------------+         |
-|  |Snapshot |  |   20 Tools     |  |    Dashboard      |         |
+|  |Snapshot |  |   26 Tools     |  |    Dashboard      |         |
 |  | Cache   |  | shell/files/   |  |  WebSocket SPA    |         |
 |  |CPU/Mem/ |  | search/edit/   |  | http://...:8420   |         |
 |  |  Disk   |  | web/agents/    |  +-------------------+         |
-|  +---------+  | scheduler      |                                |
-|               +----------------+                                |
+|  +---------+  | scheduler/net/ |                                |
+|               | email/github   |  +-------------------+         |
+|               +----------------+  | Discord Channel   |         |
+|                                   +-------------------+         |
 |                                                                 |
 |  +----------+  +---------+  +----------+  +-----------------+  |
 |  | SQLite   |  |Emotion  |  |  Cron    |  | Agent Persona   |  |
@@ -104,11 +106,11 @@ All data stays local by default. Sensor data, behavior patterns, ANIMA's memorie
 
 ## Phase 0 — What's Implemented Now
 
-ANIMA Phase 0 is a fully functional single-node autonomous AI system with 73 Python files (~8000 LOC) and 70 passing unit tests.
+ANIMA Phase 0 is a fully functional single-node autonomous AI system with 95 Python files (~11,000 LOC) and 110 passing unit tests. Phase 0 is complete; Phase 1 (distributed networking) is in progress.
 
 **Hybrid Rule Engine + LLM Architecture** — The cognitive loop tries the rule engine FIRST for cheap events (greetings, file changes, system alerts) before calling the LLM. This saves ~80% of LLM calls. For complex events, the LLM receives full context (system state, events, memory, tools) and decides what to do in a multi-turn reasoning cycle.
 
-**20 Built-in Tools** (+ dynamic skill-generated tools):
+**26 Built-in Tools** (+ dynamic skill-generated tools):
 
 | Tool | Description | Risk |
 |------|-------------|------|
@@ -132,6 +134,12 @@ ANIMA Phase 0 is a fully functional single-node autonomous AI system with 73 Pyt
 | `list_jobs` | List scheduled jobs | SAFE |
 | `cancel_job` | Cancel a scheduled job | LOW |
 | `enable_job` | Enable/disable a scheduled job | LOW |
+| `remote_exec` | Execute command on remote node | HIGH |
+| `remote_write_file` | Write file on remote node via SFTP | MEDIUM |
+| `github` | GitHub CLI (gh) — repos, issues, PRs | MEDIUM |
+| `send_email` | Send email via SMTP | MEDIUM |
+| `read_email` | Read emails via IMAP | SAFE |
+| `google` | Google Workspace via gog CLI | MEDIUM |
 
 **Cron Scheduler** — Persistent cron jobs that fire events into the cognitive loop. Jobs survive restarts (persisted to `data/scheduler.json`). Integrated into heartbeat tick (checked every 15s).
 
@@ -197,6 +205,8 @@ cp .env.example .env
 
 ```bash
 python -m anima
+python -m anima --watch           # Development mode (auto-reload)
+python -m anima spawn user@host   # Deploy to remote node
 ```
 
 Dashboard opens at **http://your-ip:8420**
@@ -212,7 +222,7 @@ pytest tests/test_oauth_live.py  # Live API test
 
 ```
 anima/
-├── anima/                    # Platform source (73 .py files, ~8000 LOC)
+├── anima/                    # Platform source (95 .py files, ~11,000 LOC)
 │   ├── core/
 │   │   ├── cognitive.py      # AgenticLoop — hybrid rule-engine + LLM
 │   │   ├── agents.py         # Multi-agent manager with internal LLM sub-agents
@@ -233,8 +243,11 @@ anima/
 │   │   ├── file_watcher.py   # File change detection with noise filtering
 │   │   ├── diff_engine.py    # Field-level threshold diffs
 │   │   └── snapshot_cache.py # Heartbeat-to-cognitive bridge
+│   ├── network/              # Distributed gossip mesh, session routing, sync
+│   ├── channels/             # Discord, webhook communication channels
+│   ├── spawn/                # Node deployment and reproduction
 │   ├── tools/
-│   │   ├── builtin/          # 20 tools: shell, files, search, edit, web, agents, scheduler
+│   │   ├── builtin/          # 26 tools: shell, files, search, edit, web, agents, scheduler, network, email, github
 │   │   ├── executor.py       # Parallel tool execution with safety checks
 │   │   ├── registry.py       # Tool registration + skill tool loading
 │   │   └── safety.py         # Command risk assessment (5-level)
@@ -262,7 +275,7 @@ anima/
 │   └── logs/                 # Log files
 ├── docs/
 │   └── deep_analysis_v3.md   # Full technical design document
-├── tests/                    # 70 unit tests
+├── tests/                    # 110 unit tests
 ├── .env.example              # Auth configuration template
 ├── LICENSE                   # MIT
 └── pyproject.toml
@@ -290,7 +303,7 @@ An honest assessment of where ANIMA stands relative to the ecosystem:
 | Capability | ANIMA Phase 0 | OpenClaw | Claude Code |
 |------------|---------------|----------|-------------|
 | Agentic LLM loop | Hybrid rule-engine + LLM | LLM-only | LLM-only |
-| Tool count | 20 built-in + skill-generated | ~15 | ~20 native |
+| Tool count | 26 built-in + skill-generated | ~15 | ~20 native |
 | File search (Glob) | `glob_search` | N/A | Glob |
 | Content search (Grep) | `grep_search` | N/A | Grep |
 | Precise editing | `edit_file` | N/A | Edit |
@@ -300,14 +313,22 @@ An honest assessment of where ANIMA stands relative to the ecosystem:
 | Parallel tool execution | `asyncio.gather` | Sequential | Parallel |
 | Cost optimization | Rule engine (~80% LLM savings) + noise filtering | N/A | N/A |
 
+### Phase 1 — Done
+
+| Capability | Status | Description |
+|------------|--------|-------------|
+| Gossip mesh | Done | Two-node gossip protocol with heartbeat exchange |
+| Discord channel | Done | Discord bot as communication channel |
+| Memory sync | Done | Cross-node memory synchronization |
+| Session routing | Done | Route sessions to appropriate node |
+
 ### Still missing (Phase 1-4 roadmap items)
 
 | Capability | Target Phase | Description |
 |------------|-------------|-------------|
+| Task delegation | Phase 1 | Delegate tasks between nodes (in progress) |
 | Self-evolution | Phase 4 | Agent writes its own tools, modifies its own code |
 | API gateway | Phase 1 | External API for third-party integrations |
-| Multi-instance agents | Phase 1-3 | Multiple ANIMA nodes discovering each other via mDNS |
-| Multi-channel comms | Phase 1 | Slack, Discord, Telegram, etc. |
 | GUI operation | Phase 2 | Screen capture + mouse/keyboard control |
 | Self-healing mesh | Phase 3 | 5-level hot repair + node takeover |
 | Embodiment | Phase 6 | Robot integration (PiDog) |
@@ -318,8 +339,8 @@ ANIMA's unique advantage is architectural: the heartbeat-driven event loop means
 
 | Phase | Name | Goal | Timeline |
 |-------|------|------|----------|
-| **0** | **First Heartbeat** | Single-node autonomous AI with agentic loop, 22 tools, dashboard | **Done** |
-| **1** | **First Conversation** | Two-node gossip mesh, Discord, memory sync, session routing, spawn | **In progress** |
+| **0** | **First Heartbeat** | Single-node autonomous AI with agentic loop, 26 tools, dashboard | **Done** |
+| **1** | **First Conversation** | Two-node gossip mesh, Discord, memory sync, session routing, spawn (2 active nodes: desktop + laptop) | **In progress** (network core done, task delegation pending) |
 | 2 | First Sight | Terminal + GUI operation with risk assessment | 7-9 weeks |
 | 3 | First Self-Heal | Multi-node mesh, rolling updates, 5-level hot repair | 7-9 weeks |
 | 4 | First Growth | Self-evolution engine: tool forge, safe self-modification | 8-10 weeks |

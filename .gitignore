@@ -12,14 +12,21 @@ build/
 .venv/
 venv/
 
-# Runtime data (generated at runtime, not source)
+# Runtime data (local, not source)
 data/anima.db
 data/chroma/
 data/logs/*
 data/notes/*
 data/workspace/*
 data/uploads/*
+data/credentials/
 data/user_profile.md
+data/environment.md
+data/projects.md
+data/node.json
+data/scheduler.json
+data/sync_watermarks.json
+data/spawn*.tar.gz
 !data/**/.gitkeep
 !data/user_profile.md.example
 
@@ -27,6 +34,11 @@ data/user_profile.md
 .env
 .env.*
 !.env.example
+
+# Agent private memory — local only
+agents/*/feelings.md
+agents/*/memory.md
+agents/*/diary.md
 
 # IDE
 .vscode/
@@ -45,7 +57,5 @@ desktop.ini
 htmlcov/
 .coverage
 
-# Agent private memory — local only
-agents/*/feelings.md
-agents/*/memory.md
-agents/*/diary.md
+# Deploy scripts (temp)
+tests/_*.py
