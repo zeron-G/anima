@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import sqlite3
 import time
@@ -32,7 +33,9 @@ CREATE TABLE IF NOT EXISTS episodic_memories (
     created_at REAL,
     last_accessed REAL,
     metadata_json TEXT DEFAULT '{}',
-    tags_json TEXT DEFAULT '[]'
+    tags_json TEXT DEFAULT '[]',
+    sync_seq INTEGER DEFAULT 0,
+    content_hash TEXT DEFAULT ''
 );
 
 CREATE TABLE IF NOT EXISTS emotion_log (
@@ -63,6 +66,7 @@ CREATE INDEX IF NOT EXISTS idx_episodic_importance ON episodic_memories(importan
 CREATE INDEX IF NOT EXISTS idx_episodic_created ON episodic_memories(created_at);
 CREATE INDEX IF NOT EXISTS idx_emotion_ts ON emotion_log(timestamp);
 CREATE INDEX IF NOT EXISTS idx_snapshot_ts ON state_snapshots(timestamp);
+-- idx_sync_seq and idx_content_hash created after ALTER TABLE migration
 
 CREATE TABLE IF NOT EXISTS llm_usage (
     id TEXT PRIMARY KEY,
@@ -99,9 +103,21 @@ class MemoryStore:
     async def create(cls, db_path: str) -> MemoryStore:
         """Factory method — creates and initializes the store."""
         store = cls(db_path)
-        store._conn = sqlite3.connect(store._db_path)
+        store._conn = sqlite3.connect(store._db_path, check_same_thread=False)
         store._conn.row_factory = sqlite3.Row
         store._conn.executescript(_SCHEMA)
+        # Migrate: add columns that may not exist in older DBs
+        for col, default in [("sync_seq", "0"), ("content_hash", "''")]:
+            try:
+                store._conn.execute(f"ALTER TABLE episodic_memories ADD COLUMN {col} {'INTEGER' if default == '0' else 'TEXT'} DEFAULT {default}")
+            except sqlite3.OperationalError:
+                pass  # Column already exists
+        # Create indexes for sync columns
+        try:
+            store._conn.execute("CREATE INDEX IF NOT EXISTS idx_sync_seq ON episodic_memories(sync_seq)")
+            store._conn.execute("CREATE INDEX IF NOT EXISTS idx_content_hash ON episodic_memories(content_hash)")
+        except sqlite3.OperationalError:
+            pass
         store._conn.commit()
         log.info("Memory store initialized: %s", store._db_path)
 
@@ -120,6 +136,20 @@ class MemoryStore:
 
     # ---- Episodic Memory ----
 
+    # Lamport clock for sync_seq
+    _sync_seq_counter: int = 0
+
+    def _next_sync_seq(self) -> int:
+        """Increment and return the next sync_seq value."""
+        MemoryStore._sync_seq_counter += 1
+        return MemoryStore._sync_seq_counter
+
+    @staticmethod
+    def _content_hash(content: str, type_: str) -> str:
+        """Compute dedup hash: sha256(content + type)[:16]."""
+        raw = f"{content}:{type_}"
+        return hashlib.sha256(raw.encode()).hexdigest()[:16]
+
     def save_memory(
         self,
         content: str,
@@ -131,10 +161,16 @@ class MemoryStore:
         """Save an episodic memory. Returns the ID."""
         mid = gen_id("mem")
         now = time.time()
+        seq = self._next_sync_seq()
+        chash = self._content_hash(content, type)
         self._conn.execute(
-            "INSERT INTO episodic_memories (id, type, content, importance, access_count, created_at, last_accessed, metadata_json, tags_json) VALUES (?, ?, ?, ?, 0, ?, ?, ?, ?)",
+            "INSERT INTO episodic_memories "
+            "(id, type, content, importance, access_count, created_at, last_accessed, "
+            "metadata_json, tags_json, sync_seq, content_hash) "
+            "VALUES (?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?)",
             (mid, type, content, importance, now, now,
-             json.dumps(metadata or {}), json.dumps(tags or [])),
+             json.dumps(metadata or {}), json.dumps(tags or []),
+             seq, chash),
         )
         self._conn.commit()
 

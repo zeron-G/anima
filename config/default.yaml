@@ -32,17 +32,13 @@ diff_rules:
 # Available: claude-opus-4-6, claude-sonnet-4-6, claude-haiku-4-5-20251001
 llm:
   tier1:
-    model: "claude-sonnet-4-6"
-    max_tokens: 4096
-  tier2:
-    model: "claude-haiku-4-5-20251001"
-    max_tokens: 2048
-  # Opus — used when explicitly requested (e.g. complex reasoning)
-  opus:
     model: "claude-opus-4-6"
     max_tokens: 8192
+  tier2:
+    model: "claude-sonnet-4-6"
+    max_tokens: 4096
   budget:
-    daily_limit_usd: 5.0
+    daily_limit_usd: 10.0
 
 # Decision significance thresholds
 decision:
@@ -87,6 +83,28 @@ tools:
 #   - "/path/to/openclaw/workspace/skills"
 skills:
   extra_dirs: []
+
+# Distributed Network (Phase 1)
+network:
+  enabled: true
+  listen_port: 9420
+  secret: "anima-network-2026"
+  peers:
+    - "192.168.1.159:9420"    # Laptop
+  gossip_interval_s: 5
+  suspect_phi: 8
+  dead_phi: 16
+
+# Communication Channels
+channels:
+  discord:
+    enabled: true
+    token: ""                 # Read from DISCORD_BOT_TOKEN env var
+    allowed_users: []         # Empty = allow all
+  webhook:
+    enabled: false
+    port: 9421
+    secret: ""                # Bearer token for webhook auth
 
 # Dashboard
 dashboard:

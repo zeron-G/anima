@@ -68,7 +68,7 @@ async def test_heartbeat_integration_file_detection(tmp_path):
     )
 
     outputs = []
-    cognitive.set_output_callback(lambda text: outputs.append(text))
+    cognitive.set_output_callback(lambda text, **kw: outputs.append(text))
 
     # --- Phase 1: Baseline tick (initializes file watcher) ---
     await heartbeat._on_script_tick()
@@ -218,7 +218,7 @@ async def test_heartbeat_integration_user_message_flow(tmp_path):
     )
 
     outputs = []
-    cognitive.set_output_callback(lambda text: outputs.append(text))
+    cognitive.set_output_callback(lambda text, **kw: outputs.append(text))
 
     # Populate snapshot cache
     snapshot_cache.update({"cpu_percent": 30, "memory_percent": 45}, [])

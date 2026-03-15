@@ -4,7 +4,13 @@ from __future__ import annotations
 
 import asyncio
 import signal
+import sys
+from typing import Any
 from pathlib import Path
+
+# Windows needs SelectorEventLoop for ZMQ async sockets
+if sys.platform == "win32":
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
 from anima.config import load_config, get
 from anima.utils.logging import setup_logging, get_logger
@@ -102,10 +108,10 @@ async def run() -> None:
 
     rule_engine = RuleEngine()
     llm_router = LLMRouter(
-        tier1_model=get("llm.tier1.model", "claude-sonnet-4-6"),
-        tier2_model=get("llm.tier2.model", "claude-haiku-4-5-20251001"),
-        tier1_max_tokens=get("llm.tier1.max_tokens", 4096),
-        tier2_max_tokens=get("llm.tier2.max_tokens", 2048),
+        tier1_model=get("llm.tier1.model", "claude-opus-4-6"),
+        tier2_model=get("llm.tier2.model", "claude-sonnet-4-6"),
+        tier1_max_tokens=get("llm.tier1.max_tokens", 8192),
+        tier2_max_tokens=get("llm.tier2.max_tokens", 4096),
         daily_budget=get("llm.budget.daily_limit_usd", 5.0),
     )
     prompt_builder = PromptBuilder()
@@ -125,6 +131,171 @@ async def run() -> None:
     )
 
     heartbeat.set_scheduler(scheduler)
+
+    # Active channels for response routing (populated if network enabled)
+    _active_channels: dict[str, Any] = {}
+
+    # ── Distributed network (Phase 1) ──
+    gossip_mesh = None
+    if get("network.enabled", False):
+        from anima.network.node import NodeIdentity, NodeState
+        from anima.network.gossip import GossipMesh
+        from anima.network.discovery import DiscoveryService, get_local_ip
+        from anima.network.sync import MemorySync
+        from anima.network.split_brain import SplitBrainDetector
+
+        node_identity = NodeIdentity()
+        node_state = NodeState(
+            node_id=node_identity.node_id,
+            hostname=__import__("socket").gethostname(),
+            ip=get_local_ip(),
+            port=get("network.listen_port", 9420),
+            agent_name=get("agent.name", "eva"),
+            capabilities=[t.name for t in tool_registry.list_tools()],
+        )
+        gossip_mesh = GossipMesh(
+            identity=node_identity,
+            local_state=node_state,
+            network_secret=get("network.secret", ""),
+            listen_port=get("network.listen_port", 9420),
+        )
+        # Configure peers
+        peers = get("network.peers", [])
+        if peers:
+            gossip_mesh.configure_peers(peers)
+
+        # Gossip event callback → push to ANIMA event queue
+        def on_network_event(event_data):
+            import asyncio
+            try:
+                loop = asyncio.get_running_loop()
+                loop.create_task(event_queue.put(Event(
+                    type=EventType.USER_MESSAGE,
+                    payload=event_data,
+                    priority=EventPriority.HIGH,
+                    source="network",
+                )))
+            except Exception:
+                pass
+
+        # Session router
+        from anima.network.session_router import SessionRouter
+        session_router = SessionRouter(node_identity.node_id)
+        session_router.set_broadcast(gossip_mesh.broadcast_event)
+
+        # Wire gossip callbacks
+        def on_network_event_with_sessions(event_data):
+            # Handle session lock/release events from other nodes
+            etype = event_data.get("type", "")
+            if etype == "session_lock":
+                session_router.handle_remote_lock(
+                    event_data.get("session_id", ""),
+                    event_data.get("node_id", ""),
+                    event_data.get("channel", ""),
+                    event_data.get("timestamp", 0),
+                )
+                return
+            if etype == "session_release":
+                session_router.handle_remote_release(
+                    event_data.get("session_id", ""),
+                    event_data.get("node_id", ""),
+                )
+                return
+            # Regular event — forward to ANIMA if we own the session or it's unowned
+            on_network_event(event_data)
+
+        def on_node_dead(node_id, state):
+            released = session_router.release_all_for_node(node_id)
+            if released:
+                log.warning("Released %d sessions from dead node %s", len(released), node_id)
+
+        gossip_mesh.set_callbacks(
+            on_event=on_network_event_with_sessions,
+            on_node_dead=on_node_dead,
+        )
+        heartbeat.set_gossip_mesh(gossip_mesh)
+
+        await gossip_mesh.start()
+
+        # Memory sync service
+        sync_port = get("network.listen_port", 9420) + 2  # Convention: sync = gossip + 2
+        memory_sync = MemorySync(memory_store, node_identity.node_id, listen_port=sync_port)
+        memory_sync._ensure_sync_columns()
+        await memory_sync.start()
+
+        # Split-brain detector
+        split_brain = SplitBrainDetector(node_identity)
+
+        # Periodic sync + split-brain check (every 60s via heartbeat)
+        async def _periodic_network_tasks():
+            while gossip_mesh._running:
+                await asyncio.sleep(60)
+                # Split-brain check
+                split_brain.check(gossip_mesh.get_alive_count())
+                # Sync with random alive peer
+                alive = gossip_mesh.get_alive_peers()
+                if alive:
+                    import random
+                    peer_id = random.choice(list(alive.keys()))
+                    peer_state = alive[peer_id]
+                    sync_addr = f"{peer_state.ip}:{peer_state.port + 2}"
+                    await memory_sync.sync_with_peer(sync_addr, peer_id)
+                # Cleanup stale registered nodes
+                node_identity.unregister_stale_nodes()
+
+        asyncio.create_task(_periodic_network_tasks(), name="network_tasks")
+
+        # Start channels
+        channels = []
+        # Webhook channel
+        if get("channels.webhook.enabled", False):
+            from anima.channels.webhook_channel import WebhookChannel
+            wh = WebhookChannel(
+                port=get("channels.webhook.port", 9421),
+                secret=get("channels.webhook.secret", ""),
+            )
+
+            async def on_webhook_message(data):
+                session_id = session_router.get_session_id("webhook", data.get("user", ""))
+                if session_router.try_lock(session_id, channel="webhook", user_id=data.get("user", "")):
+                    await event_queue.put(Event(
+                        type=EventType.USER_MESSAGE,
+                        payload=data,
+                        priority=EventPriority.HIGH,
+                        source="webhook",
+                    ))
+
+            wh.set_message_handler(on_webhook_message)
+            await wh.start()
+            channels.append(wh)
+
+        # Discord channel
+        if get("channels.discord.enabled", False):
+            from anima.channels.discord_channel import DiscordChannel
+            dc = DiscordChannel(
+                token=get("channels.discord.token", ""),
+                allowed_users=get("channels.discord.allowed_users", []),
+            )
+
+            async def on_discord_message(data):
+                session_id = data.get("source", "discord:unknown")
+                if session_router.try_lock(session_id, channel="discord", user_id=data.get("user", "")):
+                    await event_queue.put(Event(
+                        type=EventType.USER_MESSAGE,
+                        payload=data,
+                        priority=EventPriority.HIGH,
+                        source="discord",
+                    ))
+                    # Also broadcast to network so other nodes see it
+                    await gossip_mesh.broadcast_event(data)
+
+            dc.set_message_handler(on_discord_message)
+            await dc.start()
+            channels.append(dc)
+            _active_channels["discord"] = dc
+
+        log.info("Network enabled: node=%s, port=%d, peers=%d, channels=%d",
+                 node_identity.node_id, node_state.port, len(peers), len(channels))
 
     cognitive = AgenticLoop(
         event_queue=event_queue,
@@ -157,6 +328,7 @@ async def run() -> None:
     dashboard_hub.agent_manager = agent_manager
     dashboard_hub.scheduler = scheduler
     dashboard_hub.skill_loader = skill_loader
+    dashboard_hub.gossip_mesh = gossip_mesh
     dashboard_hub.config = config
 
     dashboard_port = get("dashboard.port", 8420)
@@ -165,10 +337,22 @@ async def run() -> None:
         port=dashboard_port,
     )
 
-    # Wire output callback: cognitive → terminal + dashboard
-    def on_agent_output(text: str) -> None:
+
+    # Wire output callback: cognitive → terminal + dashboard + channels
+    def on_agent_output(text: str, source: str = "") -> None:
         terminal.display(text)
         dashboard_hub.add_chat_message("agent", text)
+
+        # Route response back to the originating channel
+        if source and source.startswith("discord:"):
+            dc = _active_channels.get("discord")
+            if dc:
+                import asyncio
+                try:
+                    loop = asyncio.get_running_loop()
+                    loop.create_task(dc.send(source, text))
+                except RuntimeError:
+                    pass  # No running loop
 
     cognitive.set_output_callback(on_agent_output)
 
@@ -203,7 +387,8 @@ async def run() -> None:
         asyncio.create_task(terminal.start(), name="terminal"),
     ]
 
-    log.info("ANIMA is alive. Dashboard: http://localhost:%d", dashboard_port)
+    from anima.network.discovery import get_local_ip as _lip
+    log.info("ANIMA is alive. Dashboard: http://%s:%d", _lip(), dashboard_port)
 
     # Wait for shutdown signal
     await shutdown_event.wait()
@@ -219,9 +404,16 @@ async def run() -> None:
     # 2. Close event queue
     event_queue.close()
 
-    # 3. Stop terminal + dashboard
+    # 3. Stop terminal + dashboard + network + channels
     terminal.stop()
     await dashboard.stop()
+    if gossip_mesh:
+        if 'channels' in dir():
+            for ch in channels:
+                await ch.stop()
+        if 'memory_sync' in dir():
+            await memory_sync.stop()
+        await gossip_mesh.stop()
 
     # 4. Wait for tasks
     try:

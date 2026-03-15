@@ -1,0 +1,39 @@
+{
+  "self_id": "anima-desktop-otd1je1-c3eba5ac",
+  "registered_nodes": [
+    {
+      "id": "anima-desktop-otd1je1-c3eba5ac",
+      "joined_at": 1773562120.4109602,
+      "status": "alive"
+    },
+    {
+      "id": "anima-spawn-d3ef6a30",
+      "joined_at": 1773565641.5988848,
+      "status": "alive"
+    },
+    {
+      "id": "anima-spawn-44a8da84",
+      "joined_at": 1773566735.4040055,
+      "status": "dead",
+      "dead_since": 1773568045.5964153
+    },
+    {
+      "id": "anima-spawn-a60badd3",
+      "joined_at": 1773568060.5993397,
+      "status": "dead",
+      "dead_since": 1773568308.3284886
+    },
+    {
+      "id": "anima-spawn-90b6d54d",
+      "joined_at": 1773568868.389559,
+      "status": "dead",
+      "dead_since": 1773569023.412864
+    },
+    {
+      "id": "anima-spawn-75d965f5",
+      "joined_at": 1773569033.4146743,
+      "status": "alive"
+    }
+  ],
+  "created_at": 1773562120.4109602
+}

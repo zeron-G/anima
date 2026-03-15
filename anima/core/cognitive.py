@@ -73,8 +73,9 @@ class AgenticLoop:
 
         self._conversation: list[dict] = []
         self._max_conversation_turns = 50
-        self._output_callback: Callable[[str], Any] | None = None
+        self._output_callback: Callable[..., Any] | None = None
         self._status_callback: Callable[[dict], Any] | None = None
+        self._current_source: str = ""  # Track event source for response routing
 
     def set_output_callback(self, callback: Callable[[str], Any]) -> None:
         self._output_callback = callback
@@ -111,6 +112,9 @@ class AgenticLoop:
     # ------------------------------------------------------------------ #
 
     async def _handle_event(self, event: Event) -> None:
+        # Track source for response routing (Discord, webhook, terminal, etc.)
+        self._current_source = event.payload.get("source", event.source) if event.payload else event.source
+
         is_self = event.type in (
             EventType.STARTUP, EventType.SELF_THINKING, EventType.FOLLOW_UP,
             EventType.FILE_CHANGE, EventType.SYSTEM_ALERT, EventType.SCHEDULED_TASK,
@@ -358,7 +362,7 @@ class AgenticLoop:
 
     async def _output(self, text: str) -> None:
         if self._output_callback:
-            self._output_callback(text)
+            self._output_callback(text, source=self._current_source)
         else:
             log.info("Output: %s", text)
 

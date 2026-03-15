@@ -30,6 +30,7 @@ class DashboardHub:
         self.agent_manager = None
         self.scheduler = None
         self.skill_loader = None
+        self.gossip_mesh = None
         self.config: dict = {}
         self._start_time = time.time()
         self._chat_history: list[dict] = []
@@ -87,6 +88,18 @@ class DashboardHub:
         }
         snapshot["scheduler"] = self.scheduler.list_jobs() if self.scheduler else []
         snapshot["skills"] = self.skill_loader.list_skills() if self.skill_loader else []
+
+        # Network / distributed info
+        if self.gossip_mesh:
+            peers = self.gossip_mesh.get_peers()
+            snapshot["network"] = {
+                "enabled": True,
+                "node_id": self.gossip_mesh._identity.node_id,
+                "alive_count": self.gossip_mesh.get_alive_count(),
+                "peers": {nid: s.to_dict() for nid, s in peers.items()},
+            }
+        else:
+            snapshot["network"] = {"enabled": False}
 
         # Include agent session data
         snapshot["agents"] = (

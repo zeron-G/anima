@@ -214,6 +214,31 @@ body { background:var(--bg); color:var(--text); font-family:'Segoe UI',system-ui
   .usage-bottom { grid-template-columns:1fr; }
   .settings-grid { grid-template-columns:1fr; }
 }
+@media (max-width:600px) {
+  .header h1 { font-size:14px; }
+  .header .meta { font-size:11px; gap:6px; }
+  .panel-body { padding:8px; }
+  .overview-grid { gap:8px; }
+  .hb-grid { grid-template-columns:1fr 1fr; gap:4px; }
+  .hb-card { padding:6px; }
+  .hb-card .val { font-size:18px; }
+  .usage-top { grid-template-columns:1fr 1fr; gap:6px; }
+  .usage-card .val { font-size:16px; }
+  .msg { max-width:92%; font-size:13px; padding:8px 10px; }
+  .chat-input input { padding:10px; font-size:14px; }
+  .chat-input button { padding:10px 14px; font-size:13px; }
+  .upload-btn { padding:6px 8px; }
+  .auth-row { font-size:12px; flex-wrap:wrap; }
+  .auth-row .v { max-width:150px; font-size:11px; }
+  .model-select { font-size:11px; }
+  .ctrl-btn { padding:10px; font-size:13px; }
+  .tool-card { min-width:100px; padding:6px 8px; }
+  .activity-feed { font-size:11px; max-height:100px; }
+  .usage-table { font-size:10px; }
+  .usage-table th, .usage-table td { padding:3px 4px; }
+  .wm-item { font-size:11px; }
+  body { -webkit-text-size-adjust:100%; }
+}
 </style>
 </head>
 <body>
@@ -228,6 +253,9 @@ body { background:var(--bg); color:var(--text); font-family:'Segoe UI',system-ui
   </a>
   <a class="nav-item" data-page="usage" href="#/usage">
     &#x1F4CA;<span class="tooltip">Usage</span>
+  </a>
+  <a class="nav-item" data-page="network" href="#/network">
+    &#x1F310;<span class="tooltip">Network</span>
   </a>
   <a class="nav-item" data-page="settings" href="#/settings">
     &#x2699;<span class="tooltip">Settings</span>
@@ -413,6 +441,43 @@ body { background:var(--bg); color:var(--text); font-family:'Segoe UI',system-ui
     </div>
   </div>
 
+  <!-- ══ NETWORK PAGE ══ -->
+  <div class="page" id="page-network">
+    <div class="settings-grid" style="grid-template-columns:1fr 1fr">
+      <!-- This Node -->
+      <div class="panel">
+        <div class="panel-title">This Node</div>
+        <div class="panel-body">
+          <div class="auth-row"><span class="k">Node ID</span><span class="v" id="net-node-id">--</span></div>
+          <div class="auth-row"><span class="k">Status</span><span class="v"><span class="badge oauth" id="net-status">offline</span></span></div>
+          <div class="auth-row"><span class="k">Alive Nodes</span><span class="v" id="net-alive">0</span></div>
+        </div>
+      </div>
+      <!-- Topology -->
+      <div class="panel">
+        <div class="panel-title">Topology</div>
+        <div class="panel-body" id="net-topology" style="min-height:120px;position:relative">
+          <div style="color:var(--text2);font-size:12px;text-align:center;padding:20px">Network disabled</div>
+        </div>
+      </div>
+      <!-- Peers Table -->
+      <div class="panel" style="grid-column:1/-1">
+        <div class="panel-title">Peers</div>
+        <div class="panel-body">
+          <table class="usage-table" style="width:100%">
+            <thead><tr><th>Node</th><th>Host</th><th>IP</th><th>Status</th><th>Load</th><th>Capabilities</th></tr></thead>
+            <tbody id="net-peers-tbody"><tr><td colspan="6" style="color:var(--text2)">No peers</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+      <!-- Sessions -->
+      <div class="panel" style="grid-column:1/-1">
+        <div class="panel-title">Sessions</div>
+        <div class="panel-body" id="net-sessions" style="font-size:12px;color:var(--text2)">No active sessions</div>
+      </div>
+    </div>
+  </div>
+
   <!-- ══ SETTINGS PAGE ══ -->
   <div class="page" id="page-settings">
     <div class="settings-grid">
@@ -473,6 +538,7 @@ body { background:var(--bg); color:var(--text); font-family:'Segoe UI',system-ui
           <button class="ctrl-btn" onclick="control('pause_heartbeat')">&#x23F8; Pause Heartbeat</button>
           <button class="ctrl-btn" onclick="control('resume_heartbeat')">&#x25B6; Resume Heartbeat</button>
           <button class="ctrl-btn warn" onclick="control('clear_working_memory')">&#x1F5D1; Clear Working Memory</button>
+          <button class="ctrl-btn" onclick="if(confirm('Restart ANIMA?'))control('restart')">&#x1F504; Restart</button>
           <button class="ctrl-btn danger" onclick="if(confirm('Are you sure you want to shutdown ANIMA?'))control('shutdown')">&#x23FB; Shutdown</button>
           <div class="ctrl-feedback" id="ctrl-feedback"></div>
         </div>
@@ -510,9 +576,10 @@ const routes = {
   '#/': 'overview',
   '#/chat': 'chat',
   '#/usage': 'usage',
+  '#/network': 'network',
   '#/settings': 'settings',
 };
-const pageNames = { overview:'Overview', chat:'Chat', usage:'Usage', settings:'Settings' };
+const pageNames = { overview:'Overview', chat:'Chat', usage:'Usage', network:'Network', settings:'Settings' };
 
 function navigate() {
   const hash = location.hash || '#/';
@@ -560,6 +627,7 @@ function render(d) {
   if (currentPage === 'overview') renderOverview(d);
   else if (currentPage === 'chat') renderChat(d);
   else if (currentPage === 'usage') renderUsage(d);
+  else if (currentPage === 'network') renderNetwork(d);
   else if (currentPage === 'settings') renderSettings(d);
 }
 
@@ -784,6 +852,71 @@ function renderUsageTable() {
 }
 
 // ── Page 4: Settings ──
+
+function renderNetwork(d) {
+  var net = d.network || {};
+  var enabled = net.enabled || false;
+
+  document.getElementById('net-node-id').textContent = net.node_id || '--';
+  var statusBadge = document.getElementById('net-status');
+  statusBadge.textContent = enabled ? 'online' : 'disabled';
+  statusBadge.className = 'badge ' + (enabled ? 'oauth' : 'apikey');
+  document.getElementById('net-alive').textContent = net.alive_count || 0;
+
+  // Peers table
+  var peers = net.peers || {};
+  var peerIds = Object.keys(peers);
+  var tbody = document.getElementById('net-peers-tbody');
+  if (peerIds.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="6" style="color:var(--text2)">No peers connected</td></tr>';
+  } else {
+    var html = '';
+    for (var i = 0; i < peerIds.length; i++) {
+      var pid = peerIds[i];
+      var p = peers[pid];
+      var statusCls = p.status === 'alive' ? 'color:var(--green)' : p.status === 'suspect' ? 'color:var(--yellow)' : 'color:var(--red)';
+      var caps = (p.capabilities || []).slice(0, 5).join(', ');
+      var load = p.current_load != null ? (p.current_load * 100).toFixed(0) + '%' : '--';
+      html += '<tr><td style="font-family:monospace;font-size:11px">' + esc(pid.slice(0, 20)) + '</td>';
+      html += '<td>' + esc(p.hostname || '?') + '</td>';
+      var peerDashUrl = 'http://' + (p.ip || '?') + ':8420';
+      html += '<td style="font-family:monospace"><a href="' + peerDashUrl + '" target="_blank" style="color:var(--accent)">' + esc((p.ip || '?') + ':' + (p.port || '?')) + '</a></td>';
+      html += '<td style="' + statusCls + '">' + esc(p.status || '?') + '</td>';
+      html += '<td>' + load + '</td>';
+      html += '<td style="font-size:11px">' + esc(caps) + '</td></tr>';
+    }
+    tbody.innerHTML = html;
+  }
+
+  // Topology visualization (simple node circles)
+  var topo = document.getElementById('net-topology');
+  if (!enabled) {
+    topo.innerHTML = '<div style="color:var(--text2);font-size:12px;text-align:center;padding:20px">Network disabled. Set network.enabled: true in config.</div>';
+    return;
+  }
+  var allNodes = [{id: net.node_id || 'self', status: 'alive', hostname: 'this node'}];
+  for (var j = 0; j < peerIds.length; j++) {
+    allNodes.push({id: peerIds[j], status: peers[peerIds[j]].status, hostname: peers[peerIds[j]].hostname});
+  }
+  var topoHtml = '<div style="display:flex;gap:16px;align-items:center;justify-content:center;flex-wrap:wrap;padding:10px">';
+  for (var k = 0; k < allNodes.length; k++) {
+    var n = allNodes[k];
+    var bg = n.status === 'alive' ? 'var(--green)' : n.status === 'suspect' ? 'var(--yellow)' : 'var(--red)';
+    var glow = n.status === 'alive' ? 'box-shadow:0 0 10px ' + bg : '';
+    var isSelf = k === 0;
+    topoHtml += '<div style="text-align:center">';
+    topoHtml += '<div style="width:' + (isSelf ? 48 : 36) + 'px;height:' + (isSelf ? 48 : 36) + 'px;border-radius:50%;background:' + bg + ';' + glow + ';margin:0 auto 4px;display:flex;align-items:center;justify-content:center;font-size:' + (isSelf ? 20 : 16) + 'px">';
+    topoHtml += isSelf ? '&#x2B50;' : '&#x1F4BB;';
+    topoHtml += '</div>';
+    topoHtml += '<div style="font-size:10px;color:var(--text2)">' + esc(n.hostname || n.id.slice(0, 12)) + '</div>';
+    topoHtml += '</div>';
+    if (k < allNodes.length - 1) {
+      topoHtml += '<div style="color:var(--border);font-size:20px">&#x2194;</div>';
+    }
+  }
+  topoHtml += '</div>';
+  topo.innerHTML = topoHtml;
+}
 
 function renderSettings(d) {
   // Auth

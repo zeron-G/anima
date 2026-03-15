@@ -42,7 +42,7 @@ async def main():
         emotion_state=em, llm_router=lr, prompt_builder=pb,
         tool_executor=te, tool_registry=tr, config=config)
     outputs = []; statuses = []
-    loop.set_output_callback(lambda t: outputs.append(t))
+    loop.set_output_callback(lambda t, **kw: outputs.append(t))
     loop.set_status_callback(lambda s: statuses.append(s))
     sc.update({'cpu_percent': 8, 'memory_percent': 35}, [])
 

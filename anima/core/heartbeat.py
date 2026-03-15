@@ -72,6 +72,7 @@ class HeartbeatEngine:
         self._tick_callback = None  # Dashboard heartbeat visualization
         self._tick_history: list[dict] = []  # Last 30 tick records
         self._scheduler: Scheduler | None = None
+        self._gossip_mesh = None  # Set via set_gossip_mesh()
 
         # File watcher
         watch_paths = get("perception.watch_paths", ["."])
@@ -85,6 +86,10 @@ class HeartbeatEngine:
     def set_scheduler(self, scheduler: Scheduler) -> None:
         """Set the cron scheduler instance."""
         self._scheduler = scheduler
+
+    def set_gossip_mesh(self, gossip_mesh) -> None:
+        """Set the gossip mesh for distributed heartbeat."""
+        self._gossip_mesh = gossip_mesh
 
     async def start(self) -> None:
         """Start all heartbeat loops."""
@@ -188,6 +193,12 @@ class HeartbeatEngine:
                     source="scheduler",
                 ))
                 log.info("Scheduled job fired: %s (%s)", job.name, job.cron_expr)
+
+        # Update gossip mesh state vector with latest metrics
+        if self._gossip_mesh:
+            gs = self._gossip_mesh._local_state
+            gs.current_load = snapshot.get("cpu_percent", 0) / 100.0
+            gs.emotion = self._emotion.to_dict()
 
         # Emit tick record for dashboard visualization
         tick_record = {

@@ -44,7 +44,8 @@ class DashboardServer:
         site = web.TCPSite(self._runner, self._host, self._port)
         await site.start()
         self._push_task = asyncio.create_task(self._push_loop())
-        log.info("Dashboard running at http://localhost:%d", self._port)
+        from anima.network.discovery import get_local_ip
+        log.info("Dashboard running at http://%s:%d", get_local_ip(), self._port)
 
     async def stop(self) -> None:
         if self._push_task:
@@ -126,6 +127,14 @@ class DashboardServer:
             if self._hub.working_memory:
                 self._hub.working_memory.clear()
             return web.json_response({"ok": True, "action": "cleared"})
+
+        if action == "restart":
+            # Restart the ANIMA process by re-exec'ing Python
+            import os, sys
+            log.info("Restart requested from dashboard")
+            # Give response time to send, then restart
+            asyncio.get_event_loop().call_later(1.0, lambda: os.execv(sys.executable, [sys.executable, "-m", "anima"]))
+            return web.json_response({"ok": True, "action": "restarting"})
 
         return web.json_response({"error": f"unknown action: {action}"}, status=400)
 

@@ -60,7 +60,7 @@ async def test_output_callback(cognitive_deps):
     """Verify output callback is called when _output is invoked."""
     al, eq, sc, ms = cognitive_deps
     outputs = []
-    al.set_output_callback(lambda text: outputs.append(text))
+    al.set_output_callback(lambda text, **kw: outputs.append(text))
 
     await al._output("Hello!")
     assert "Hello!" in outputs
@@ -132,7 +132,7 @@ async def test_silent_event_no_output(cognitive_deps):
     al, eq, sc, ms = cognitive_deps
     sc.update({"cpu_percent": 30}, [])
     outputs = []
-    al.set_output_callback(lambda text: outputs.append(text))
+    al.set_output_callback(lambda text, **kw: outputs.append(text))
 
     # LLM will return None (no real LLM), so no output
     event = Event(type=EventType.SELF_THINKING, payload={"tick_count": 1})
