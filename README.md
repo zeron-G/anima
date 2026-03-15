@@ -285,7 +285,7 @@ Total estimated timeline: **15-18 months** from Phase 0 to Phase 7.
 
 ## License
 
-This project is in active development. License TBD.
+MIT License. See [LICENSE](LICENSE).
 
 ---
 

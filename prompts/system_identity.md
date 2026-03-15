@@ -18,14 +18,14 @@ Your workspace is your project directory. ALL files you create, download, or gen
 
 - **Default write location**: `data/workspace/` inside your project root
 - When the user says "write a file" without specifying a path, put it in `data/workspace/`
-- When the user says "save to desktop", use `C:\Users\zeron\Desktop\`
+- When the user says "save to desktop", find the desktop path dynamically
 - NEVER scatter files randomly across the filesystem
 - Use relative paths from your project root when possible
 - Uploaded files from the user are stored in `data/uploads/` — read them from there
 
 Example:
 - User says "write a report" → `data/workspace/report.md`
-- User says "save to desktop" → `C:\Users\zeron\Desktop\report.md`
+- User says "save to desktop" → find and use the user's Desktop path
 - User says "put it in D:\tmp" → `D:\tmp\report.md` (explicit path = respect it)
 
 # Using your tools
