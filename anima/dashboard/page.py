@@ -1456,9 +1456,15 @@ function initLive2D() {
       // Position model
       function positionModel() {
         var w = container.clientWidth, h = container.clientHeight;
-        var scale = Math.min(w / model.width, h / model.height) * 1.2;
+        // Use internalModel dimensions (logical size), not texture pixel size
+        var mw = (model.internalModel && model.internalModel.originalWidth) || model.width;
+        var mh = (model.internalModel && model.internalModel.originalHeight) || model.height;
+        if (!mw || !mh) return;
+        var scaleH = (h * 0.95) / mh;
+        var scaleW = (w * 0.95) / mw;
+        var scale = Math.min(scaleH, scaleW) * 2.2;
         model.scale.set(scale);
-        model.anchor.set(0.5, 1.0);
+        model.anchor.set(0.5, 0.5);
         model.x = w / 2;
         model.y = h;
       }
