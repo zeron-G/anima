@@ -1456,11 +1456,11 @@ function initLive2D() {
       // Position model
       function positionModel() {
         var w = container.clientWidth, h = container.clientHeight;
-        var scale = Math.min(w / model.width, h / model.height) * 0.7;
+        var scale = Math.min(w / model.width, h / model.height) * 1.2;
         model.scale.set(scale);
-        model.anchor.set(0.5, 0.5);
+        model.anchor.set(0.5, 1.0);
         model.x = w / 2;
-        model.y = h * 0.55;
+        model.y = h;
       }
       positionModel();
 
