@@ -182,6 +182,92 @@ def _invoke_claude_code(prompt: str, max_budget: float = 2.0) -> tuple[bool, str
         return False, str(e)
 
 
+def _post_startup_health_check() -> str | None:
+    """Check ANIMA subsystems after startup. Returns error description or None if healthy."""
+    if not LOG_FILE.exists():
+        return "No log file — ANIMA may not have started"
+
+    try:
+        text = LOG_FILE.read_text(encoding="utf-8", errors="replace")
+        # Get only lines from the most recent startup
+        lines = text.splitlines()
+        # Find the last "ANIMA starting..." line
+        start_idx = 0
+        for i in range(len(lines) - 1, -1, -1):
+            if "ANIMA starting..." in lines[i]:
+                start_idx = i
+                break
+        recent = lines[start_idx:]
+        recent_text = "\n".join(recent)
+
+        issues = []
+
+        # Check Discord
+        if "Discord connected as" not in recent_text:
+            if "discord.py not installed" in recent_text:
+                issues.append("Discord: discord.py package not installed")
+            elif "Discord thread starting" in recent_text:
+                issues.append("Discord: thread started but never connected (token invalid?)")
+            else:
+                issues.append("Discord: not started at all")
+
+        # Check network/gossip
+        if "Gossip mesh started" not in recent_text:
+            issues.append("Network: gossip mesh not started")
+        elif "Node discovered" not in recent_text:
+            # Not critical — peer might be offline
+            pass
+
+        # Check cognitive loop
+        if "Agentic loop started" not in recent_text:
+            issues.append("Cognitive: agentic loop not started")
+
+        # Check heartbeat
+        if "Heartbeat engine started" not in recent_text:
+            issues.append("Heartbeat: engine not started")
+
+        # Check for startup errors
+        error_lines = [l for l in recent if "[ERROR]" in l or "[CRITICAL]" in l]
+        if error_lines:
+            issues.append(f"Startup errors ({len(error_lines)}): {error_lines[0]}")
+
+        # Check for import errors
+        import_errors = [l for l in recent if "ModuleNotFoundError" in l or "ImportError" in l]
+        if import_errors:
+            issues.append(f"Missing module: {import_errors[0]}")
+
+        return "; ".join(issues) if issues else None
+
+    except Exception as e:
+        return f"Health check failed: {e}"
+
+
+def _build_health_check_prompt(health_issues: str, log_context: str) -> str:
+    """Build a prompt to fix post-startup health issues."""
+    return f"""ANIMA (an autonomous AI agent system) started but has health issues:
+
+{health_issues}
+
+## Recent log:
+```
+{log_context}
+```
+
+## Instructions:
+1. Diagnose why the subsystem(s) failed to start
+2. Common fixes:
+   - Missing package: install with `uv pip install --python D:/data/code/github/anima/.venv/Scripts/python.exe <package>`
+     OR `D:/program/codesupport/anaconda/envs/anima/python.exe -m pip install <package>`
+   - Import error: check the module exists, fix typos
+   - Config issue: check config/default.yaml
+3. Fix the root cause
+4. Run tests: `.venv/Scripts/python.exe -m pytest tests/ --ignore=tests/test_oauth_live.py --ignore=tests/stress_test.py --tb=short -q`
+5. If tests pass, commit: `git add <files> && git commit -m "watchdog: fix <description>"`
+
+IMPORTANT: Only fix the specific health issue. Minimal changes.
+"""
+
+
 def _build_crash_prompt(crash_context: str, exit_code: int) -> str:
     """Build a prompt for Claude Code to diagnose a crash."""
     return f"""ANIMA (an autonomous AI agent system) just crashed with exit code {exit_code}.
@@ -241,10 +327,11 @@ def run_watchdog(dry_run: bool = False) -> None:
     _log(f"Dry run: {dry_run}")
     _log("=" * 60)
 
-    python_exe = str(PROJECT_ROOT / ".venv" / "Scripts" / "python.exe")
-    # Fallback to anaconda env if .venv doesn't exist
-    if not Path(python_exe).exists():
-        python_exe = r"D:\program\codesupport\anaconda\envs\anima\python.exe"
+    # Prefer anaconda env (has all deps including discord.py, paramiko, etc.)
+    # Fall back to .venv only if anaconda env doesn't exist
+    anaconda_python = r"D:\program\codesupport\anaconda\envs\anima\python.exe"
+    venv_python = str(PROJECT_ROOT / ".venv" / "Scripts" / "python.exe")
+    python_exe = anaconda_python if Path(anaconda_python).exists() else venv_python
 
     consecutive_fixes = 0
     last_crash_time = 0
@@ -257,6 +344,36 @@ def run_watchdog(dry_run: bool = False) -> None:
             cwd=str(PROJECT_ROOT),
         )
         _log(f"ANIMA started (PID {proc.pid})")
+
+        # Post-startup health check (wait for boot, then verify subsystems)
+        _log("Waiting 30s for startup, then running health check...")
+        time.sleep(30)
+        if proc.poll() is None:  # Still alive
+            health = _post_startup_health_check()
+            if health:
+                _log(f"Health check FAILED: {health}")
+                if not dry_run:
+                    # Try to fix the startup issue
+                    log_context = _extract_crash_context(lines=60)
+                    prompt = _build_health_check_prompt(health, log_context)
+                    success, output = _invoke_claude_code(prompt)
+                    if success:
+                        _log(f"Health fix applied: {output[:200]}")
+                        # Kill and restart to apply fix
+                        proc.terminate()
+                        try:
+                            proc.wait(timeout=10)
+                        except subprocess.TimeoutExpired:
+                            proc.kill()
+                        consecutive_fixes += 1
+                        if consecutive_fixes > MAX_CONSECUTIVE_FIXES:
+                            _log("Too many consecutive fixes — stopping")
+                            return
+                        time.sleep(3)
+                        continue  # Restart loop
+            else:
+                _log("Health check PASSED — all subsystems OK")
+                consecutive_fixes = 0  # Reset on healthy start
 
         # Monitor loop
         error_check_interval = 60  # Check for error patterns every 60s
