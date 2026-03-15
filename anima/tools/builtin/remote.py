@@ -6,6 +6,7 @@ import asyncio
 import tempfile
 import os
 import time
+import uuid
 
 from anima.models.tool_spec import ToolSpec, RiskLevel
 from anima.utils.logging import get_logger
@@ -16,12 +17,26 @@ _KNOWN_NODES: dict[str, dict] = {}
 _gossip_mesh = None
 _local_node_id: str = ""
 
+# Pending delegated tasks: task_id → (Future, event_loop)
+_pending_tasks: dict[str, tuple] = {}
+
 
 def set_gossip_mesh(mesh, node_id: str) -> None:
     """Set the gossip mesh reference for task delegation."""
     global _gossip_mesh, _local_node_id
     _gossip_mesh = mesh
     _local_node_id = node_id
+
+
+def resolve_task_result(task_id: str, result: str) -> None:
+    """Resolve a pending delegated task. Called from the gossip thread."""
+    entry = _pending_tasks.pop(task_id, None)
+    if entry is None:
+        log.debug("resolve_task_result: unknown task_id %s", task_id)
+        return
+    future, loop = entry
+    loop.call_soon_threadsafe(future.set_result, result)
+    log.info("Resolved delegated task %s", task_id)
 
 
 def register_node(name: str, host: str, user: str, password: str) -> None:
@@ -102,20 +117,33 @@ async def _delegate_task(node: str, task: str, timeout: int = 120) -> dict:
     """Delegate a task to another ANIMA node via the gossip network.
 
     Unlike remote_exec (SSH), this sends the task to the OTHER node's Eva,
-    who processes it with her own tools and reasoning.
+    who processes it with her own tools and reasoning. Blocks until the
+    result arrives or times out.
     """
     if _gossip_mesh is None:
         return {"success": False, "error": "Not connected to gossip network"}
 
+    task_id = str(uuid.uuid4())
+    loop = asyncio.get_event_loop()
+    future: asyncio.Future = loop.create_future()
+    _pending_tasks[task_id] = (future, loop)
+
     await _gossip_mesh.broadcast_event({
         "type": "task_delegate",
+        "task_id": task_id,
         "from_node": _local_node_id,
         "target_node": node,
         "task": task,
         "timestamp": time.time(),
     })
 
-    return {"success": True, "result": f"Task delegated to {node}. They will process it autonomously."}
+    log.info("Delegated task %s to %s, awaiting result (timeout=%ds)", task_id, node, timeout)
+    try:
+        result = await asyncio.wait_for(future, timeout=float(timeout))
+        return {"success": True, "result": result}
+    except asyncio.TimeoutError:
+        _pending_tasks.pop(task_id, None)
+        return {"success": False, "error": f"Timeout: no response from {node} within {timeout}s"}
 
 
 def get_remote_tools() -> list[ToolSpec]:
