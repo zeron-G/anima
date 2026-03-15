@@ -39,6 +39,10 @@ class DashboardServer:
         self._app.router.add_get("/api/uploads", self._handle_list_uploads)
         self._app.router.add_post("/api/tts", self._handle_tts)
         self._app.router.add_get("/api/voice/{filename}", self._handle_voice_file)
+        # Static files for Live2D model + SDK
+        static_dir = Path(__file__).parent / "static"
+        if static_dir.exists():
+            self._app.router.add_static("/static/", static_dir)
 
     async def start(self) -> None:
         self._runner = web.AppRunner(self._app)

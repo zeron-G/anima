@@ -1,0 +1,85 @@
+{
+  "Version": 3,
+  "FileReferences": {
+    "Moc": "PurpleBird.moc3",
+    "Textures": [
+      "PurpleBird.4096/texture_00.png",
+      "PurpleBird.4096/texture_01.png",
+      "PurpleBird.4096/texture_02.png",
+      "PurpleBird.4096/texture_03.png",
+      "PurpleBird.4096/texture_04.png"
+    ],
+    "Physics": "PurpleBird.physics3.json",
+    "DisplayInfo": "PurpleBird.cdi3.json",
+    "Expressions": [
+      {
+        "Name": "QAQ",
+        "File": "QAQ.exp3.json"
+      },
+      {
+        "Name": "脸红",
+        "File": "lianhong.exp3.json"
+      },
+      {
+        "Name": "生气",
+        "File": "shengqi.exp3.json"
+      },
+      {
+        "Name": "问号",
+        "File": "wenhao.exp3.json"
+      },
+      {
+        "Name": "星星眼",
+        "File": "xingxing.exp3.json"
+      },
+      {
+        "Name": "晕",
+        "File": "yun.exp3.json"
+      },
+      {
+        "Name": "光圈",
+        "File": "光圈.exp3.json"
+      },
+      {
+        "Name": "双马尾",
+        "File": "双马尾.exp3.json"
+      },
+      {
+        "Name": "大翅膀",
+        "File": "大翅膀.exp3.json"
+      },
+      {
+        "Name": "小翅膀",
+        "File": "小翅膀.exp3.json"
+      },
+      {
+        "Name": "小翅膀2",
+        "File": "小翅膀2.exp3.json"
+      },
+      {
+        "Name": "麦克风",
+        "File": "麦克风.exp3.json"
+      },
+      {
+        "Name": "放手",
+        "File": "放手.exp3.json"
+      },
+      {
+        "Name": "祈祷",
+        "File": "祈祷.exp3.json"
+      }
+    ]
+  },
+  "Groups": [
+    {
+      "Target": "Parameter",
+      "Name": "EyeBlink",
+      "Ids": []
+    },
+    {
+      "Target": "Parameter",
+      "Name": "LipSync",
+      "Ids": []
+    }
+  ]
+}

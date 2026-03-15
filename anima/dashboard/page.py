@@ -418,11 +418,10 @@ body { background:var(--bg); color:var(--text); font-family:'Segoe UI',system-ui
       </div>
     </div>
   </div>
-  <!-- Live2D SDK -->
-  <script src="https://cubism.live2d.com/sdk-web/cubismcore/live2dcubismcore.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/gh/dylanNew/live2d/webgl/Live2D/lib/live2d.min.js"></script>
+  <!-- Live2D SDK (Cubism Core + PixiJS + pixi-live2d-display) -->
+  <script src="/static/live2dcubismcore.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/pixi.js@7.x/dist/pixi.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/pixi-live2d-display@0.4.0/dist/index.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/pixi-live2d-display@0.4.0/dist/cubism4.min.js"></script>
   <!-- TTS audio element -->
   <audio id="tts-audio" style="display:none"></audio>
 
@@ -1264,13 +1263,39 @@ function playTTS(text) {
     body: JSON.stringify({text: text})
   }).then(function(r) { return r.json(); }).then(function(d) {
     if (d.ok && d.url) {
-      ttsAudio = document.getElementById('tts-audio');
-      ttsAudio.src = d.url;
-      ttsAudio.play().catch(function() {});
-      // Trigger Live2D talking animation
-      if (window.live2dModel) {
-        try { window.live2dModel.motion('Tap'); } catch(e) {}
-      }
+      // Use Web Audio API for lipsync analysis
+      fetch(d.url).then(function(r) { return r.arrayBuffer(); }).then(function(buf) {
+        var audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        audioCtx.decodeAudioData(buf, function(audioBuffer) {
+          var analyser = audioCtx.createAnalyser();
+          analyser.fftSize = 256;
+          analyser.smoothingTimeConstant = 0.7;
+          var source = audioCtx.createBufferSource();
+          source.buffer = audioBuffer;
+          source.connect(analyser);
+          analyser.connect(audioCtx.destination);
+          var dataArray = new Float32Array(analyser.fftSize);
+          var stopped = false;
+
+          function updateMouth() {
+            if (stopped) return;
+            analyser.getFloatTimeDomainData(dataArray);
+            var sum = 0;
+            for (var i = 0; i < dataArray.length; i++) sum += dataArray[i] * dataArray[i];
+            var rms = Math.sqrt(sum / dataArray.length);
+            live2dMouthOpen = Math.min(1, rms / 0.15);
+            requestAnimationFrame(updateMouth);
+          }
+
+          source.onended = function() {
+            stopped = true;
+            live2dMouthOpen = 0;
+            audioCtx.close();
+          };
+          source.start(0);
+          updateMouth();
+        });
+      });
     }
   }).catch(function() {});
 }
@@ -1340,20 +1365,45 @@ document.getElementById('mic-btn').addEventListener('click', function() {
   }
 });
 
-// ── Live2D Avatar ──
-// Uses pixi-live2d-display with a free model
+// ── Live2D Avatar (PurpleBird model with emotion driver) ──
 var live2dReady = false;
+var live2dMouthOpen = 0;
+
+// Emotion → Live2D parameter mapping (from eva-live2d emotion-driver)
+var EMOTION_MAP = {
+  happy: { expression: null, params: { ParamEyeLSmile: 0.7, ParamEyeRSmile: 0.7, ParamMouthForm: 0.6, Param7: 0.3 }},
+  excited: { expression: '星星眼', params: { ParamEyeLSmile: 0.5, ParamEyeRSmile: 0.5, ParamMouthForm: 0.8 }},
+  sad: { expression: 'QAQ', params: { ParamBrowLY: -0.4, ParamBrowRY: -0.4, ParamMouthForm: -0.2 }},
+  angry: { expression: '生气', params: { Param8: 0.8, ParamBrowLAngle: -0.5, ParamBrowRAngle: -0.5, ParamMouthForm: -0.4 }},
+  embarrassed: { expression: '脸红', params: { Param7: 1.0, ParamEyeLOpen: 0.6, ParamEyeROpen: 0.6 }},
+  curious: { expression: '问号', params: { ParamAngleZ: 8.0, ParamBrowLY: 0.3, ParamBrowRY: 0.3 }},
+  sleepy: { expression: null, params: { ParamEyeLOpen: 0.3, ParamEyeROpen: 0.3, ParamEyeLSmile: 0.3, ParamEyeRSmile: 0.3 }},
+  neutral: { expression: null, params: {}},
+};
+
+// Map ANIMA's 4-dim emotion to dominant emotion name
+function getDominantEmotion(emotion) {
+  if (!emotion) return 'neutral';
+  var e = emotion.engagement || 0, co = emotion.confidence || 0,
+      cu = emotion.curiosity || 0, cn = emotion.concern || 0;
+  if (cn > 0.6) return 'sad';
+  if (cu > 0.7) return 'curious';
+  if (e > 0.7 && co > 0.6) return 'excited';
+  if (e > 0.6) return 'happy';
+  if (co > 0.7) return 'confident';
+  if (cn > 0.4) return 'worried';
+  return 'neutral';
+}
 
 function initLive2D() {
   if (typeof PIXI === 'undefined' || typeof PIXI.live2d === 'undefined') {
-    // SDK not loaded yet, retry
     setTimeout(initLive2D, 1000);
     return;
   }
 
-  var canvas = document.getElementById('live2d-canvas');
   var container = document.getElementById('live2d-container');
-  if (!canvas || !container) return;
+  var canvas = document.getElementById('live2d-canvas');
+  if (!container || !canvas) return;
 
   try {
     var app = new PIXI.Application({
@@ -1363,63 +1413,80 @@ function initLive2D() {
       resizeTo: container,
     });
 
-    // Free Hiyori model from Live2D samples
-    var modelUrl = 'https://cdn.jsdelivr.net/gh/guansss/pixi-live2d-display/test/assets/haru/haru_greeter_t03.model3.json';
-
-    PIXI.live2d.Live2DModel.from(modelUrl).then(function(model) {
+    PIXI.live2d.Live2DModel.from('/static/model/PurpleBird/PurpleBird.model3.json', {
+      autoInteract: false,
+    }).then(function(model) {
       app.stage.addChild(model);
-      // Scale and position
-      var scale = Math.min(container.clientWidth / model.width, container.clientHeight / model.height) * 0.8;
-      model.scale.set(scale);
-      model.x = container.clientWidth / 2;
-      model.y = container.clientHeight;
-      model.anchor.set(0.5, 1);
+
+      // Position model
+      function positionModel() {
+        var w = container.clientWidth, h = container.clientHeight;
+        var scale = Math.min(w / model.width, h / model.height) * 2.0;
+        model.scale.set(scale);
+        model.anchor.set(0.5, 0.5);
+        model.x = w / 2;
+        model.y = h;
+      }
+      positionModel();
+
+      // Resize handler
+      new ResizeObserver(positionModel).observe(container);
+
+      // Mouse tracking
+      document.addEventListener('mousemove', function(e) {
+        model.focus(e.clientX, e.clientY);
+      });
+
+      // Mouth sync via ticker
+      app.ticker.add(function() {
+        try {
+          var cm = model.internalModel && model.internalModel.coreModel;
+          if (cm) {
+            cm.setParameterValueById('ParamMouthOpenY', live2dMouthOpen);
+          }
+        } catch(e) {}
+      });
 
       window.live2dModel = model;
       live2dReady = true;
-
-      // Click interaction
-      model.on('hit', function(hitAreas) {
-        if (hitAreas.includes('Body')) {
-          model.motion('Tap');
-        }
-      });
+      console.log('Live2D PurpleBird loaded');
     }).catch(function(e) {
-      console.log('Live2D model load failed:', e);
+      console.log('Live2D load failed:', e);
       container.style.display = 'none';
     });
   } catch(e) {
-    console.log('Live2D init failed:', e);
+    console.log('Live2D init error:', e);
     container.style.display = 'none';
   }
 }
 
-// Update Live2D expression based on emotion state
+var lastEmotionName = 'neutral';
 function updateLive2DExpression(emotion) {
   if (!live2dReady || !window.live2dModel) return;
   var model = window.live2dModel;
+  var emoName = getDominantEmotion(emotion);
+  if (emoName === lastEmotionName) return;
+  lastEmotionName = emoName;
+
+  var mapping = EMOTION_MAP[emoName] || EMOTION_MAP['neutral'];
   try {
-    var dominant = 'neutral';
-    if (emotion) {
-      var max = 0;
-      for (var k in emotion) {
-        if (emotion[k] > max) { max = emotion[k]; dominant = k; }
+    // Set expression if mapped
+    if (mapping.expression) {
+      var em = model.internalModel && model.internalModel.motionManager &&
+               model.internalModel.motionManager.expressionManager;
+      if (em) em.setExpression(mapping.expression);
+    }
+    // Set parameters
+    var cm = model.internalModel && model.internalModel.coreModel;
+    if (cm) {
+      for (var param in mapping.params) {
+        try { cm.setParameterValueById(param, mapping.params[param]); } catch(e) {}
       }
     }
-    // Map emotion to expression index
-    var exprMap = {
-      'curiosity': 1,
-      'engagement': 2,
-      'confidence': 3,
-      'concern': 4,
-    };
-    var idx = exprMap[dominant] || 0;
-    model.expression(idx);
   } catch(e) {}
 }
 
-// Init Live2D after page load
-setTimeout(initLive2D, 2000);
+setTimeout(initLive2D, 1500);
 
 // ── Start ──
 connect();
