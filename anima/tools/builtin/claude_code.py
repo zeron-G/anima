@@ -41,6 +41,7 @@ def _run_sync(
     continue_session: bool = False,
     resume_session: str = "",
     save_session: bool = False,
+    max_turns: int = 15,
 ) -> dict:
     """Run Claude Code CLI synchronously (called in thread via run_in_executor)."""
     global _last_session_id
@@ -53,6 +54,7 @@ def _run_sync(
         "--allowedTools", "Read,Edit,Bash,Grep,Glob,Write",
         "--max-budget-usd", str(max_budget),
         "--model", "sonnet",
+        "--max-turns", str(max_turns),
     ]
 
     # Session handling
@@ -116,10 +118,10 @@ def _run_sync(
         return {"success": False, "error": str(e), "returncode": -1}
 
 
-async def _claude_code(prompt: str, working_directory: str = "", timeout: int = 120) -> dict:
+async def _claude_code(prompt: str, working_directory: str = "", timeout: int = 120, max_turns: int = 15) -> dict:
     """Delegate a task to Claude Code (one-shot, no session persistence)."""
     return await asyncio.get_event_loop().run_in_executor(
-        None, _run_sync, prompt, working_directory, timeout, 2.0, False, "", False
+        None, _run_sync, prompt, working_directory, timeout, 2.0, False, "", False, max_turns
     )
 
 
@@ -128,6 +130,8 @@ async def _claude_code_chat(
     resume_session: str = "",
     timeout: int = 180,
     max_budget: float = 2.0,
+    max_turns: int = 15,
+    working_directory: str = "",
 ) -> dict:
     """Chat with Claude Code in a persistent session.
 
@@ -141,7 +145,7 @@ async def _claude_code_chat(
     save = True  # Always save session for chat mode
 
     return await asyncio.get_event_loop().run_in_executor(
-        None, _run_sync, message, "", timeout, max_budget, continue_flag, resume_session, save
+        None, _run_sync, message, working_directory, timeout, max_budget, continue_flag, resume_session, save, max_turns
     )
 
 
@@ -204,6 +208,11 @@ def get_claude_code_tools() -> list[ToolSpec]:
                         "description": "Timeout in seconds (default 120, max 300)",
                         "default": 120,
                     },
+                    "max_turns": {
+                        "type": "integer",
+                        "description": "Max tool-call rounds (default 15). Use 20-30 for complex multi-file tasks.",
+                        "default": 15,
+                    },
                 },
                 "required": ["prompt"],
             },
@@ -227,6 +236,11 @@ def get_claude_code_tools() -> list[ToolSpec]:
                         "type": "string",
                         "description": "Your message to Claude Code",
                     },
+                    "working_directory": {
+                        "type": "string",
+                        "description": "Directory to run in (default: project root)",
+                        "default": "",
+                    },
                     "resume_session": {
                         "type": "string",
                         "description": "Session ID to resume (optional — omit to continue last session)",
@@ -241,6 +255,11 @@ def get_claude_code_tools() -> list[ToolSpec]:
                         "type": "number",
                         "description": "Max USD to spend (default $2.00)",
                         "default": 2.0,
+                    },
+                    "max_turns": {
+                        "type": "integer",
+                        "description": "Max tool-call rounds (default 15). Use 20-30 for complex multi-file tasks.",
+                        "default": 15,
                     },
                 },
                 "required": ["message"],
