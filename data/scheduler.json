@@ -8,8 +8,8 @@
       "enabled": true,
       "recurring": true,
       "timeout_s": 120,
-      "last_run": 1773558300.1040144,
-      "next_run": 1773558600.0,
+      "last_run": 1773559200.684668,
+      "next_run": 1773559500.0,
       "created_at": 1773556539.4701304
     },
     {
@@ -32,8 +32,8 @@
       "enabled": true,
       "recurring": true,
       "timeout_s": 120,
-      "last_run": 1773558014.9269493,
-      "next_run": 1773558900.0,
+      "last_run": 1773558900.4683146,
+      "next_run": 1773559800.0,
       "created_at": 1773557014.579
     },
     {
