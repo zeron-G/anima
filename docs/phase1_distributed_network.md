@@ -28,6 +28,7 @@
 16. [实现路线图](#16-实现路线图)
 17. [文件结构设计](#17-文件结构)
 18. [里程碑与验收标准](#18-里程碑)
+19. [繁殖模块：节点注入与快速启动](#19-繁殖模块)
 
 ---
 
@@ -160,24 +161,30 @@ ANIMA 选择 **AP**（可用性 + 分区容忍性）：
 - Python 原生支持（pyzmq）
 - 不需要中间件（RabbitMQ/Redis），每个节点就是自己的消息路由器
 
-### 4.2 三层通信架构
+### 4.2 两层通信架构
+
+> **设计决策：心跳和 Gossip 合并为一个定时器。**
+>
+> 原始设计有两个独立的 5 秒循环（心跳广播 + Gossip 交换），但这两者做的事情本质相同：把 state_vector 发给别人、收别人的 state_vector。分成两个定时器会导致同一个 state_vector 每 5 秒被发送两次，且两个定时器会产生竞态。合并后代码更少、消息量减半、无竞态。
 
 ```
-Layer 1: Heartbeat Mesh (ZMQ PUB/SUB)
-  每个节点 PUB 自己的心跳，SUB 所有已知节点
-  频率: 5s
-  内容: state_vector (节点状态、能力、负载)
-  用途: 存活检测 + 能力发现 + 负载感知
+Layer 1: Gossip Mesh (ZMQ PUB/SUB + 随机点对点)
+  单一 5s 定时器，每次触发做三件事：
+    1. PUB 自己的 state_vector（所有人可见）
+    2. 随机选 2 个邻居做状态交换（Gossip 核心）
+    3. 根据收到的信息更新节点状态表 + 故障检测器
+  心跳本身就是 Gossip 的载体——不需要两层。
+  内容: state_vector (节点状态、能力、负载、情感、会话)
+  用途: 存活检测 + 能力发现 + 负载感知 + 状态同步
 
-Layer 2: Event Bus (ZMQ PUB/SUB)
-  全局事件广播
-  内容: 用户消息、会话更新、记忆同步、告警
-  用途: 所有节点看到所有事件 → 一个节点接管处理
+Layer 2: Event Bus + Direct Channel (ZMQ PUB/SUB + REQ/REP)
+  PUB/SUB: 全局事件广播
+    内容: 用户消息、会话锁定/释放、配置变更、告警
+    用途: 所有节点看到所有事件 → 一个节点接管处理
 
-Layer 3: Direct Channel (ZMQ REQ/REP)
-  节点间点对点通信
-  内容: 任务委派、状态同步请求、大文件传输、热修复
-  用途: 需要确认的操作
+  REQ/REP: 节点间点对点通信
+    内容: 任务委派、记忆增量同步、大文件传输、热修复
+    用途: 需要确认的操作（不走广播，因为数据量可能大）
 ```
 
 ### 4.3 消息格式
@@ -279,13 +286,19 @@ class NodeCapability:
 
 ### 6.1 分布式心跳 vs 本地心跳
 
-Phase 0 的心跳是本地的：15s 采一次 CPU/内存/磁盘。Phase 1 增加网络心跳：
+Phase 0 的心跳是本地的：15s 采一次 CPU/内存/磁盘。Phase 1 增加一个统一的网络定时器：
 
 ```
-本地心跳 (15s): 系统资源 + 文件变化 + 情感衰减（不变）
-网络心跳 (5s):  向其他节点广播自己的 state_vector
-Gossip 同步 (5s): 随机选 2 个邻居交换状态
+本地心跳 (15s): 系统资源 + 文件变化 + 情感衰减 + cron 检查（不变）
+
+网络 Gossip (5s): 单一定时器，每次触发时：
+  1. 广播 state_vector（PUB）
+  2. 随机选 2 个邻居交换状态
+  3. 更新节点状态表 + 故障检测器（Phi Accrual）
+  4. 检查是否有节点状态变为 SUSPECT/DEAD
 ```
+
+只有一个 5s 定时器负责所有网络通信。心跳就是 Gossip 的载体。
 
 ### 6.2 故障检测：Phi Accrual 故障检测器
 
@@ -317,14 +330,77 @@ ALIVE → ISOLATED (手动维护模式)
 
 | 数据 | 同步方式 | 一致性要求 |
 |------|----------|-----------|
-| 节点状态（心跳） | Gossip 广播 | 最终一致（5-10s） |
+| 节点状态（心跳） | Gossip（state_vector 自带） | 最终一致（5-10s） |
 | 用户对话历史 | 事件广播 + 按需拉取 | 最终一致 |
-| 情感状态 | Gossip（包含在 state_vector 中） | 弱一致 |
-| 工具执行结果 | 直接回复给请求节点 | 强一致（REQ/REP） |
-| 记忆（SQLite） | 定期批量同步（增量） | 最终一致（分钟级） |
-| 配置变更 | 广播 + 确认 | 多数确认 |
+| 情感状态 | Gossip（state_vector 自带） | 弱一致 |
+| 工具执行结果 | REQ/REP 直接回复 | 强一致 |
+| 记忆（SQLite） | REQ/REP 增量同步（见下文） | 最终一致（分钟级） |
+| 配置变更 | 广播 + 多数确认 | 多数确认 |
 
-### 7.2 冲突类型与解决策略
+### 7.2 记忆增量同步（具体实现）
+
+> **这是分布式 ANIMA 的数据基础。设计必须在写 `conflict.py` 之前确定。**
+
+#### 怎么知道哪些记录是新的
+
+SQLite 的 `episodic_memories` 和 `llm_usage` 表新增一列：
+
+```sql
+ALTER TABLE episodic_memories ADD COLUMN sync_seq INTEGER DEFAULT 0;
+ALTER TABLE llm_usage ADD COLUMN sync_seq INTEGER DEFAULT 0;
+```
+
+每个节点维护一个单调递增的 `local_seq` 计数器（Lamport clock）。每次写入记忆时 `sync_seq = ++local_seq`。
+
+每对节点维护一个 `peer_sync_watermark: {peer_node_id: last_synced_seq}`。同步时：
+
+```python
+# 节点 A 向节点 B 请求增量
+request = SyncRequest(
+    from_node="A",
+    tables=["episodic_memories", "llm_usage"],
+    watermarks={"B": 142}  # "我上次从你同步到 seq=142"
+)
+
+# 节点 B 回复差异
+response = SyncResponse(
+    records=[
+        # 所有 sync_seq > 142 的记录
+        {"table": "episodic_memories", "id": "mem_xxx", "sync_seq": 143, ...},
+        {"table": "episodic_memories", "id": "mem_yyy", "sync_seq": 144, ...},
+    ],
+    current_seq=156  # B 当前最新 seq
+)
+
+# A 写入收到的记录，更新 watermark
+peer_sync_watermark["B"] = 156
+```
+
+#### 传输格式
+
+- 序列化：msgpack（二进制，比 JSON 小 30-50%，快 5-10x）
+- 传输通道：ZeroMQ REQ/REP（不走 PUB/SUB 广播——记忆数据量可能大）
+- 批量大小：每次最多 500 条记录，超过则分批
+- 压缩：超过 10KB 时用 zlib 压缩
+
+#### 去重
+
+两个节点可能独立创建内容相似但 ID 不同的记忆（如两个节点都观察到同一个文件变化）。
+
+去重策略：写入时计算 `content_hash = sha256(content + type)[:16]`，存入 `episodic_memories` 的新列。同步写入前检查：如果 `content_hash` 已存在且 `created_at` 差距 < 60s，判定为重复，跳过写入。
+
+```sql
+ALTER TABLE episodic_memories ADD COLUMN content_hash TEXT DEFAULT '';
+CREATE INDEX IF NOT EXISTS idx_content_hash ON episodic_memories(content_hash);
+```
+
+#### 同步频率
+
+- 正常模式：每 60s 做一次增量同步（与 2 个随机邻居）
+- 节点刚加入/恢复：立即做全量同步
+- 手动触发：Dashboard 上的 "Sync Now" 按钮
+
+### 7.3 冲突类型与解决策略
 
 **场景 1：两个节点同时回复同一条 Discord 消息**
 
@@ -332,13 +408,13 @@ ALIVE → ISOLATED (手动维护模式)
 
 **场景 2：两个节点同时修改同一个记忆条目**
 
-解决：Last-Write-Wins (LWW) + 版本向量。每个记忆条目有 `(node_id, timestamp, version)` 元组。冲突时比较 timestamp，相同则比较 node_id。
+解决：Last-Write-Wins (LWW) + 版本向量。每个记忆条目有 `(node_id, timestamp, sync_seq)` 元组。冲突时比较 timestamp，相同则比较 node_id 字典序。
 
 **场景 3：网络分裂后两边都更新了配置**
 
 解决：CRDT (Conflict-free Replicated Data Type)。配置项使用 LWW-Register CRDT，合并后自动取最新值。如果是不可合并的冲突（如两边改了同一个配置项到不同值），标记为 CONFLICT 等待用户决策。
 
-### 7.3 向量时钟
+### 7.4 向量时钟
 
 每个节点维护一个向量时钟 `{node_id: logical_clock}`，用于判断事件的因果关系：
 
@@ -461,21 +537,54 @@ PENDING → ACCEPTED(node_id) → RUNNING → DONE / FAILED
 
 网络分裂导致两组节点互相看不到对方。两边都认为"对方死了，我是唯一的存活者"。
 
-### 11.2 ANIMA 的脑裂策略
+### 11.2 "全网总数"的精确定义
 
-**少数派只读。** 当节点检测到自己能看到的节点数少于全网总数的 50% 时，进入只读模式：
+> **这是脑裂判定的基础。定义不清会导致误判。**
+
+少数派判定依赖"我能看到的节点数是否超过全网总数的 50%"。但"全网总数"是什么？
+
+**问题示例**：A、B、C 三个节点，C 是笔记本，用户关盖睡觉了。A 和 B 还在运行。A 能看到 B 但看不到 C。全网总数是 3（C 曾经注册过）还是 2（C 已经 DEAD）？
+
+**解决方案：持久化注册表。**
+
+```python
+# data/node.json
+{
+    "self_id": "anima-desktop-a3f2c8e1",
+    "registered_nodes": [
+        {"id": "anima-desktop-a3f2c8e1", "joined_at": 1773600000, "status": "alive"},
+        {"id": "anima-rpi-kitchen-7b9d4f02", "joined_at": 1773600100, "status": "alive"},
+        {"id": "anima-laptop-c4d5e6f7", "joined_at": 1773600200, "status": "dead"},
+    ]
+}
+```
+
+规则：
+- **加入**：节点首次通过 Gossip 交换后加入 `registered_nodes`
+- **标记 DEAD**：Phi Accrual 检测到故障后标记，但**不从列表中删除**
+- **自动注销**：连续 DEAD 超过 24 小时 → 自动从列表中移除
+- **手动注销**：用户在 Dashboard 上点"移除节点"
+- **脑裂判定**：`可见节点数（包括自己）/ registered_nodes 中非注销节点数 > 50%` → 多数派
+
+这样判定是确定性的。临时离线的节点（如关盖的笔记本）在 24 小时内仍计入总数，防止误判。
+
+### 11.3 脑裂策略
+
+**少数派只读。** 当节点判定自己在少数派分区时：
 
 - 可以回复用户消息（不能让用户等着）
 - 不能修改全局配置
 - 不能删除记忆
 - 不能执行有副作用的任务（如删文件、发邮件）
+- Dashboard 显示"⚠ 网络分裂 — 只读模式"
 
 **合并协议。** 网络恢复后：
 
 1. 两个分区交换各自的向量时钟
-2. 找出并发写入的数据（向量时钟不可比的条目）
-3. 按上面的冲突策略逐一解决
-4. 合并后重置向量时钟
+2. 交换 `peer_sync_watermark`，做增量记忆同步
+3. 找出并发写入的数据（向量时钟不可比的条目）
+4. 按 7.3 的冲突策略逐一解决
+5. 合并后统一向量时钟
 
 ---
 
@@ -798,6 +907,203 @@ channels:
 | Phase 1c | 热修复 + 冲突解决 + 脑裂 | 2 周 |
 | Phase 1d | mDNS + Webhook + Dashboard 网络拓扑 | 1 周 |
 | **总计** | | **8 周** |
+
+---
+
+## 19. 繁殖模块
+
+> **生命的基本能力：繁殖。ANIMA 应该能在新设备上"分裂"出一个完整的自己。**
+
+### 19.1 为什么需要繁殖
+
+手动部署一个新 ANIMA 节点需要：安装 Python → 创建 venv → pip install → 复制配置 → 配置认证 → 启动 → 手动加入网络。这个过程对技术用户需要 10-15 分钟，对非技术用户几乎不可能。
+
+如果 ANIMA 能"繁殖"——由一个运行中的节点自动完成以上所有步骤——新节点的部署时间从 15 分钟降到 1 分钟。
+
+### 19.2 繁殖协议
+
+```
+繁殖流程（从节点 A 到目标设备 T）:
+
+1. A 通过 SSH 连接到 T（用户提供 user@host + key/password）
+2. A 检查 T 的环境（OS、Python 版本、可用磁盘、网络）
+3. A 生成繁殖包（见 19.3）
+4. A 通过 SCP 发送繁殖包到 T
+5. A 在 T 上远程执行 bootstrap.sh
+6. bootstrap.sh 完成：创建环境 → 安装依赖 → 注入配置 → 启动 ANIMA
+7. 新节点通过 Gossip 自动加入网络
+8. A 验证新节点存活（心跳检测）
+9. 繁殖完成 → 记忆同步开始
+```
+
+### 19.3 繁殖包结构
+
+```
+anima-spawn-{timestamp}.tar.gz
+├── bootstrap.sh              # 一键启动脚本
+├── bootstrap.ps1             # Windows 版本
+├── anima/                    # 完整的 ANIMA 源代码（从 A 复制）
+├── config/
+│   └── default.yaml          # 配置（已注入 network.peers = [A 的地址]）
+├── agents/
+│   └── eva/
+│       └── soul.md           # 人格设定（从 A 复制）
+├── prompts/                  # 提示词模板
+├── .env                      # 认证凭证（见 19.4）
+├── data/
+│   └── node.json             # 预生成的 node_id + registered_nodes
+├── requirements.txt
+└── pyproject.toml
+```
+
+### 19.4 认证分发
+
+> **安全是最重要的约束。密钥不能明文传输。**
+
+三种方式，按安全等级：
+
+**方式 1：OAuth Token 继承（推荐）**
+
+如果目标设备有 Claude Code 安装：
+```
+1. 在 T 上运行 `claude login`（用户手动，一次性）
+2. ANIMA 自动发现 ~/.claude/.credentials.json
+3. 零密钥传输
+```
+
+**方式 2：.env 注入（便捷但需加密传输）**
+
+```
+1. A 生成临时的 .env 文件（包含 ANTHROPIC_API_KEY 或 OAUTH_TOKEN）
+2. .env 通过 SSH SCP 传输（加密通道）
+3. 到达 T 后权限设为 600（仅所有者可读）
+4. 繁殖包中的 .env 在传输后从 A 上删除
+```
+
+**方式 3：网络密钥交换（最安全）**
+
+```
+1. 新节点启动后生成一次性公钥
+2. 通过 Dashboard 显示 QR code / 6 位配对码
+3. 用户在 A 的 Dashboard 输入配对码
+4. A 通过配对码加密的通道传输 network.secret + API key
+5. 密钥永远不以明文出现
+```
+
+Phase 1 实现方式 1 + 2。方式 3 是 Phase 3 的增强。
+
+### 19.5 bootstrap.sh 设计
+
+```bash
+#!/bin/bash
+# ANIMA Node Bootstrap — 一键部署
+set -e
+
+ANIMA_DIR="$HOME/.anima"
+PYTHON="${PYTHON:-python3}"
+
+echo "=== ANIMA Node Bootstrap ==="
+
+# 1. 检查 Python
+$PYTHON --version || { echo "Python 3.11+ required"; exit 1; }
+
+# 2. 创建安装目录
+mkdir -p "$ANIMA_DIR"
+cp -r ./* "$ANIMA_DIR/"
+cd "$ANIMA_DIR"
+
+# 3. 创建虚拟环境
+$PYTHON -m venv .venv
+source .venv/bin/activate
+
+# 4. 安装依赖
+pip install -e ".[dev]" --quiet
+
+# 5. 设置权限
+chmod 600 .env 2>/dev/null || true
+
+# 6. 启动 ANIMA（后台）
+nohup python -m anima > data/logs/anima.log 2>&1 &
+echo $! > data/anima.pid
+
+echo "=== ANIMA node started (PID: $(cat data/anima.pid)) ==="
+echo "Dashboard: http://$(hostname -I | awk '{print $1}'):8420"
+```
+
+### 19.6 快速启动封装 (`anima spawn` 命令)
+
+从运行中的 ANIMA 节点触发繁殖：
+
+```bash
+# 通过 SSH 繁殖到新设备
+python -m anima spawn user@192.168.1.174
+
+# 指定 Python 路径（树莓派上可能是 python3.11）
+python -m anima spawn user@192.168.1.174 --python python3.11
+
+# 繁殖到本地目录（用于测试）
+python -m anima spawn --local /tmp/anima-node2 --port 8421
+
+# 只生成繁殖包（不执行部署）
+python -m anima spawn --pack-only --output anima-spawn.tar.gz
+```
+
+### 19.7 实现文件
+
+```
+anima/
+├── spawn/                    # 繁殖模块
+│   ├── __init__.py
+│   ├── packager.py           # 生成繁殖包（tar.gz）
+│   ├── deployer.py           # SSH 部署 + 远程执行
+│   ├── validator.py          # 部署后验证（心跳检测）
+│   └── bootstrap.sh          # 嵌入繁殖包的启动脚本
+├── __main__.py               # 增加 `spawn` 子命令
+```
+
+### 19.8 安全约束
+
+- 繁殖包中的 .env 文件在传输完成后从源节点删除临时副本
+- SSH 连接使用密钥认证（推荐）或密码认证
+- 繁殖过程的所有操作写入审计日志
+- 新节点的 `network.secret` 与父节点相同（同一网络）
+- 繁殖不传输 `data/anima.db`（记忆通过增量同步获取，不通过包传输）
+- 繁殖不传输 `agents/*/feelings.md`（情感记忆是私有的，不繁殖）
+
+### 19.9 繁殖后的验证
+
+```python
+async def validate_spawn(target_host, timeout=60):
+    """验证新节点是否成功启动并加入网络。"""
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        # 检查 Gossip 中是否出现新节点
+        new_node = find_node_by_host(target_host)
+        if new_node and new_node.status == "ALIVE":
+            # 发送测试任务
+            result = await dispatch_task(new_node, TaskRequest(
+                required_capabilities=["shell"],
+                payload={"command": "python -c 'print(42)'"},
+            ))
+            if result.success and "42" in result.output:
+                log.info("Spawn validated: %s is alive and functional", new_node.node_id)
+                return True
+        await asyncio.sleep(2)
+    return False
+```
+
+---
+
+## 预计开发周期（更新）
+
+| 阶段 | 内容 | 时间 |
+|------|------|------|
+| Phase 1a | 双节点通信 + 统一 Gossip + 网络心跳 | 3 周 |
+| Phase 1b | 会话路由 + Discord 集成 | 2 周 |
+| Phase 1c | 热修复 + 记忆增量同步 + 脑裂 | 2 周 |
+| Phase 1d | mDNS + Webhook + Dashboard 网络拓扑 | 1 周 |
+| Phase 1e | 繁殖模块 + 快速启动封装 | 1 周 |
+| **总计** | | **9 周** |
 
 ---
 
