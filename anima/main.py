@@ -18,8 +18,12 @@ from anima.utils.logging import setup_logging, get_logger
 log = get_logger("main")
 
 
-async def run() -> None:
-    """Main async entry point — starts all subsystems."""
+async def run() -> bool:
+    """Main async entry point — starts all subsystems.
+
+    Returns True if a restart was requested (evolution hot-reload),
+    False for normal shutdown.
+    """
     config = load_config()
     setup_logging(
         level=get("logging.level", "INFO"),
@@ -336,8 +340,22 @@ async def run() -> None:
         tool_registry=tool_registry,
         config=config,
     )
+    cognitive.set_heartbeat(heartbeat)
     if gossip_mesh:
         cognitive.set_gossip_mesh(gossip_mesh)
+
+    # ── Restore from checkpoint if this is an evolution restart ──
+    from anima.core.reload import ReloadManager
+    checkpoint = ReloadManager.load_checkpoint()
+    is_restart = checkpoint is not None
+    if checkpoint:
+        cognitive.restore_from_checkpoint(checkpoint)
+        heartbeat.mark_as_restart(
+            reason=checkpoint.get("reason", "evolution"),
+            tick_count=checkpoint.get("tick_count", 0),
+        )
+        log.info("Evolution restart: restored state from checkpoint (%s)",
+                 checkpoint.get("reason", "?"))
 
     terminal = TerminalUI(event_queue=event_queue)
 
@@ -420,9 +438,23 @@ async def run() -> None:
     from anima.network.discovery import get_local_ip as _lip
     log.info("ANIMA is alive. Dashboard: http://%s:%d", _lip(), dashboard_port)
 
-    # Wait for shutdown signal
+    # Wait for shutdown signal (from user Ctrl+C or evolution reload)
+    # Also monitor cognitive loop's reload manager
+    async def _watch_reload():
+        while not shutdown_event.is_set():
+            if cognitive.reload_manager.restart_requested:
+                log.info("Evolution reload detected — initiating restart...")
+                shutdown_event.set()
+                return
+            await asyncio.sleep(2)
+    reload_watcher = asyncio.create_task(_watch_reload(), name="reload_watcher")
+
     await shutdown_event.wait()
-    log.info("Shutdown signal received...")
+    restart_requested = cognitive.reload_manager.restart_requested
+    if restart_requested:
+        log.info("Shutdown for evolution restart: %s", cognitive.reload_manager.restart_reason)
+    else:
+        log.info("Shutdown signal received...")
 
     # Graceful shutdown sequence
     timeout = get("shutdown.timeout_s", 5)
@@ -456,14 +488,44 @@ async def run() -> None:
         for t in tasks:
             t.cancel()
 
-    # 5. Flush memory
+    # 5. Clean up reload watcher
+    reload_watcher.cancel()
+    try:
+        await reload_watcher
+    except asyncio.CancelledError:
+        pass
+
+    # 6. Flush memory
     await memory_store.close()
-    log.info("ANIMA shutdown complete.")
+
+    if restart_requested:
+        log.info("ANIMA shutdown complete — restarting for evolution reload...")
+    else:
+        log.info("ANIMA shutdown complete.")
+    return restart_requested
 
 
 def main_entry() -> None:
-    """Sync entry point for console_scripts."""
-    try:
-        asyncio.run(run())
-    except KeyboardInterrupt:
-        pass
+    """Sync entry point for console_scripts.
+
+    Wraps run() in a restart loop for evolution hot-reload.
+    When evolution modifies .py files and requests reload:
+      1. run() saves checkpoint → graceful shutdown → returns True
+      2. This loop re-calls run()
+      3. New run() loads checkpoint → restores state → continues
+    """
+    restart_count = 0
+    while True:
+        try:
+            restart = asyncio.run(run())
+        except KeyboardInterrupt:
+            break
+
+        if not restart:
+            break
+
+        # Evolution restart — brief pause then restart
+        restart_count += 1
+        import time
+        log.info("Evolution restart #%d — reloading in 2 seconds...", restart_count)
+        time.sleep(2)  # Brief pause for connections to close cleanly

@@ -29,6 +29,7 @@ from anima.models.event import Event, EventType
 from anima.perception.snapshot_cache import SnapshotCache
 from anima.tools.executor import ToolExecutor
 from anima.tools.registry import ToolRegistry
+from anima.core.reload import ReloadManager
 from anima.utils.logging import get_logger
 
 log = get_logger("cognitive")
@@ -77,10 +78,34 @@ class AgenticLoop:
         self._status_callback: Callable[[dict], Any] | None = None
         self._current_source: str = ""  # Track event source for response routing
         self._gossip_mesh = None  # Set via set_gossip_mesh() for delegation results
+        self._reload_manager = ReloadManager()
+        self._heartbeat = None  # Set via set_heartbeat() for tick count in checkpoint
 
     def set_gossip_mesh(self, gossip_mesh) -> None:
         """Set gossip mesh for broadcasting delegation results."""
         self._gossip_mesh = gossip_mesh
+
+    def set_heartbeat(self, heartbeat) -> None:
+        """Set heartbeat ref for checkpoint tick count."""
+        self._heartbeat = heartbeat
+
+    @property
+    def reload_manager(self) -> ReloadManager:
+        return self._reload_manager
+
+    def restore_from_checkpoint(self, checkpoint: dict) -> None:
+        """Restore conversation and emotion state from a restart checkpoint."""
+        conv = checkpoint.get("conversation", [])
+        if conv:
+            self._conversation = conv
+            log.info("Restored %d conversation turns from checkpoint", len(conv))
+        emotion = checkpoint.get("emotion")
+        if emotion:
+            self._emotion.engagement = emotion.get("engagement", self._emotion.engagement)
+            self._emotion.confidence = emotion.get("confidence", self._emotion.confidence)
+            self._emotion.curiosity = emotion.get("curiosity", self._emotion.curiosity)
+            self._emotion.concern = emotion.get("concern", self._emotion.concern)
+            log.info("Restored emotion state from checkpoint")
 
     def set_output_callback(self, callback: Callable[[str], Any]) -> None:
         self._output_callback = callback
@@ -97,6 +122,14 @@ class AgenticLoop:
         while True:
             event = await self._event_queue.get_timeout(timeout=2.0)
             if event is None:
+                # Check for pending reload request during idle
+                if self._reload_manager.restart_requested:
+                    log.info("Reload requested — triggering shutdown for restart")
+                    await self._event_queue.put(Event(
+                        type=EventType.SHUTDOWN,
+                        payload={"restart": True, "reason": self._reload_manager.restart_reason},
+                        source="reload",
+                    ))
                 continue
             if event.type == EventType.SHUTDOWN:
                 break
@@ -281,7 +314,6 @@ class AgenticLoop:
                     proposal = parse_proposal(last_content)
                     if proposal.get("title"):
                         # Check if Eva already did the work (combined propose+execute)
-                        # by looking for tool calls in the conversation
                         tool_calls_made = sum(
                             1 for m in self._conversation
                             if m.get("role") == "assistant" and "tool_use" in str(m.get("content", ""))
@@ -295,12 +327,12 @@ class AgenticLoop:
                                 evo_type=proposal.get("type", ""),
                             )
                             log.info("Evolution combined propose+execute: %s", proposal.get("title"))
+                            self._maybe_trigger_reload(proposal.get("title", ""))
                         else:
                             evo_state.advance_phase("executing", **proposal)
                             log.info("Evolution proposal accepted: %s", proposal.get("title"))
                     else:
                         # No formal proposal found — but Eva may have done the work anyway
-                        # Check if she made git commits or used edit_file
                         did_work = any(
                             "edit_file" in str(m.get("content", "")) or
                             "git commit" in str(m.get("content", "")) or
@@ -309,7 +341,6 @@ class AgenticLoop:
                             if m.get("role") == "assistant"
                         )
                         if did_work:
-                            # Extract title from the response text heuristically
                             title = ""
                             for line in last_content.splitlines():
                                 line = line.strip().strip("*#- ")
@@ -317,7 +348,6 @@ class AgenticLoop:
                                     title = line.split(":", 1)[1].strip()
                                     break
                             if not title:
-                                # Use first non-empty line as title
                                 for line in last_content.splitlines():
                                     line = line.strip().strip("*#- ")
                                     if len(line) > 10 and len(line) < 100:
@@ -331,20 +361,63 @@ class AgenticLoop:
                                 evo_type="fix",
                             )
                             log.info("Evolution auto-completed (work detected): %s", title)
+                            self._maybe_trigger_reload(title)
                         else:
                             evo_state.fail_loop("No valid proposal generated")
                 elif phase == "execute":
-                    # Execution done — record result
+                    title = evo_state.current_loop.get("title", "")
                     evo_state.complete_loop(
                         result=last_content[:500],
-                        title=evo_state.current_loop.get("title", ""),
+                        title=title,
                         evo_type=evo_state.current_loop.get("type", ""),
                     )
                     self._emotion.adjust(confidence=0.1, curiosity=0.1)
+                    self._maybe_trigger_reload(title)
             except Exception as e:
                 log.error("Evolution state update failed: %s", e)
 
         self._memory_store.audit(action=f"event:{event.type.name}", details=user_message[:200])
+
+    # ------------------------------------------------------------------ #
+    #  Evolution hot-reload                                                #
+    # ------------------------------------------------------------------ #
+
+    def _maybe_trigger_reload(self, evolution_title: str) -> None:
+        """Check if evolution modified .py files and trigger hot-reload if so.
+
+        Only reloads when Python source code was changed. Config/prompt/doc
+        changes don't need a reload since they're read fresh each time.
+        """
+        import subprocess
+        from anima.config import project_root
+
+        try:
+            # Check git diff for .py file changes since last non-evolution commit
+            result = subprocess.run(
+                ["git", "diff", "HEAD~1", "--name-only", "--diff-filter=AM"],
+                capture_output=True, text=True, timeout=10,
+                cwd=str(project_root()),
+            )
+            changed_files = result.stdout.strip().splitlines() if result.returncode == 0 else []
+            py_changed = [f for f in changed_files if f.endswith(".py")]
+
+            if not py_changed:
+                log.info("Evolution completed (no .py changes) — no reload needed")
+                return
+
+            log.info("Evolution modified %d Python files — requesting reload: %s",
+                     len(py_changed), py_changed[:5])
+
+            tick_count = self._heartbeat._tick_count if self._heartbeat else 0
+            self._reload_manager.request_reload(
+                reason=f"Evolution: {evolution_title}",
+                conversation=self._conversation,
+                emotion_state=self._emotion.to_dict(),
+                tick_count=tick_count,
+                evolution_title=evolution_title,
+            )
+        except Exception as e:
+            log.error("Reload check failed: %s", e)
 
     # ------------------------------------------------------------------ #
     #  Event → message conversion                                         #
@@ -357,6 +430,13 @@ class AgenticLoop:
         if t == EventType.USER_MESSAGE:
             return p.get("text", "")
         if t == EventType.STARTUP:
+            if p and p.get("is_restart"):
+                return (
+                    "[INTERNAL: EVOLUTION RESTART]\n"
+                    f"You just restarted after evolution: {p.get('reason', 'code update')}.\n"
+                    "Your conversation context has been preserved. "
+                    "Briefly confirm you're back online — no need for full startup scan."
+                )
             return (
                 "[INTERNAL: STARTUP]\n"
                 "You just booted. Check time and system status, then greet briefly."

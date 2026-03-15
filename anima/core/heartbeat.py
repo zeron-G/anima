@@ -73,11 +73,20 @@ class HeartbeatEngine:
         self._tick_history: list[dict] = []  # Last 30 tick records
         self._scheduler: Scheduler | None = None
         self._gossip_mesh = None  # Set via set_gossip_mesh()
+        self._is_restart = False  # Set via mark_as_restart()
+        self._restart_reason = ""
 
         # File watcher
         watch_paths = get("perception.watch_paths", ["."])
         watch_exts = get("perception.watch_extensions", None)
         self._file_watcher = FileWatcher(watch_paths, watch_exts)
+
+    def mark_as_restart(self, reason: str, tick_count: int = 0) -> None:
+        """Mark this startup as an evolution restart."""
+        self._is_restart = True
+        self._restart_reason = reason
+        if tick_count > 0:
+            self._tick_count = tick_count  # Preserve uptime counter
 
     def set_tick_callback(self, callback) -> None:
         """Set callback for heartbeat tick visualization."""
@@ -103,9 +112,15 @@ class HeartbeatEngine:
                  self._script_interval, self._llm_interval, self._major_interval)
 
         # Push STARTUP event — agent introduces itself and scans environment
+        startup_payload = {"reason": "ANIMA boot — first heartbeat"}
+        if self._is_restart:
+            startup_payload = {
+                "reason": f"Evolution restart — {self._restart_reason}",
+                "is_restart": True,
+            }
         await self._event_queue.put(Event(
             type=EventType.STARTUP,
-            payload={"reason": "ANIMA boot — first heartbeat"},
+            payload=startup_payload,
             priority=EventPriority.NORMAL,
             source="heartbeat",
         ))
