@@ -37,7 +37,7 @@ class ToolRegistry:
         from anima.tools.builtin.note import get_note_tool
         from anima.tools.builtin.datetime_tool import get_datetime_tool
         from anima.tools.builtin.web_fetch import get_web_fetch_tool
-        from anima.tools.builtin.claude_code import get_claude_code_tool
+        from anima.tools.builtin.claude_code import get_claude_code_tools
         from anima.tools.builtin.agent_tools import get_agent_tools
         from anima.tools.builtin.search import get_search_tools
         from anima.tools.builtin.edit import get_edit_tool
@@ -54,7 +54,8 @@ class ToolRegistry:
         self.register(get_note_tool())
         self.register(get_datetime_tool())
         self.register(get_web_fetch_tool())
-        self.register(get_claude_code_tool())
+        for tool in get_claude_code_tools():
+            self.register(tool)
         for tool in get_agent_tools():
             self.register(tool)
         for tool in get_search_tools():

@@ -1,7 +1,9 @@
 """Entry point for `python -m anima`.
 
 Usage:
-    python -m anima              # Start ANIMA normally
+    python -m anima                  # Start ANIMA normally
+    python -m anima watchdog         # Start with watchdog (auto-repair on crash)
+    python -m anima watchdog --dry   # Watchdog monitor only (no auto-fix)
     python -m anima spawn user@host  # Deploy to remote machine
     python -m anima spawn --local /path  # Deploy locally (testing)
     python -m anima spawn --pack-only    # Just create the package
@@ -18,13 +20,22 @@ if sys.platform == "win32":
 def main():
     args = sys.argv[1:]
 
-    if args and args[0] == "spawn":
+    if args and args[0] == "watchdog":
+        _run_watchdog(args[1:])
+    elif args and args[0] == "spawn":
         _handle_spawn(args[1:])
     elif "--watch" in args:
         _run_with_watch()
     else:
         from anima.main import main_entry
         main_entry()
+
+
+def _run_watchdog(args: list[str]):
+    """Start ANIMA under watchdog supervision with auto-repair."""
+    from anima.watchdog import run_watchdog
+    dry_run = "--dry" in args
+    run_watchdog(dry_run=dry_run)
 
 
 def _run_with_watch():

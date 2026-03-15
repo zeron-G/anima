@@ -252,7 +252,11 @@ class HeartbeatEngine:
         self._emotion.decay(rate=decay_rate)
 
     async def _confirm_alive(self) -> None:
-        """Alive confirmation — just log periodically."""
+        """Alive confirmation — log periodically + update watchdog heartbeat."""
+        # Update watchdog heartbeat file every tick (15s)
+        from anima.watchdog import _update_heartbeat
+        _update_heartbeat()
+
         if self._tick_count % 20 == 0:  # Every ~5 minutes
             log.info("♥ Alive (tick #%d, memory=%d/%d)",
                      self._tick_count,
