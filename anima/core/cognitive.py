@@ -110,6 +110,29 @@ class AgenticLoop:
             self._emotion.concern = emotion.get("concern", self._emotion.concern)
             log.info("Restored emotion state from checkpoint")
 
+    def load_conversation_from_db(self) -> None:
+        """Load recent conversation from SQLite on startup.
+
+        This ensures Eva has context even after a cold restart
+        (watchdog kill, crash, manual restart — any scenario).
+        No checkpoint file needed.
+        """
+        recent = self._memory_store.get_recent_memories(limit=30, type="chat")
+        if not recent:
+            return
+        # Memories are newest-first, reverse to chronological order
+        recent.reverse()
+        for mem in recent:
+            meta = {}
+            try:
+                meta = json.loads(mem.get("metadata_json", "{}"))
+            except Exception:
+                pass
+            role = meta.get("role", "assistant")
+            content = mem.get("content", "")
+            self._conversation.append({"role": role, "content": content})
+        log.info("Loaded %d conversation turns from DB", len(recent))
+
     def set_output_callback(self, callback: Callable[[str], Any]) -> None:
         self._output_callback = callback
 

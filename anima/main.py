@@ -348,7 +348,12 @@ async def run() -> bool:
     if gossip_mesh:
         cognitive.set_gossip_mesh(gossip_mesh)
 
-    # ── Restore from checkpoint if this is an evolution restart ──
+    # ── Restore conversation context ──
+    # Always load recent conversation from DB — works for ANY restart type
+    # (cold restart, watchdog kill, evolution restart, manual restart)
+    cognitive.load_conversation_from_db()
+
+    # Also check for evolution checkpoint (has extra state like emotion)
     from anima.core.reload import ReloadManager
     checkpoint = ReloadManager.load_checkpoint()
     is_restart = checkpoint is not None
