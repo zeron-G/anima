@@ -245,10 +245,16 @@ class GossipMesh:
 
         self._detector.report_heartbeat(nid)
 
-        if old_status != "alive":
+        if old_status is None:
+            # First discovery
             if self._on_node_alive:
                 self._on_node_alive(nid, remote)
-            log.info("Node alive: %s (%s)", nid, remote.hostname)
+            log.info("Node discovered: %s (%s)", nid, remote.hostname)
+        elif old_status in ("suspect", "dead") and remote.status == "alive":
+            # Recovery from failure
+            if self._on_node_alive:
+                self._on_node_alive(nid, remote)
+            log.info("Node recovered: %s (%s)", nid, remote.hostname)
 
     def _check_failures(self) -> None:
         with self._lock:

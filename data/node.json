@@ -49,6 +49,12 @@
     {
       "id": "anima-spawn-1de968f7",
       "joined_at": 1773570927.0387228,
+      "status": "dead",
+      "dead_since": 1773572097.1599634
+    },
+    {
+      "id": "anima-spawn-e9ca70b2",
+      "joined_at": 1773572112.1629324,
       "status": "alive"
     }
   ],

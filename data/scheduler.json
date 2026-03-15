@@ -8,8 +8,8 @@
       "enabled": true,
       "recurring": true,
       "timeout_s": 120,
-      "last_run": 1773570902.8631797,
-      "next_run": 1773571200.0,
+      "last_run": 1773572402.8412082,
+      "next_run": 1773572700.0,
       "created_at": 1773556539.4701304
     },
     {
@@ -32,8 +32,8 @@
       "enabled": true,
       "recurring": true,
       "timeout_s": 120,
-      "last_run": 1773570602.679885,
-      "next_run": 1773571500.0,
+      "last_run": 1773572402.8412082,
+      "next_run": 1773573300.0,
       "created_at": 1773557014.579
     },
     {
@@ -83,6 +83,18 @@
       "last_run": 1773569682.8824568,
       "next_run": 1773569681.8824568,
       "created_at": 1773569682.8814569
+    },
+    {
+      "id": "cron_faf349ccd496",
+      "name": "test-job",
+      "cron_expr": "*/1 * * * *",
+      "prompt": "test prompt",
+      "enabled": false,
+      "recurring": false,
+      "timeout_s": 120,
+      "last_run": 1773571287.0509083,
+      "next_run": 1773571286.0509083,
+      "created_at": 1773571287.0504081
     }
   ]
 }

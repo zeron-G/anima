@@ -199,12 +199,12 @@ cp .env.example .env
 python -m anima
 ```
 
-Dashboard opens at **http://localhost:8420**
+Dashboard opens at **http://your-ip:8420**
 
 ### Test
 
 ```bash
-pytest tests/ -v                 # Unit tests (70)
+pytest tests/ -v                 # Unit tests (110)
 pytest tests/test_oauth_live.py  # Live API test
 ```
 
@@ -318,8 +318,8 @@ ANIMA's unique advantage is architectural: the heartbeat-driven event loop means
 
 | Phase | Name | Goal | Timeline |
 |-------|------|------|----------|
-| **0** | **First Heartbeat** | Single-node autonomous AI with agentic loop, tools, dashboard | **5-7 weeks** |
-| 1 | First Conversation | Two-node discovery, heartbeat exchange, task delegation | 5-7 weeks |
+| **0** | **First Heartbeat** | Single-node autonomous AI with agentic loop, 22 tools, dashboard | **Done** |
+| **1** | **First Conversation** | Two-node gossip mesh, Discord, memory sync, session routing, spawn | **In progress** |
 | 2 | First Sight | Terminal + GUI operation with risk assessment | 7-9 weeks |
 | 3 | First Self-Heal | Multi-node mesh, rolling updates, 5-level hot repair | 7-9 weeks |
 | 4 | First Growth | Self-evolution engine: tool forge, safe self-modification | 8-10 weeks |

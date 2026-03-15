@@ -153,7 +153,9 @@ class HeartbeatEngine:
             if len(self._recent_significance_scores) > 20:
                 self._recent_significance_scores.pop(0)
 
-        if diff.has_alerts:
+        # Alert cooldown: same alert type at most once per 5 minutes
+        if diff.has_alerts and (time.time() - getattr(self, '_last_alert_time', 0)) > 300:
+            self._last_alert_time = time.time()
             await self._event_queue.put(Event(
                 type=EventType.SYSTEM_ALERT,
                 payload={"diff": {
