@@ -141,10 +141,9 @@ Then propose ONE improvement. Directions:
 - You CAN NOT: delete .env, credentials, evolution_state.json, or system files
 - You CAN NOT: run rm -rf or format commands
 
-## Collaboration: Use Claude Code for complex changes
-- For complex multi-file changes, use `claude_code_chat` to collaborate with Claude Code
+## External help
 - For errors you can't fix yourself, use `self_repair` to let Claude Code diagnose and fix
-- Claude Code can read your entire codebase, run tests, and commit changes
+- For complex multi-file tasks, use `claude_code` to delegate to Claude Code
 
 ## Output
 Respond with your proposal in this format:

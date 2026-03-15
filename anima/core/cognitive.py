@@ -454,12 +454,10 @@ class AgenticLoop:
                 "Review your recent memory — use read_file on data/projects.md and check if any todos are overdue or need attention.",
                 "Check system health in detail — use system_info and look for disk space issues, high memory usage, or anything unusual. If disk > 90%, investigate what's using space.",
                 "Check if there are any unread emails using read_email. Summarize anything important.",
-                "Look at your data/logs/anima.log (last 50 lines) for any errors or warnings that need attention. If you find errors you can't fix yourself, use self_repair to invoke Claude Code.",
-                "Think about what skills or tools you're missing. What tasks have you failed at recently? Use claude_code_chat to discuss improvements with Claude Code and implement them together.",
+                "Look at your data/logs/anima.log (last 50 lines) for any errors or warnings that need attention. If you find errors you can't fix yourself, use self_repair.",
+                "Think about what skills or tools you're missing. What tasks have you failed at recently? Write a brief note about potential improvements using save_note.",
                 "Check on the laptop node status using remote_exec. Is it running? What's its CPU/memory? Report any issues.",
                 "Review your GitHub repos — use the github tool to check 'repo list' and see if there are any issues or PRs that need attention.",
-                "Use claude_code_chat to collaborate on ANIMA development. Discuss: what features are missing? What's broken? What should be improved? Then implement the best idea together.",
-                "Read your dev-session memories (search for 'dev-session' in your memory) to recall past architectural decisions. Check if any of the solved bugs have regressed.",
             ]
             task_index = (tick // 20) % len(tasks)  # Rotate every ~5 minutes (20 ticks at 15s)
             task = tasks[task_index]

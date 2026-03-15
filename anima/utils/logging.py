@@ -30,7 +30,15 @@ def setup_logging(
 
     # Console handler — only if requested
     if console:
-        ch = logging.StreamHandler(sys.stderr)
+        # On Windows, stderr may use GBK/cp1252; reconfigure to UTF-8 with
+        # replacement so emoji in log messages never crash the agentic loop.
+        stream = sys.stderr
+        if hasattr(stream, "reconfigure"):
+            try:
+                stream.reconfigure(encoding="utf-8", errors="replace")
+            except Exception:
+                pass
+        ch = logging.StreamHandler(stream)
         ch.setFormatter(fmt)
         logger.addHandler(ch)
 
