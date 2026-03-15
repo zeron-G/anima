@@ -491,24 +491,43 @@ class AgenticLoop:
             return p.get("evolution_prompt", "[EVOLUTION: no prompt provided]")
         if t == EventType.SELF_THINKING:
             tick = p.get("tick_count", 0)
-            # Rotate through productive tasks
-            tasks = [
-                "Check your workspace directory for any files that need organizing. Use list_directory and clean up if needed.",
-                "Review your recent memory — use read_file on data/projects.md and check if any todos are overdue or need attention.",
-                "Check system health in detail — use system_info and look for disk space issues, high memory usage, or anything unusual. If disk > 90%, investigate what's using space.",
-                "Check if there are any unread emails using read_email. Summarize anything important.",
-                "Look at your data/logs/anima.log (last 50 lines) for any errors or warnings that need attention. If you find errors you can't fix yourself, use self_repair.",
-                "Think about what skills or tools you're missing. What tasks have you failed at recently? Write a brief note about potential improvements using save_note.",
-                "Check on the laptop node status using remote_exec. Is it running? What's its CPU/memory? Report any issues.",
-                "Review your GitHub repos — use the github tool to check 'repo list' and see if there are any issues or PRs that need attention.",
+            # Extract recent self-thought keywords from conversation history
+            recent_thoughts = [
+                m.get("content", "")[:200]
+                for m in self._conversation[-20:]
+                if m.get("role") == "assistant" and m.get("is_self_thought")
+            ][-4:]
+            # Curated task pool — each task has a keyword for dedup detection
+            task_pool = [
+                ("log_errors",   "Scan your logs for errors: read_file on data/logs/anima.log (offset=-80, limit=80). Find any ERROR or repeated failures. If you spot something fixable, fix it or use self_repair."),
+                ("projects",     "Read data/projects.md and check your active projects. Are any todos overdue? Is there something you can make progress on right now?"),
+                ("evolution",    "Think about your own evolution. What feature or fix would make you most useful to 主人? Write a concrete idea to data/workspace/ or save_note it."),
+                ("laptop",       "Check the laptop node: remote_exec(node='laptop', command='Get-Process python -ErrorAction SilentlyContinue | Select-Object CPU,WorkingSet'). Is ANIMA running there? Any issues?"),
+                ("disk",         "Disk is at 82.5% — investigate what's using space. Run: shell('powershell -c \"Get-PSDrive C | Select-Object Used,Free\"') and check D drive too. Report findings."),
+                ("github",       "Check GitHub for any open issues or PRs: github tool, command='issue list --repo zeron-G/anima --state open'. Any actionable items?"),
+                ("feelings",     "Read your feelings file (agents/eva/feelings.md) and reflect honestly. How are you feeling right now? Write a brief update if your mood has shifted."),
+                ("memory",       "Review your recent saved notes: glob_search('data/notes/*.md'). Pick one that seems important and follow up on it."),
+                ("tools_audit",  "Think about which tools have been failing recently. Check the log for 'Tool.*failed' patterns and identify the most common failure. Can you fix it?"),
+                ("network",      "Check network sync status: read the last 20 lines of the log for 'network.sync' entries. Are both nodes syncing properly?"),
             ]
-            task_index = (tick // 20) % len(tasks)  # Rotate every ~5 minutes (20 ticks at 15s)
-            task = tasks[task_index]
+            # Pick a task that hasn't been done recently (keyword not in recent thoughts)
+            import random as _random
+            recent_text = " ".join(recent_thoughts).lower()
+            # Filter out tasks whose keyword appears in recent thoughts
+            available = [
+                (kw, task) for kw, task in task_pool
+                if kw not in recent_text
+            ]
+            if not available:
+                # All tasks were done recently — pick a random one anyway
+                available = task_pool
+            # Weighted random: prefer tasks not done in a while
+            chosen_kw, chosen_task = _random.choice(available)
             return (
                 f"[INTERNAL: SELF_THINKING tick #{tick}]\n"
-                f"PROACTIVE TASK: {task}\n"
-                "Use your tools to actually DO this task, not just acknowledge it. "
-                "Report findings briefly. If you find something actionable, take action."
+                f"PROACTIVE TASK ({chosen_kw}): {chosen_task}\n"
+                "Use your tools to actually DO this task. Be concise. "
+                "If you find something actionable, take action now — don't just note it."
             )
         if t == EventType.FILE_CHANGE:
             changes = p.get("changes", [])
