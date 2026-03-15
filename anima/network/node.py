@@ -92,7 +92,7 @@ class NodeIdentity:
                 self._save()
                 return
 
-    def unregister_stale_nodes(self, max_dead_hours: float = 24.0) -> list[str]:
+    def unregister_stale_nodes(self, max_dead_hours: float = 1.0) -> list[str]:
         """Remove nodes that have been dead for > max_dead_hours."""
         cutoff = time.time() - max_dead_hours * 3600
         removed = []
@@ -109,8 +109,11 @@ class NodeIdentity:
         return removed
 
     def get_active_count(self) -> int:
-        """Count of registered nodes that are not unregistered."""
-        return len(self._data["registered_nodes"])
+        """Count of registered nodes that are alive or suspect (not dead)."""
+        return sum(
+            1 for n in self._data["registered_nodes"]
+            if n.get("status", "alive") not in ("dead",)
+        )
 
     def is_majority(self, visible_count: int) -> bool:
         """Check if visible_count (including self) is a majority."""
