@@ -1,60 +1,63 @@
-"""Shell command execution tool."""
+"""Shell command execution tool.
+
+Uses subprocess.run in a thread (via asyncio.to_thread) instead of
+asyncio.create_subprocess_shell, because WindowsSelectorEventLoopPolicy
+(required for ZMQ) does not support async subprocesses on Windows.
+"""
 
 from __future__ import annotations
 
 import asyncio
 import os
+import subprocess
 import sys
 
 from anima.models.tool_spec import ToolSpec, RiskLevel
 
-# Auto-detect Python path: prefer conda env, then sys.executable
 _PYTHON_PATH = sys.executable
-# Also build a PATH that includes the Python directory
 _EXTRA_PATH = os.path.dirname(_PYTHON_PATH)
 
 
-async def _run_shell(command: str, timeout: int = 30) -> dict:
-    """Execute a shell command and return output.
-
-    Injects the current Python interpreter's directory into PATH so that
-    `python` and `pip` work inside subprocess even if not on system PATH.
-    """
+def _run_shell_sync(command: str, timeout: int = 30) -> dict:
+    """Execute a shell command synchronously (runs in thread)."""
     env = os.environ.copy()
-    # Ensure python is findable
     path = env.get("PATH", "")
     if _EXTRA_PATH not in path:
         env["PATH"] = _EXTRA_PATH + os.pathsep + path
-    # Set UTF-8 encoding for subprocess
     env["PYTHONIOENCODING"] = "utf-8"
 
     try:
-        proc = await asyncio.create_subprocess_shell(
+        result = subprocess.run(
             command,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
+            shell=True,
+            capture_output=True,
+            timeout=timeout,
             env=env,
         )
-        stdout, stderr = await asyncio.wait_for(
-            proc.communicate(), timeout=timeout
-        )
-        stdout_str = stdout.decode("utf-8", errors="replace").strip()
-        stderr_str = stderr.decode("utf-8", errors="replace").strip()
+        stdout_str = result.stdout.decode("utf-8", errors="replace").strip()
+        stderr_str = result.stderr.decode("utf-8", errors="replace").strip()
 
-        result = {
-            "returncode": proc.returncode,
+        out = {
+            "returncode": result.returncode,
             "stdout": stdout_str,
             "stderr": stderr_str,
         }
-        # If command failed, include a clear error message
-        if proc.returncode != 0:
-            result["error"] = f"Command exited with code {proc.returncode}"
+        if result.returncode != 0:
+            out["error"] = f"Command exited with code {result.returncode}"
             if stderr_str:
-                result["error"] += f": {stderr_str[:200]}"
-        return result
-    except asyncio.TimeoutError:
-        proc.kill()
+                out["error"] += f": {stderr_str[:200]}"
+        return out
+    except subprocess.TimeoutExpired:
         return {"returncode": -1, "stdout": "", "stderr": "Command timed out", "error": "timeout"}
+    except Exception as e:
+        return {"returncode": -1, "stdout": "", "stderr": str(e), "error": str(e)}
+
+
+async def _run_shell(command: str, timeout: int = 30) -> dict:
+    """Execute a shell command (async wrapper, runs in thread)."""
+    return await asyncio.get_event_loop().run_in_executor(
+        None, _run_shell_sync, command, timeout
+    )
 
 
 def get_shell_tool() -> ToolSpec:

@@ -144,6 +144,9 @@ def create_spawn_package(
                 "secret": network_secret or get("network.secret", ""),
                 "peers": [parent_address],
             }
+            # Disable Discord on child nodes (only parent runs the bot)
+            if "channels" in cfg:
+                cfg["channels"]["discord"] = {"enabled": False, "token": "", "allowed_users": []}
             cfg_text = yaml.dump(cfg, default_flow_style=False, allow_unicode=True)
             _add_string_to_tar(tar, "config/default.yaml", cfg_text)
 

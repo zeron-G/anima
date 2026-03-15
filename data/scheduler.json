@@ -8,8 +8,8 @@
       "enabled": true,
       "recurring": true,
       "timeout_s": 120,
-      "last_run": 1773569103.9572387,
-      "next_run": 1773569400.0,
+      "last_run": 1773570902.8631797,
+      "next_run": 1773571200.0,
       "created_at": 1773556539.4701304
     },
     {
@@ -32,8 +32,8 @@
       "enabled": true,
       "recurring": true,
       "timeout_s": 120,
-      "last_run": 1773568803.7865527,
-      "next_run": 1773569700.0,
+      "last_run": 1773570602.679885,
+      "next_run": 1773571500.0,
       "created_at": 1773557014.579
     },
     {
@@ -59,6 +59,30 @@
       "last_run": 0,
       "next_run": 1773633540.0,
       "created_at": 1773557014.5794992
+    },
+    {
+      "id": "cron_ef6c2c175c52",
+      "name": "test-job",
+      "cron_expr": "*/1 * * * *",
+      "prompt": "test prompt",
+      "enabled": false,
+      "recurring": false,
+      "timeout_s": 120,
+      "last_run": 1773569671.2379427,
+      "next_run": 1773569670.2379427,
+      "created_at": 1773569671.2374427
+    },
+    {
+      "id": "cron_8c6cbd55d961",
+      "name": "test-job",
+      "cron_expr": "*/1 * * * *",
+      "prompt": "test prompt",
+      "enabled": false,
+      "recurring": false,
+      "timeout_s": 120,
+      "last_run": 1773569682.8824568,
+      "next_run": 1773569681.8824568,
+      "created_at": 1773569682.8814569
     }
   ]
 }

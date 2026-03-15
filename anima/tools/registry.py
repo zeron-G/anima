@@ -42,6 +42,7 @@ class ToolRegistry:
         from anima.tools.builtin.search import get_search_tools
         from anima.tools.builtin.edit import get_edit_tool
         from anima.tools.builtin.scheduler_tools import get_scheduler_tools
+        from anima.tools.builtin.remote import get_remote_tool
 
         self.register(get_shell_tool())
         for tool in get_file_tools():
@@ -58,3 +59,4 @@ class ToolRegistry:
         self.register(get_edit_tool())
         for tool in get_scheduler_tools():
             self.register(tool)
+        self.register(get_remote_tool())

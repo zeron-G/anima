@@ -39,6 +39,7 @@ async def run() -> None:
             pass
 
     # Import here to avoid circular imports at module level
+    from anima.models.event import Event, EventType, EventPriority
     from anima.core.event_queue import EventQueue
     from anima.perception.snapshot_cache import SnapshotCache
     from anima.perception.diff_engine import DiffEngine
@@ -81,6 +82,12 @@ async def run() -> None:
 
     tool_registry = ToolRegistry()
     tool_registry.register_builtins()
+
+    # Register known remote nodes for cross-node communication
+    from anima.tools.builtin.remote import register_node
+    for node_cfg in get("network.remote_nodes", []):
+        register_node(node_cfg["name"], node_cfg["host"], node_cfg["user"], node_cfg["password"])
+
     tool_executor = ToolExecutor(
         registry=tool_registry,
         max_risk=get("tools.safety.max_risk_level", 3),

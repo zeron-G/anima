@@ -33,6 +33,23 @@
       "id": "anima-spawn-75d965f5",
       "joined_at": 1773569033.4146743,
       "status": "alive"
+    },
+    {
+      "id": "anima-spawn-b0cdc953",
+      "joined_at": 1773569751.8714392,
+      "status": "dead",
+      "dead_since": 1773570887.0322158
+    },
+    {
+      "id": "anima-spawn-9e387b45",
+      "joined_at": 1773570897.0343902,
+      "status": "dead",
+      "dead_since": 1773570987.0505157
+    },
+    {
+      "id": "anima-spawn-1de968f7",
+      "joined_at": 1773570927.0387228,
+      "status": "alive"
     }
   ],
   "created_at": 1773562120.4109602

@@ -94,6 +94,11 @@ network:
   gossip_interval_s: 5
   suspect_phi: 8
   dead_phi: 16
+  remote_nodes:
+    - name: "laptop"
+      host: "100.109.112.90"
+      user: "29502"
+      password: "***REDACTED***"
 
 # Communication Channels
 channels:
