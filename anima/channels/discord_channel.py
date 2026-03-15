@@ -42,6 +42,9 @@ class DiscordChannel(BaseChannel):
         self._inbox: queue.Queue = queue.Queue()  # Discord → ANIMA
         self._response_targets: dict[str, int] = {}  # session_id → channel_id
 
+        # Typing indicator tasks: channel_id → asyncio.Task
+        self._typing_tasks: dict[int, asyncio.Task] = {}
+
     async def start(self) -> None:
         if not self._token:
             log.warning("Discord token not configured, skipping")
@@ -125,6 +128,9 @@ class DiscordChannel(BaseChannel):
             session_id = f"discord:{message.author.id}"
             self._response_targets[session_id] = message.channel.id
 
+            # Start persistent typing indicator immediately
+            await self._start_typing(message.channel.id)
+
             # Put on thread-safe queue (ANIMA polls this)
             self._inbox.put({
                 "text": message.content,
@@ -145,11 +151,47 @@ class DiscordChannel(BaseChannel):
         finally:
             log.info("Discord thread exited (connected=%s)", self._connected)
 
+    async def _start_typing(self, channel_id: int) -> None:
+        """Start a persistent typing indicator loop for a channel (discord loop)."""
+        # Cancel any existing typing task for this channel
+        old = self._typing_tasks.get(channel_id)
+        if old and not old.done():
+            old.cancel()
+
+        async def _typing_loop():
+            channel = self._client.get_channel(channel_id)
+            if channel is None:
+                try:
+                    channel = await self._client.fetch_channel(channel_id)
+                except Exception:
+                    return
+            try:
+                while True:
+                    await channel.trigger_typing()
+                    await asyncio.sleep(8)  # Discord typing lasts ~10s, refresh every 8s
+            except asyncio.CancelledError:
+                pass
+            except Exception as e:
+                log.debug("Typing loop ended: %s", e)
+
+        task = asyncio.ensure_future(_typing_loop())
+        self._typing_tasks[channel_id] = task
+
+    async def _stop_typing(self, channel_id: int) -> None:
+        """Cancel the typing indicator for a channel."""
+        task = self._typing_tasks.pop(channel_id, None)
+        if task and not task.done():
+            task.cancel()
+
     async def _send_in_discord(self, channel_id: int, text: str) -> None:
         """Send message via discord client (runs in discord's event loop)."""
         channel = self._client.get_channel(channel_id)
         if channel is None:
             channel = await self._client.fetch_channel(channel_id)
+
+        # Stop typing indicator before sending
+        await self._stop_typing(channel_id)
+
         # Split long messages
         for i in range(0, len(text), 1900):
             await channel.send(text[i:i + 1900])
