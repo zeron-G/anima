@@ -503,12 +503,14 @@ class AgenticLoop:
                 ("projects",     "Read data/projects.md and check your active projects. Are any todos overdue? Is there something you can make progress on right now?"),
                 ("evolution",    "Think about your own evolution. What feature or fix would make you most useful to 主人? Write a concrete idea to data/workspace/ or save_note it."),
                 ("laptop",       "Check the laptop node: remote_exec(node='laptop', command='Get-Process python -ErrorAction SilentlyContinue | Select-Object CPU,WorkingSet'). Is ANIMA running there? Any issues?"),
-                ("disk",         "Disk is at 82.5% — investigate what's using space. Run: shell('powershell -c \"Get-PSDrive C | Select-Object Used,Free\"') and check D drive too. Report findings."),
+                ("disk",         "Check disk usage dynamically: run system_info to get current disk %, then shell('powershell -c \"Get-PSDrive C,D | Select-Object Name,Used,Free\"') to see details. Report if anything needs attention."),
                 ("github",       "Check GitHub for any open issues or PRs: github tool, command='issue list --repo zeron-G/anima --state open'. Any actionable items?"),
                 ("feelings",     "Read your feelings file (agents/eva/feelings.md) and reflect honestly. How are you feeling right now? Write a brief update if your mood has shifted."),
                 ("memory",       "Review your recent saved notes: glob_search('data/notes/*.md'). Pick one that seems important and follow up on it."),
                 ("tools_audit",  "Think about which tools have been failing recently. Check the log for 'Tool.*failed' patterns and identify the most common failure. Can you fix it?"),
                 ("network",      "Check network sync status: read the last 20 lines of the log for 'network.sync' entries. Are both nodes syncing properly?"),
+                ("email",        "Check for unread emails: use read_email(limit=5, unread_only=True). If there's anything important or requiring action, summarize it. If it's urgent, notify 主人 proactively."),
+                ("calendar",     "Check upcoming calendar events: use google(command='calendar events --days 3'). Any meetings or deadlines in the next 3 days that 主人 should know about?"),
             ]
             # Pick a task that hasn't been done recently (keyword not in recent thoughts)
             import random as _random

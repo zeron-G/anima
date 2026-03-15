@@ -1,9 +1,9 @@
 {
-  "loop_count": 5,
+  "loop_count": 6,
   "status": "proposing",
   "current_loop": {
-    "id": "L0005",
-    "started_at": 1773608070.3703184,
+    "id": "L0006",
+    "started_at": 1773609142.5998394,
     "phase": "propose"
   },
   "history": [
@@ -43,7 +43,17 @@
       "completed_at": 1773607165.8772416,
       "result": "---\n\n**进化 L0004 完成！** 🩰✨\n\n**TYPE:** fix  \n**TITLE:** 工具失败详细日志 + 修复 SELF_THINKING recent_thoughts 提取 bug\n\n**做了两件事：**\n\n**🔧 改动1 — 工具失败日志增强**\n- 之前日志：`Tool shell failed` — 完全不知道发什么命令、为什么失败\n- 现在日志：`Tool shell failed: exit code 1 | cmd='git push origin main'` \n- 失败时从 `log.info` 升为 `log.warning`，一眼就能找到问题\n\n**🐛 改动2 — 修复 SELF_THINKING 防重复机制的根本 bug**\n- 发现 L0003 注入的 recent_self_thoughts 其实根本没用——过滤条件写反了，取的是对用户的回复，不是自思考内容\n- 根因：`[self-thought]` 标记只在 memory_store 里，conversation buffer 里没有区分标记\n- 修复：存入 conversatio",
       "duration_s": 145.5
+    },
+    {
+      "id": "L0005",
+      "started_at": 1773608070.3703184,
+      "phase": "executing",
+      "type": "fix",
+      "title": "** SELF_THINKING 随机任务选择 — 关键词去重替代 tick-based 轮换",
+      "completed_at": 1773608239.5660021,
+      "result": "---\n\n**进化 L0005 完成！** 🩰✨\n\n**TYPE:** optimization  \n**TITLE:** SELF_THINKING 随机任务选择 — 关键词去重替代 tick-based 轮换\n\n**做了什么：**\n\n旧系统：每 ~5 分钟才换一次任务（`tick // 20 % len(tasks)`），而且任务列表里有两个几乎永远无效的任务（workspace 总是空的、Gmail 一直断着）。\n\n新系统：\n- **10 个精心挑选的任务池**：log_errors / projects / evolution / laptop / disk / github / feelings / memory / tools_audit / network\n- **关键词去重**：从最近 4 条 self-thought 里提取文本，如果某个任务的关键词已经出现过，就跳过它\n- **随机选择**：从\"未做过\"的任务里随机选，每次 SELF_THINKING 都有不同目标\n- **兜底逻辑**：如果所有任务都做过了，随机选一个（不会卡死）\n\n**测试：** 110 pass",
+      "duration_s": 169.2
     }
   ],
-  "last_loop_at": 1773608070.3703184
+  "last_loop_at": 1773609142.5998394
 }
