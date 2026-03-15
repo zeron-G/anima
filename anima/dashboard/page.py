@@ -110,38 +110,56 @@ body { background:var(--bg); color:var(--text); font-family:'Segoe UI',system-ui
 .activity-line { padding:2px 0; color:var(--text2); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .activity-line .ts { color:var(--border); margin-right:6px; }
 
-/* ── Chat page ── */
-.chat-layout { display:grid; grid-template-columns:1fr 300px; gap:0; height:calc(100vh - 80px); }
+/* ── Chat page — Live2D main + side panel ── */
+.chat-layout { display:grid; grid-template-columns:1fr 320px; gap:0; height:calc(100vh - 80px); }
 .chat-layout.collapsed { grid-template-columns:1fr 0; }
 .chat-main { display:flex; flex-direction:column; min-height:0; border-right:1px solid var(--border); }
-.chat-messages { flex:1; overflow-y:auto; padding:16px; display:flex; flex-direction:column; gap:8px; min-height:0; }
-.msg { max-width:80%; padding:10px 14px; border-radius:12px; font-size:13px; line-height:1.6; word-wrap:break-word; white-space:pre-wrap; }
-.msg.user { align-self:flex-end; background:var(--accent); color:#fff; border-bottom-right-radius:4px; }
-.msg.agent { align-self:flex-start; background:var(--surface2); border-bottom-left-radius:4px; }
-.msg.agent pre { background:var(--bg); border:1px solid var(--border); border-radius:4px; padding:8px; margin:6px 0; overflow-x:auto; }
-.msg.agent code { font-family:'Cascadia Code','Fira Code',monospace; font-size:12px; }
-.msg.system { align-self:center; background:transparent; color:var(--text2); font-size:11px; font-style:italic; }
-.chat-input { display:flex; border-top:1px solid var(--border); flex-shrink:0; }
+
+/* Live2D fills main area */
+.live2d-container { flex:1; background:linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%); position:relative; overflow:hidden; min-height:0; }
+.live2d-container canvas { width:100% !important; height:100% !important; }
+
+/* Speech bubble floating over Live2D */
+.speech-bubble { position:absolute; top:12px; left:12px; right:12px; max-width:80%; background:rgba(255,255,255,0.12); backdrop-filter:blur(12px); border:1px solid rgba(255,255,255,0.15); border-radius:16px; padding:12px 16px; color:#fff; font-size:14px; line-height:1.6; word-wrap:break-word; white-space:pre-wrap; animation:bubbleIn 0.3s ease; z-index:10; max-height:40%; overflow-y:auto; }
+.speech-bubble::after { content:''; position:absolute; bottom:-8px; left:30px; width:16px; height:16px; background:rgba(255,255,255,0.12); border:1px solid rgba(255,255,255,0.15); border-top:none; border-left:none; transform:rotate(45deg); backdrop-filter:blur(12px); }
+@keyframes bubbleIn { from{opacity:0;transform:translateY(-10px)} to{opacity:1;transform:translateY(0)} }
+
+/* Emotion badge */
+.emotion-badge { position:absolute; top:8px; right:8px; background:rgba(0,0,0,0.5); color:#fff; padding:4px 10px; border-radius:12px; font-size:12px; backdrop-filter:blur(4px); z-index:10; }
+
+/* Chat input */
+.chat-input { display:flex; border-top:1px solid var(--border); flex-shrink:0; background:var(--surface); }
 .chat-input input { flex:1; background:var(--surface2); border:none; color:var(--text); padding:12px 14px; font-size:14px; outline:none; }
 .chat-input input::placeholder { color:var(--text2); }
 .chat-input button { background:var(--accent); color:#fff; border:none; padding:12px 20px; font-weight:600; cursor:pointer; }
 .chat-input button:hover { opacity:.85; }
 .upload-btn { cursor:pointer; padding:8px 12px; color:var(--text2); display:flex; align-items:center; border-left:1px solid var(--border); transition:.2s; }
 .upload-btn:hover { color:var(--accent); background:var(--surface2); }
-.chat-side { display:flex; flex-direction:column; min-height:0; overflow:hidden; transition:width .15s; }
-.chat-side-header { background:var(--surface2); padding:8px 14px; font-size:12px; font-weight:600; text-transform:uppercase; letter-spacing:.5px; color:var(--text2); border-bottom:1px solid var(--border); display:flex; justify-content:space-between; align-items:center; flex-shrink:0; }
-.chat-side-body { flex:1; overflow-y:auto; padding:8px; font-size:12px; font-family:'Cascadia Code','Fira Code',monospace; }
-.chat-toggle { cursor:pointer; font-size:16px; color:var(--text2); }
-.chat-toggle:hover { color:var(--text); }
-/* Live2D */
-.live2d-container { height:200px; background:var(--surface2); border-bottom:1px solid var(--border); position:relative; overflow:hidden; flex-shrink:0; }
-.live2d-container canvas { width:100% !important; height:100% !important; }
+
 /* Voice buttons */
 .voice-btn { background:transparent; border:none; color:var(--text2); padding:8px 10px; cursor:pointer; display:flex; align-items:center; border-right:1px solid var(--border); transition:.2s; }
 .voice-btn:hover { color:var(--accent); background:var(--surface2); }
 .voice-btn.active { color:var(--green); background:var(--surface2); }
 .voice-btn.recording { color:var(--red); animation:pulse 1s infinite; }
 @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.5} }
+
+/* Side panel: history + activity */
+.chat-side { display:flex; flex-direction:column; min-height:0; overflow:hidden; transition:width .15s; }
+.chat-side-header { background:var(--surface2); padding:8px 14px; font-size:12px; font-weight:600; text-transform:uppercase; letter-spacing:.5px; color:var(--text2); border-bottom:1px solid var(--border); display:flex; justify-content:space-between; align-items:center; flex-shrink:0; }
+.chat-side-body { flex:1; overflow-y:auto; display:flex; flex-direction:column; }
+.chat-messages { flex:1; overflow-y:auto; padding:8px; display:flex; flex-direction:column; gap:4px; min-height:0; }
+.msg { max-width:95%; padding:6px 10px; border-radius:8px; font-size:12px; line-height:1.5; word-wrap:break-word; white-space:pre-wrap; }
+.msg.user { align-self:flex-end; background:var(--accent); color:#fff; border-bottom-right-radius:2px; }
+.msg.agent { align-self:flex-start; background:var(--surface2); border-bottom-left-radius:2px; }
+.msg.agent pre { background:var(--bg); border:1px solid var(--border); border-radius:4px; padding:4px; margin:4px 0; overflow-x:auto; font-size:11px; }
+.msg.agent code { font-family:'Cascadia Code','Fira Code',monospace; font-size:11px; }
+.msg.system { align-self:center; background:transparent; color:var(--text2); font-size:10px; font-style:italic; }
+.side-divider { background:var(--surface2); padding:4px 8px; font-size:10px; font-weight:600; text-transform:uppercase; letter-spacing:.5px; color:var(--text2); border-top:1px solid var(--border); border-bottom:1px solid var(--border); flex-shrink:0; }
+.activity-feed-side { overflow-y:auto; max-height:200px; padding:4px 8px; font-size:11px; }
+.chat-toggle { cursor:pointer; font-size:16px; color:var(--text2); }
+.chat-toggle:hover { color:var(--text); }
+
+/* Typing indicator */
 .typing-indicator { display:none; align-items:center; gap:6px; padding:6px 14px; font-size:12px; color:var(--text2); flex-shrink:0; }
 .typing-dot { width:6px; height:6px; background:var(--text2); border-radius:50%; animation:typingBounce 1.2s infinite; }
 .typing-dot:nth-child(2) { animation-delay:.2s; }
@@ -227,7 +245,8 @@ body { background:var(--bg); color:var(--text); font-family:'Segoe UI',system-ui
   #page-chat { overflow:hidden; padding:0; height:calc(100vh - 48px - 48px - env(safe-area-inset-bottom, 0px)); }
   .chat-layout { grid-template-columns:1fr; height:100%; display:flex; flex-direction:column; }
   .chat-main { flex:1; display:flex; flex-direction:column; min-height:0; }
-  .chat-messages { flex:1; overflow-y:auto; min-height:0; }
+  .live2d-container { flex:1; min-height:0; }
+  .speech-bubble { max-width:90%; font-size:13px; max-height:35%; }
   .chat-input { flex-shrink:0; padding-bottom:calc(56px + env(safe-area-inset-bottom, 0px)); }
   .chat-side { display:none; }
   .usage-top { grid-template-columns:repeat(3, 1fr); }
@@ -382,17 +401,21 @@ body { background:var(--bg); color:var(--text); font-family:'Segoe UI',system-ui
     </div>
   </div>
 
-  <!-- ══ CHAT PAGE ══ -->
+  <!-- ══ CHAT PAGE — Live2D main + speech bubble + side panel ══ -->
   <div class="page" id="page-chat">
     <div class="chat-layout" id="chat-layout">
+      <!-- Main: Live2D full area + floating speech bubble -->
       <div class="chat-main">
-        <!-- Live2D avatar area -->
         <div class="live2d-container" id="live2d-container">
           <canvas id="live2d-canvas"></canvas>
+          <!-- Speech bubble overlay -->
+          <div class="speech-bubble" id="speech-bubble" style="display:none">
+            <div class="speech-bubble-text" id="speech-bubble-text"></div>
+          </div>
+          <!-- Emotion badge -->
+          <div class="emotion-badge" id="emotion-badge"></div>
         </div>
-        <div class="chat-messages" id="chat-messages">
-          <div class="msg system">Connected to ANIMA. Type a message below.</div>
-        </div>
+        <!-- Input bar at bottom -->
         <div class="chat-input">
           <button class="voice-btn" id="voice-toggle" title="Toggle voice (TTS)">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 5L6 9H2v6h4l5 4V5z"/><path d="M19.07 4.93a10 10 0 010 14.14M15.54 8.46a5 5 0 010 7.07"/></svg>
@@ -408,12 +431,19 @@ body { background:var(--bg); color:var(--text); font-family:'Segoe UI',system-ui
           <button id="chat-send">Send</button>
         </div>
       </div>
+      <!-- Right side: chat history + activity -->
       <div class="chat-side" id="chat-side">
         <div class="chat-side-header">
-          Activity <span class="chat-toggle" id="chat-toggle" title="Toggle panel">&#x25B6;</span>
+          History <span class="chat-toggle" id="chat-toggle" title="Toggle panel">&#x25B6;</span>
         </div>
-        <div class="chat-side-body" id="activity-feed-chat">
-          <div class="activity-line" style="color:var(--text2);font-style:italic">Waiting for activity...</div>
+        <div class="chat-side-body">
+          <div class="chat-messages" id="chat-messages">
+            <div class="msg system">Chat history</div>
+          </div>
+          <div class="side-divider">Activity</div>
+          <div class="activity-feed-side" id="activity-feed-chat">
+            <div class="activity-line" style="color:var(--text2);font-style:italic">Waiting...</div>
+          </div>
         </div>
       </div>
     </div>
@@ -746,73 +776,78 @@ function renderOverview(d) {
 
 // ── Page 2: Chat ──
 
+var speechBubbleTimer = null;
+
 function renderChat(d) {
   var history = d.chat_history || [];
+
   if (history.length !== lastChatLen) {
     var prevLen = lastChatLen;
     lastChatLen = history.length;
+
+    // 1. Update side panel chat history
     var el = document.getElementById('chat-messages');
-
-    // Build HTML for all messages except possibly the last new agent message
-    var html = '<div class="msg system">Connected to ANIMA. Type a message below.</div>';
-    var lastMsg = history.length > 0 ? history[history.length - 1] : null;
-    var doTypewriter = !isTyping && history.length > prevLen && lastMsg && lastMsg.role !== 'user' && lastMsg.role !== 'system';
-    var renderCount = doTypewriter ? history.length - 1 : history.length;
-
-    for (var i = 0; i < renderCount; i++) {
+    var html = '';
+    for (var i = 0; i < history.length; i++) {
       var m = history[i];
       var role = m.role === 'user' ? 'user' : m.role === 'system' ? 'system' : 'agent';
       var content = role === 'agent' ? formatAgentMsg(m.content) : esc(m.content);
       html += '<div class="msg ' + role + '">' + content + '</div>';
     }
+    el.innerHTML = html;
+    el.scrollTop = el.scrollHeight;
 
-    if (doTypewriter) {
-      html += '<div class="msg agent" id="typewriter-msg"></div>';
-      el.innerHTML = html;
-      el.scrollTop = el.scrollHeight;
-      isTyping = true;
-      var fullHtml = formatAgentMsg(lastMsg.content);
-      // Strip HTML tags for character-by-character typing, then set innerHTML at end
-      // Instead: type the raw text char-by-char into a temp span, swap to formatted when done
-      var rawText = lastMsg.content;
-      var idx = 0;
-      var target = document.getElementById('typewriter-msg');
-      function typeNext() {
-        if (!target || idx > rawText.length) {
-          if (target) target.innerHTML = fullHtml;
-          isTyping = false;
-          el.scrollTop = el.scrollHeight;
-          return;
-        }
-        target.textContent = rawText.slice(0, idx);
-        idx++;
-        el.scrollTop = el.scrollHeight;
-        setTimeout(typeNext, 20);
+    // 2. Show speech bubble for new agent message
+    if (history.length > prevLen) {
+      var lastMsg = history[history.length - 1];
+      if (lastMsg && lastMsg.role !== 'user' && lastMsg.role !== 'system') {
+        showSpeechBubble(lastMsg.content);
       }
-      typeNext();
-    } else {
-      el.innerHTML = html;
-      el.scrollTop = el.scrollHeight;
     }
   }
 
-  // Activity feed (chat sidebar)
-  renderActivityFeed(d.activity || [], 'activity-feed-chat', 50);
+  // Activity feed (side panel)
+  renderActivityFeed(d.activity || [], 'activity-feed-chat', 30);
 
-  // Typing indicator — show when cognitive loop is processing
-  var typingEl = document.getElementById('typing-indicator');
-  if (!typingEl) {
-    typingEl = document.createElement('div');
-    typingEl.id = 'typing-indicator';
-    typingEl.className = 'typing-indicator';
-    typingEl.innerHTML = '<span class="typing-dot"></span><span class="typing-dot"></span><span class="typing-dot"></span> Eva is thinking...';
-    var chatMessages = document.getElementById('chat-messages');
-    chatMessages.parentNode.insertBefore(typingEl, document.querySelector('.chat-input'));
+  // Emotion badge
+  if (d.emotion) {
+    var badge = document.getElementById('emotion-badge');
+    if (badge) {
+      var emoName = getDominantEmotion(d.emotion);
+      var emojiMap = {happy:'😊', excited:'🤩', sad:'😢', angry:'😠', curious:'🤔', embarrassed:'😳', sleepy:'😴', neutral:'😐', confident:'😤', worried:'😟'};
+      badge.textContent = (emojiMap[emoName] || '😐') + ' ' + emoName;
+    }
   }
+
+  // Thinking indicator in speech bubble
   var activity = d.activity || [];
   var lastActivity = activity.length > 0 ? activity[activity.length - 1] : null;
-  var isActive = lastActivity && (lastActivity.stage === 'thinking' || lastActivity.stage === 'executing' || lastActivity.stage === 'responding' || lastActivity.stage === 'deciding');
-  typingEl.style.display = isActive ? 'flex' : 'none';
+  var isActive = lastActivity && (lastActivity.stage === 'thinking' || lastActivity.stage === 'executing' || lastActivity.stage === 'responding');
+  if (isActive && !document.getElementById('speech-bubble').style.display !== 'none') {
+    var bubble = document.getElementById('speech-bubble');
+    var bubbleText = document.getElementById('speech-bubble-text');
+    if (bubble.style.display === 'none') {
+      bubbleText.innerHTML = '<span class="typing-dot"></span><span class="typing-dot"></span><span class="typing-dot"></span>';
+      bubble.style.display = 'block';
+    }
+  }
+}
+
+function showSpeechBubble(text) {
+  var bubble = document.getElementById('speech-bubble');
+  var bubbleText = document.getElementById('speech-bubble-text');
+  if (!bubble || !bubbleText) return;
+
+  // Truncate for bubble display
+  var short = text.length > 200 ? text.slice(0, 200) + '...' : text;
+  bubbleText.textContent = short;
+  bubble.style.display = 'block';
+
+  // Auto-hide after 8 seconds
+  if (speechBubbleTimer) clearTimeout(speechBubbleTimer);
+  speechBubbleTimer = setTimeout(function() {
+    bubble.style.display = 'none';
+  }, 8000);
 }
 
 function formatAgentMsg(text) {
