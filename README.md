@@ -1,56 +1,151 @@
-# ANIMA
+[English](README.md) | [中文](README_ZH.md)
 
-**A heartbeat-driven autonomous AI life system with pluggable agent personas.**
+# PROJECT ANIMA
 
-ANIMA is a platform for persistent AI entities. It provides the heartbeat engine, agentic loop, memory, tools, and multi-agent orchestration. The agent persona (personality, speech, emotional memory) is fully customizable.
+**A heartbeat-driven, distributed, self-evolving AI life system.**
 
-Currently ships with **EVA** — a tsundere ballet angel AI companion.
-
-[中文文档](#anima-中文文档)
+> *ANIMA* — Latin for "soul". Not another chatbot framework.
 
 ---
 
-## What makes ANIMA different
+## The Problem: Why Current AI Agents Are Not Enough
 
-| vs Claude Code | vs ChatGPT | vs OpenClaw |
-|---|---|---|
-| Runs **continuously** — heartbeat, not conversations | Has **persistent memory** across sessions | Has **pluggable personas** — not tied to one identity |
-| **Self-driving** — proactively scans environment | Can **use tools** autonomously (shell, files, web) | **Multi-agent** orchestration with hierarchy |
-| **Emotional state** that evolves over time | Runs **locally** on your machine | **Dashboard** with real-time monitoring |
-
-## Architecture
+Every AI agent framework in 2025-2026 shares the same fundamental limitation: **they are all passive-reactive systems.**
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│  ANIMA Platform                                         │
-│                                                         │
-│  ┌─────────┐  ┌──────────────┐  ┌───────────────────┐  │
-│  │Heartbeat│  │ Agentic Loop │  │   Agent Manager   │  │
-│  │ Engine  │──│  (LLM+Tools) │──│ internal/cli/shell│  │
-│  │ 15s/5m  │  │  multi-turn  │  │  parallel spawn   │  │
-│  └────┬────┘  └──────┬───────┘  └───────────────────┘  │
-│       │              │                                   │
-│  ┌────┴────┐  ┌──────┴───────┐  ┌───────────────────┐  │
-│  │Snapshot │  │  13 Tools    │  │    Dashboard      │  │
-│  │ Cache   │  │ shell/files/ │  │  WebSocket SPA    │  │
-│  │CPU/Mem/ │  │ web/agents/  │  │  http://...:8420  │  │
-│  │  Disk   │  │ claude_code  │  └───────────────────┘  │
-│  └─────────┘  └──────────────┘                          │
-│                                                         │
-│  ┌──────────┐  ┌─────────┐  ┌────────────────────────┐ │
-│  │ SQLite   │  │Emotion  │  │   Agent Persona        │ │
-│  │ Memory   │  │ State   │  │   agents/eva/soul.md   │ │
-│  │chat/usage│  │ 4D+decay│  │   agents/eva/feelings  │ │
-│  └──────────┘  └─────────┘  └────────────────────────┘ │
-└─────────────────────────────────────────────────────────┘
+User sends message -> Agent processes -> Returns response -> Waits for next message
 ```
+
+Close the terminal, and the agent dies. It never observes anything on its own, never discovers problems you haven't asked about, never learns while you sleep. This is not an intelligent agent. It is an auto-responder.
+
+This is not a missing feature that can be patched. The entire data flow of passive systems assumes "input comes from the user" — context management, memory structures, tool invocation, everything. Building autonomous behavior on top of a passive architecture is like constructing a building that needs an active foundation on passive ground. The foundation is wrong.
+
+## The Core Question
+
+**If AI is not a tool waiting for commands, but a continuously running life form, what would it look like?**
+
+It would operate like a biological organism:
+
+- It has a **heartbeat** — continuously perceiving the world and reacting
+- It has a **nervous system** — distributed nodes sharing senses and consciousness
+- It **self-heals** — automatic recovery when nodes fail
+- It **evolves** — learns, creates tools, optimizes itself
+- It has a **body** — reaches into the physical world through smart home devices and robots
+- It has **personality** — develops unique interaction styles over time
+
+## Five Design Principles
+
+### 1. One Loop to Rule Them All
+
+All inputs — user messages, sensor data, timers, node broadcasts — enter the same event queue, processed by the same cognitive loop. A user saying "check the weather" and a temperature sensor reporting 35C are the same thing to ANIMA: an event that needs perception and response. One brain, one state, zero synchronization problems.
+
+### 2. Heartbeat = Life
+
+A multi-tier biological clock keeps ANIMA alive without burning tokens. Low-level heartbeats (1s/15s) are pure scripts checking "did anything happen?" — zero LLM cost. Mid-level heartbeats (1min/5min) use rule engines. High-level heartbeats (30min/1h) invoke real thinking, but infrequently. Daily LLM cost target: ~$1.50.
+
+### 3. "No Change, No Thought"
+
+Before every heartbeat invokes the LLM, a pure-script diff check runs: what changed since last time? If nothing changed, skip. This reduces actual daily LLM calls from a theoretical 86,400+ to approximately 50-70. Cost reduction: over 1000x.
+
+### 4. Nodes = Organs
+
+Every ANIMA node runs the same core code (heartbeat engine, cognitive loop, memory, communication). Different nodes differ only in configuration: which heartbeat tiers to run, which tools to register, which sensors to connect. A Raspberry Pi controlling an air conditioner and a PC running shell commands are architecturally identical.
+
+### 5. Privacy First, Local First
+
+All data stays local by default. Sensor data, behavior patterns, ANIMA's memories — everything on your own hardware. Cloud LLMs (Claude/GPT) are optional enhancements, not requirements. ANIMA can run fully offline with local models.
+
+## Comparison with Existing Paradigms
+
+| Dimension | Traditional AI Agent | ANIMA |
+|-----------|---------------------|-------|
+| Runtime | Passive: user input -> AI output | Autonomous: heartbeat-driven continuous cognition |
+| Lifecycle | Session-level: dies when you close the window | Persistent: 7x24, sleeps but never stops |
+| User input | Only input source | One of many event types |
+| Architecture | Monolithic single process | Distributed multi-node mesh |
+| Fault tolerance | Crash = stop | Self-healing: 5-level hot repair + node takeover |
+| Evolution | Static: manual developer updates only | Self-evolving: learns, creates tools, optimizes code |
+| Physical presence | Pure software | Embodied: robots + smart home + environment control |
+| Cost model | Every interaction calls LLM | "No change, no thought": 90%+ heartbeats need no LLM |
+
+## Architecture (Phase 0 — Current)
+
+```
++---------------------------------------------------------+
+|  ANIMA Platform                                         |
+|                                                         |
+|  +---------+  +--------------+  +-------------------+  |
+|  |Heartbeat|  | Agentic Loop |  |   Agent Manager   |  |
+|  | Engine  |--|  (LLM+Tools) |--|internal/cli/shell |  |
+|  | 15s/5m  |  |  multi-turn  |  | parallel spawn    |  |
+|  +----+----+  +------+-------+  +-------------------+  |
+|       |              |                                  |
+|  +----+----+  +------+-------+  +-------------------+  |
+|  |Snapshot |  |  13 Tools    |  |    Dashboard      |  |
+|  | Cache   |  | shell/files/ |  |  WebSocket SPA    |  |
+|  |CPU/Mem/ |  | web/agents/  |  | http://...:8420   |  |
+|  |  Disk   |  | claude_code  |  +-------------------+  |
+|  +---------+  +--------------+                          |
+|                                                         |
+|  +----------+  +---------+  +------------------------+  |
+|  | SQLite   |  |Emotion  |  |   Agent Persona        | |
+|  | Memory   |  | State   |  |  agents/eva/soul.md    | |
+|  |chat/usage|  | 4D+decay|  |  agents/eva/feelings   | |
+|  +----------+  +---------+  +------------------------+  |
++---------------------------------------------------------+
+```
+
+## Phase 0 — What's Implemented Now
+
+ANIMA Phase 0 is a fully functional single-node autonomous AI system:
+
+**AgenticLoop** — An LLM-native agentic loop. The LLM receives the full context (system state, events, memory, tools) and decides what to do in a multi-turn reasoning cycle. Not a rigid PODAR pipeline, but a flexible agent that thinks and acts in natural loops.
+
+**13 Built-in Tools:**
+
+| Tool | Description | Risk |
+|------|-------------|------|
+| `shell` | Execute shell commands | HIGH |
+| `read_file` | Read file contents | SAFE |
+| `write_file` | Write file contents | MEDIUM |
+| `list_directory` | List directory contents | SAFE |
+| `system_info` | CPU, memory, disk, OS info | SAFE |
+| `get_datetime` | Current date/time | SAFE |
+| `save_note` | Save observation to notes | LOW |
+| `web_fetch` | HTTP GET any URL | LOW |
+| `claude_code` | Delegate to Claude Code CLI | MEDIUM |
+| `spawn_agent` | Spawn sub-agent (internal/claude_code/shell) | HIGH |
+| `check_agent` | Check sub-agent status | SAFE |
+| `wait_agent` | Wait for sub-agent completion | SAFE |
+| `list_agents` | List all agent sessions | SAFE |
+
+**Multi-Agent Orchestration:**
+
+```
+Eva (main loop)
++-- spawn_agent(type="internal")     -> Sub-agent with own LLM loop + all tools
++-- spawn_agent(type="claude_code")  -> Full Claude Code CLI instance
++-- spawn_agent(type="shell")        -> Shell subprocess
+```
+
+- Internal agents run independent LLM reasoning loops with full tool access
+- Tools execute in parallel via `asyncio.gather`
+- Main event loop stays non-blocking
+
+**Dashboard** — 4-page SPA at `http://localhost:8420`:
+- Overview: heartbeat pulse, system metrics, emotion bars, activity feed
+- Chat: full chat with markdown rendering and file upload
+- Usage: token tracking by model/provider/day
+- Settings: hot-switch models, auth info, tool list, controls
+
+**Other systems:** OAuth auto-discovery (Claude Code local credentials), persistent memory (SQLite), 4D emotion state (engagement/confidence/curiosity/concern with decay), pluggable agent personas (ships with EVA).
 
 ## Quick Start
 
 ### Prerequisites
 
 - Python 3.11+
-- One of: Claude Code login (`claude login`) / OAuth Token / Anthropic API Key
+- One of: Claude Code login / OAuth Token / Anthropic API Key
 
 ### Install
 
@@ -58,7 +153,7 @@ Currently ships with **EVA** — a tsundere ballet angel AI companion.
 git clone https://github.com/your-username/anima.git
 cd anima
 
-# Create environment (conda or venv)
+# Create environment
 conda create -n anima python=3.11 -y && conda activate anima
 # or: python -m venv .venv && source .venv/bin/activate
 
@@ -70,8 +165,8 @@ pip install -e ".[dev]"
 ANIMA supports three auth methods (in priority order):
 
 | Priority | Method | How |
-|---|---|---|
-| 1 | Claude Code OAuth | Just run `claude login` — ANIMA auto-discovers the token |
+|----------|--------|-----|
+| 1 | Claude Code OAuth | Run `claude login` — ANIMA auto-discovers the token |
 | 2 | OAuth Token | Set `ANTHROPIC_OAUTH_TOKEN` in `.env` |
 | 3 | API Key | Set `ANTHROPIC_API_KEY` in `.env` |
 
@@ -109,7 +204,7 @@ anima/
 │   ├── llm/
 │   │   ├── providers.py      # Anthropic API (OAuth + API Key, direct HTTP)
 │   │   ├── router.py         # Tier1/Tier2 routing with fallback
-│   │   ├── prompts.py        # Dynamic prompt builder (lean, event-specific)
+│   │   ├── prompts.py        # Dynamic prompt builder
 │   │   └── usage.py          # Usage tracking (persisted to SQLite)
 │   ├── memory/
 │   │   ├── store.py          # SQLite backend (chat, usage, audit, snapshots)
@@ -118,13 +213,13 @@ anima/
 │   │   ├── system_monitor.py # CPU/memory/disk sampling
 │   │   ├── file_watcher.py   # File change detection (polling)
 │   │   ├── diff_engine.py    # Field-level threshold diffs
-│   │   └── snapshot_cache.py # Heartbeat→cognitive bridge
+│   │   └── snapshot_cache.py # Heartbeat-to-cognitive bridge
 │   ├── tools/
 │   │   ├── builtin/          # 13 tools: shell, files, web, agents, claude_code
 │   │   ├── executor.py       # Tool execution with safety checks
 │   │   ├── registry.py       # Tool registration
 │   │   └── safety.py         # Command risk assessment
-│   ├── emotion/state.py      # 4D emotion (engagement/confidence/curiosity/concern)
+│   ├── emotion/state.py      # 4D emotion state with decay
 │   ├── dashboard/            # Web UI (aiohttp + WebSocket SPA)
 │   ├── ui/terminal.py        # Rich terminal with markdown rendering
 │   ├── models/               # Data models (Event, MemoryItem, ToolSpec)
@@ -137,176 +232,63 @@ anima/
 ├── config/
 │   └── default.yaml          # Runtime configuration
 ├── prompts/                  # Platform prompt templates
-│   ├── system_identity.md    # Operational rules (tool usage, output format)
-│   ├── decide.md             # Decision prompt (legacy)
-│   └── reflect.md            # Reflection prompt
 ├── data/                     # Runtime data (gitignored)
-│   ├── anima.db              # SQLite (chat, usage, audit)
-│   ├── workspace/            # Agent's working directory
-│   ├── uploads/              # User-uploaded files
-│   ├── logs/                 # Log files
-│   └── user_profile.md       # Learned user preferences
+├── docs/
+│   └── deep_analysis_v3.md   # Full technical design document
 ├── tests/                    # 70 tests
 ├── .env.example              # Auth configuration template
-├── pyproject.toml            # Package config
-└── README.md
+└── pyproject.toml            # Package config
 ```
 
-## Tools (13)
-
-| Tool | Description | Risk |
-|---|---|---|
-| `shell` | Execute shell commands (Python on PATH) | HIGH |
-| `read_file` | Read file contents | SAFE |
-| `write_file` | Write file contents | MEDIUM |
-| `list_directory` | List directory contents | SAFE |
-| `system_info` | CPU, memory, disk, OS info | SAFE |
-| `get_datetime` | Current date/time | SAFE |
-| `save_note` | Save observation to notes | LOW |
-| `web_fetch` | HTTP GET any URL | LOW |
-| `claude_code` | Delegate to Claude Code CLI | MEDIUM |
-| `spawn_agent` | Spawn sub-agent (internal/claude_code/shell) | HIGH |
-| `check_agent` | Check sub-agent status | SAFE |
-| `wait_agent` | Wait for sub-agent completion | SAFE |
-| `list_agents` | List all agent sessions | SAFE |
-
-## Multi-Agent System
-
-ANIMA can orchestrate sub-agents for parallel/complex work:
-
-```
-Eva (main loop)
-├── spawn_agent(type="internal", prompt="research X")
-│   └── Sub-agent: own LLM loop + all tools, focused task
-├── spawn_agent(type="claude_code", prompt="refactor Y")
-│   └── Claude Code CLI: full Claude instance
-└── spawn_agent(type="shell", prompt="python script.py")
-    └── Shell subprocess
-```
-
-- `internal` agents run their own LLM agentic loop with ANIMA's tools
-- Tools execute in parallel (`asyncio.gather`)
-- Event loop is non-blocking — Eva stays responsive while agents work
-
-## Dashboard
-
-4-page SPA at `http://localhost:8420`:
-
-- **Overview** — Heartbeat pulse, system metrics, emotion bars, activity feed
-- **Chat** — Full chat with markdown rendering, file upload
-- **Usage** — Token tracking by model/provider/day, sortable history
-- **Settings** — Hot-switch models, auth info, tools, controls
-
-## Creating a New Agent
+## Creating a New Agent Persona
 
 ```bash
 mkdir agents/my_agent
 ```
 
-Create `agents/my_agent/soul.md`:
-```markdown
-# My Agent
+Create `agents/my_agent/soul.md` with personality definition, then set in `config/default.yaml`:
 
-I am MyAgent. I speak formally and focus on productivity.
-
-## Core traits
-- Professional and precise
-- Data-driven decision making
-```
-
-Set in `config/default.yaml`:
 ```yaml
 agent:
   name: "my_agent"
 ```
 
+## Roadmap
+
+| Phase | Name | Goal | Timeline |
+|-------|------|------|----------|
+| **0** | **First Heartbeat** | Single-node autonomous AI with agentic loop, tools, dashboard | **5-7 weeks** |
+| 1 | First Conversation | Two-node discovery, heartbeat exchange, task delegation | 5-7 weeks |
+| 2 | First Sight | Terminal + GUI operation with risk assessment | 7-9 weeks |
+| 3 | First Self-Heal | Multi-node mesh, rolling updates, 5-level hot repair | 7-9 weeks |
+| 4 | First Growth | Self-evolution engine: tool forge, safe self-modification | 8-10 weeks |
+| 5 | First Soul | 3D avatar, voice interaction, personality system | 7-9 weeks |
+| 6 | First Walk | Robot integration (PiDog), multi-node sensory fusion | 9-11 weeks |
+| 7 | First Home | Smart space ecosystem: edge nodes + IoT + NAS | 10-12 weeks |
+
+Total estimated timeline: **15-18 months** from Phase 0 to Phase 7.
+
+## Tech Stack
+
+| Purpose | Technology |
+|---------|-----------|
+| Core language | Python 3.11+ (Phase 0-4), TypeScript (Phase 5 frontend), Rust (Phase 6 if needed) |
+| Async runtime | asyncio (stdlib) |
+| LLM provider | Anthropic API (direct HTTP), with OAuth + API Key support |
+| Structured storage | SQLite (stdlib) |
+| Web backend | aiohttp |
+| Web frontend | Vanilla JS SPA + WebSocket |
+| System monitoring | psutil |
+| Future: node comms | ZeroMQ (pyzmq) |
+| Future: node discovery | zeroconf (mDNS) |
+| Future: vector store | ChromaDB |
+
+## License
+
+This project is in active development. License TBD.
+
 ---
 
-# ANIMA 中文文档
+For the complete technical deep-dive into ANIMA's design philosophy, architecture decisions, and long-term vision, see **[docs/deep_analysis_v3.md](docs/deep_analysis_v3.md)**.
 
-**心跳驱动的自主 AI 生命体平台，支持可插拔的智能体人格。**
-
-ANIMA 是持续运行的 AI 实体平台。提供心跳引擎、智能体循环、记忆系统、工具和多智能体编排。智能体人格（性格、语言风格、情感记忆）完全可自定义。
-
-内置智能体：**EVA** — 傲娇芭蕾天使 AI 伴侣。
-
-## 特性
-
-- **持续运行** — 心跳驱动，不是对话式的
-- **自驱动** — 主动扫描环境、检测文件变化、监控系统状态
-- **13 个工具** — Shell、文件操作、网页抓取、Claude Code 委托、多智能体
-- **多智能体编排** — 内部 LLM 子智能体 + Claude Code CLI + Shell 并行执行
-- **持久记忆** — SQLite 存储聊天、使用量、审计日志
-- **情感系统** — 四维情感状态（engagement/confidence/curiosity/concern）
-- **Web 看板** — 4 页 SPA，实时 WebSocket 推送
-- **OAuth 认证** — 自动发现 Claude Code 本地凭证
-
-## 快速开始
-
-```bash
-git clone https://github.com/your-username/anima.git
-cd anima
-conda create -n anima python=3.11 -y && conda activate anima
-pip install -e ".[dev]"
-cp .env.example .env  # 编辑认证配置（或使用 Claude Code 自动发现）
-python -m anima       # 启动，看板在 http://localhost:8420
-```
-
-### 认证方式（三选一，按优先级）
-
-| 优先级 | 方式 | 配置 |
-|---|---|---|
-| 1 | Claude Code OAuth | 运行 `claude login`，ANIMA 自动发现 |
-| 2 | OAuth Token | `.env` 中设置 `ANTHROPIC_OAUTH_TOKEN` |
-| 3 | API Key | `.env` 中设置 `ANTHROPIC_API_KEY` |
-
-### 创建新智能体
-
-```bash
-mkdir agents/你的智能体
-# 编辑 agents/你的智能体/soul.md 定义人格
-# config/default.yaml 中设置 agent.name
-```
-
-## 项目结构
-
-```
-anima/core/cognitive.py    # 智能体循环（LLM + 工具多轮推理）
-anima/core/agents.py       # 多智能体管理（内部/CLI/Shell）
-anima/core/heartbeat.py    # 三级心跳（15s/5min/1h）
-anima/llm/providers.py     # Anthropic API（OAuth + API Key）
-anima/llm/prompts.py       # 动态提示词（按事件类型裁剪）
-anima/memory/store.py      # SQLite 后端
-anima/tools/builtin/       # 13 个内置工具
-anima/dashboard/           # Web 看板（aiohttp + WebSocket）
-agents/eva/                # EVA 人格定义
-config/default.yaml        # 运行时配置
-```
-
-## 多智能体系统
-
-```
-Eva（主循环）
-├── spawn_agent(type="internal") → 内部 LLM 子智能体，拥有全部工具
-├── spawn_agent(type="claude_code") → Claude Code CLI 进程
-└── spawn_agent(type="shell") → Shell 子进程
-```
-
-- 内部智能体运行独立的 LLM 推理循环，可使用 ANIMA 的所有工具
-- 工具并行执行（asyncio.gather）
-- 事件循环不阻塞 — Eva 在子智能体工作时保持响应
-
-## 看板
-
-http://localhost:8420，4 页 SPA：
-
-- **Overview** — 心跳脉冲、系统指标、情感状态、活动流
-- **Chat** — 聊天 + markdown 渲染 + 文件上传
-- **Usage** — Token 按模型/提供商/日期追踪
-- **Settings** — 热切换模型、认证信息、工具列表、控制
-
-## 测试
-
-```bash
-pytest tests/ -v  # 70 个测试
-```
+> *"The first heartbeat is the hardest. After that, ANIMA lives."*
