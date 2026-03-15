@@ -280,10 +280,59 @@ class AgenticLoop:
                     # Parse the proposal and save to state
                     proposal = parse_proposal(last_content)
                     if proposal.get("title"):
-                        evo_state.advance_phase("executing", **proposal)
-                        log.info("Evolution proposal accepted: %s", proposal.get("title"))
+                        # Check if Eva already did the work (combined propose+execute)
+                        # by looking for tool calls in the conversation
+                        tool_calls_made = sum(
+                            1 for m in self._conversation
+                            if m.get("role") == "assistant" and "tool_use" in str(m.get("content", ""))
+                        )
+                        if tool_calls_made > 3:
+                            # Eva did significant work — treat as combined propose+execute
+                            evo_state.advance_phase("executing", **proposal)
+                            evo_state.complete_loop(
+                                result=last_content[:500],
+                                title=proposal.get("title", ""),
+                                evo_type=proposal.get("type", ""),
+                            )
+                            log.info("Evolution combined propose+execute: %s", proposal.get("title"))
+                        else:
+                            evo_state.advance_phase("executing", **proposal)
+                            log.info("Evolution proposal accepted: %s", proposal.get("title"))
                     else:
-                        evo_state.fail_loop("No valid proposal generated")
+                        # No formal proposal found — but Eva may have done the work anyway
+                        # Check if she made git commits or used edit_file
+                        did_work = any(
+                            "edit_file" in str(m.get("content", "")) or
+                            "git commit" in str(m.get("content", "")) or
+                            "shell" in str(m.get("content", ""))
+                            for m in self._conversation
+                            if m.get("role") == "assistant"
+                        )
+                        if did_work:
+                            # Extract title from the response text heuristically
+                            title = ""
+                            for line in last_content.splitlines():
+                                line = line.strip().strip("*#- ")
+                                if "TITLE" in line.upper() and ":" in line:
+                                    title = line.split(":", 1)[1].strip()
+                                    break
+                            if not title:
+                                # Use first non-empty line as title
+                                for line in last_content.splitlines():
+                                    line = line.strip().strip("*#- ")
+                                    if len(line) > 10 and len(line) < 100:
+                                        title = line
+                                        break
+                            title = title or "Autonomous improvement"
+                            evo_state.advance_phase("executing", type="fix", title=title)
+                            evo_state.complete_loop(
+                                result=last_content[:500],
+                                title=title,
+                                evo_type="fix",
+                            )
+                            log.info("Evolution auto-completed (work detected): %s", title)
+                        else:
+                            evo_state.fail_loop("No valid proposal generated")
                 elif phase == "execute":
                     # Execution done — record result
                     evo_state.complete_loop(
