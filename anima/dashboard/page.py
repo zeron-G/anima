@@ -133,6 +133,11 @@ body { background:var(--bg); color:var(--text); font-family:'Segoe UI',system-ui
 .chat-side-body { flex:1; overflow-y:auto; padding:8px; font-size:12px; font-family:'Cascadia Code','Fira Code',monospace; }
 .chat-toggle { cursor:pointer; font-size:16px; color:var(--text2); }
 .chat-toggle:hover { color:var(--text); }
+.typing-indicator { display:none; align-items:center; gap:6px; padding:6px 14px; font-size:12px; color:var(--text2); flex-shrink:0; }
+.typing-dot { width:6px; height:6px; background:var(--text2); border-radius:50%; animation:typingBounce 1.2s infinite; }
+.typing-dot:nth-child(2) { animation-delay:.2s; }
+.typing-dot:nth-child(3) { animation-delay:.4s; }
+@keyframes typingBounce { 0%,80%,100%{opacity:.3;transform:scale(.8)} 40%{opacity:1;transform:scale(1)} }
 
 /* ── Usage page ── */
 .usage-top { display:grid; grid-template-columns:repeat(5, 1fr); gap:12px; margin-bottom:16px; }
@@ -199,16 +204,22 @@ body { background:var(--bg); color:var(--text); font-family:'Segoe UI',system-ui
 
 /* ── Responsive ── */
 @media (max-width:900px) {
-  .sidebar { position:fixed; bottom:0; left:0; top:auto; width:100%; height:48px; flex-direction:row; border-right:none; border-top:1px solid var(--border); }
+  .sidebar { position:fixed; bottom:0; left:0; top:auto; width:100%; height:48px; flex-direction:row; border-right:none; border-top:1px solid var(--border); padding-bottom:env(safe-area-inset-bottom, 0px); z-index:200; }
   .nav-item { flex:1; height:48px; border-left:none; border-top:3px solid transparent; }
   .nav-item.active { border-left-color:transparent; border-top-color:var(--accent); }
   .nav-item .tooltip { display:none; }
   .nav-spacer { display:none; }
   .header { margin-left:0; }
-  .main { margin-left:0; height:calc(100vh - 48px - 48px); }
+  .main { margin-left:0; height:calc(100vh - 48px - 48px - env(safe-area-inset-bottom, 0px)); overflow-y:auto; }
   :root { --sidebar-w:0px; }
-  .overview-grid { grid-template-columns:1fr; }
-  .chat-layout { grid-template-columns:1fr; }
+  .overview-grid { grid-template-columns:1fr; height:auto; padding-bottom:60px; }
+  .overview-left, .overview-right { overflow-y:visible; }
+  .page { overflow-y:auto; height:100%; padding-bottom:calc(16px + env(safe-area-inset-bottom, 0px)); }
+  #page-chat { overflow:hidden; padding:0; height:calc(100vh - 48px - 48px - env(safe-area-inset-bottom, 0px)); }
+  .chat-layout { grid-template-columns:1fr; height:100%; display:flex; flex-direction:column; }
+  .chat-main { flex:1; display:flex; flex-direction:column; min-height:0; }
+  .chat-messages { flex:1; overflow-y:auto; min-height:0; }
+  .chat-input { flex-shrink:0; padding-bottom:calc(56px + env(safe-area-inset-bottom, 0px)); }
   .chat-side { display:none; }
   .usage-top { grid-template-columns:repeat(3, 1fr); }
   .usage-bottom { grid-template-columns:1fr; }
@@ -565,6 +576,7 @@ let ws = null;
 let lastData = null;
 let modelSyncDone = false;
 let lastChatLen = 0;
+let isTyping = false;
 let currentPage = 'overview';
 let usageSortCol = 'timestamp';
 let usageSortAsc = false;
@@ -710,21 +722,70 @@ function renderOverview(d) {
 function renderChat(d) {
   var history = d.chat_history || [];
   if (history.length !== lastChatLen) {
+    var prevLen = lastChatLen;
     lastChatLen = history.length;
     var el = document.getElementById('chat-messages');
+
+    // Build HTML for all messages except possibly the last new agent message
     var html = '<div class="msg system">Connected to ANIMA. Type a message below.</div>';
-    for (var i = 0; i < history.length; i++) {
+    var lastMsg = history.length > 0 ? history[history.length - 1] : null;
+    var doTypewriter = !isTyping && history.length > prevLen && lastMsg && lastMsg.role !== 'user' && lastMsg.role !== 'system';
+    var renderCount = doTypewriter ? history.length - 1 : history.length;
+
+    for (var i = 0; i < renderCount; i++) {
       var m = history[i];
       var role = m.role === 'user' ? 'user' : m.role === 'system' ? 'system' : 'agent';
       var content = role === 'agent' ? formatAgentMsg(m.content) : esc(m.content);
       html += '<div class="msg ' + role + '">' + content + '</div>';
     }
-    el.innerHTML = html;
-    el.scrollTop = el.scrollHeight;
+
+    if (doTypewriter) {
+      html += '<div class="msg agent" id="typewriter-msg"></div>';
+      el.innerHTML = html;
+      el.scrollTop = el.scrollHeight;
+      isTyping = true;
+      var fullHtml = formatAgentMsg(lastMsg.content);
+      // Strip HTML tags for character-by-character typing, then set innerHTML at end
+      // Instead: type the raw text char-by-char into a temp span, swap to formatted when done
+      var rawText = lastMsg.content;
+      var idx = 0;
+      var target = document.getElementById('typewriter-msg');
+      function typeNext() {
+        if (!target || idx > rawText.length) {
+          if (target) target.innerHTML = fullHtml;
+          isTyping = false;
+          el.scrollTop = el.scrollHeight;
+          return;
+        }
+        target.textContent = rawText.slice(0, idx);
+        idx++;
+        el.scrollTop = el.scrollHeight;
+        setTimeout(typeNext, 20);
+      }
+      typeNext();
+    } else {
+      el.innerHTML = html;
+      el.scrollTop = el.scrollHeight;
+    }
   }
 
   // Activity feed (chat sidebar)
   renderActivityFeed(d.activity || [], 'activity-feed-chat', 50);
+
+  // Typing indicator — show when cognitive loop is processing
+  var typingEl = document.getElementById('typing-indicator');
+  if (!typingEl) {
+    typingEl = document.createElement('div');
+    typingEl.id = 'typing-indicator';
+    typingEl.className = 'typing-indicator';
+    typingEl.innerHTML = '<span class="typing-dot"></span><span class="typing-dot"></span><span class="typing-dot"></span> Eva is thinking...';
+    var chatMessages = document.getElementById('chat-messages');
+    chatMessages.parentNode.insertBefore(typingEl, document.querySelector('.chat-input'));
+  }
+  var activity = d.activity || [];
+  var lastActivity = activity.length > 0 ? activity[activity.length - 1] : null;
+  var isActive = lastActivity && (lastActivity.stage === 'thinking' || lastActivity.stage === 'executing' || lastActivity.stage === 'responding' || lastActivity.stage === 'deciding');
+  typingEl.style.display = isActive ? 'flex' : 'none';
 }
 
 function formatAgentMsg(text) {
