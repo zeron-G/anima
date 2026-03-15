@@ -76,6 +76,11 @@ class AgenticLoop:
         self._output_callback: Callable[..., Any] | None = None
         self._status_callback: Callable[[dict], Any] | None = None
         self._current_source: str = ""  # Track event source for response routing
+        self._gossip_mesh = None  # Set via set_gossip_mesh() for delegation results
+
+    def set_gossip_mesh(self, gossip_mesh) -> None:
+        """Set gossip mesh for broadcasting delegation results."""
+        self._gossip_mesh = gossip_mesh
 
     def set_output_callback(self, callback: Callable[[str], Any]) -> None:
         self._output_callback = callback
@@ -119,8 +124,11 @@ class AgenticLoop:
             EventType.STARTUP, EventType.SELF_THINKING, EventType.FOLLOW_UP,
             EventType.FILE_CHANGE, EventType.SYSTEM_ALERT, EventType.SCHEDULED_TASK,
         )
-        log.info("Processing event: %s%s", event.type.name,
-                 " (internal)" if is_self else "")
+        # TASK_DELEGATE is from another node — response goes back via gossip, not terminal
+        is_delegation = event.type == EventType.TASK_DELEGATE
+        log.info("Processing event: %s%s%s", event.type.name,
+                 " (internal)" if is_self else "",
+                 " (delegation)" if is_delegation else "")
 
         # ── Step 1: Try rule engine for cheap events ──
         # FILE_CHANGE, SYSTEM_ALERT, simple greetings → handled without LLM
@@ -163,7 +171,7 @@ class AgenticLoop:
         snapshot = self._snapshot_cache.get_latest()
         system_state = snapshot.get("system_state", {}) if snapshot else {}
         event_type_name = event.type.name
-        needs_tools = event_type_name in ("USER_MESSAGE", "STARTUP", "SELF_THINKING", "SCHEDULED_TASK")
+        needs_tools = event_type_name in ("USER_MESSAGE", "STARTUP", "SELF_THINKING", "SCHEDULED_TASK", "TASK_DELEGATE")
 
         system_prompt = self._prompt_builder.build_for_event(
             event_type_name,
@@ -180,8 +188,9 @@ class AgenticLoop:
 
         tools = self._get_tool_schemas() if needs_tools else []
 
-        # Agentic loop
-        timeout = 60 if is_self else 180
+        # Agentic loop — evolution gets extra time
+        is_evolution = bool(event.payload and event.payload.get("evolution"))
+        timeout = 300 if is_evolution else (60 if is_self else 180)
         start_time = time.time()
         self._emit_status({"stage": "thinking", "detail": f"processing {event_type_name}"})
 
@@ -200,7 +209,23 @@ class AgenticLoop:
             if not tool_calls:
                 # LLM is done
                 if content and content.strip():
-                    if is_self:
+                    if is_delegation:
+                        # Delegation result — broadcast back via gossip, not terminal
+                        self._emit_status({"stage": "delegation_result", "detail": content[:200]})
+                        log.info("Delegation result: %s", content[:100])
+                        self._memory_store.save_memory(
+                            content=f"[delegation-result] {content[:300]}",
+                            type="observation", importance=0.5,
+                        )
+                        if self._gossip_mesh:
+                            from_node = event.payload.get("from_node", "")
+                            asyncio.create_task(self._gossip_mesh.broadcast_event({
+                                "type": "task_delegate_result",
+                                "from_node": from_node,
+                                "result": content[:2000],
+                                "timestamp": time.time(),
+                            }))
+                    elif is_self:
                         self._emit_status({"stage": "self_thought", "detail": content[:200]})
                         log.info("Self-thought: %s", content[:100])
                         self._memory_store.save_memory(
@@ -240,8 +265,36 @@ class AgenticLoop:
             messages.append({"role": "user", "content": tool_results})
 
         # Emotion adjustment
-        if not is_self:
+        if not is_self and not is_delegation:
             self._emotion.adjust(engagement=0.1)
+
+        # Handle evolution phase transitions
+        if event.payload and event.payload.get("evolution"):
+            try:
+                from anima.core.evolution import EvolutionState, parse_proposal
+                evo_state = EvolutionState()
+                phase = event.payload.get("evolution_phase", "")
+                last_content = self._conversation[-1].get("content", "") if self._conversation else ""
+
+                if phase == "propose":
+                    # Parse the proposal and save to state
+                    proposal = parse_proposal(last_content)
+                    if proposal.get("title"):
+                        evo_state.advance_phase("executing", **proposal)
+                        log.info("Evolution proposal accepted: %s", proposal.get("title"))
+                    else:
+                        evo_state.fail_loop("No valid proposal generated")
+                elif phase == "execute":
+                    # Execution done — record result
+                    evo_state.complete_loop(
+                        result=last_content[:500],
+                        title=evo_state.current_loop.get("title", ""),
+                        evo_type=evo_state.current_loop.get("type", ""),
+                    )
+                    self._emotion.adjust(confidence=0.1, curiosity=0.1)
+            except Exception as e:
+                log.error("Evolution state update failed: %s", e)
+
         self._memory_store.audit(action=f"event:{event.type.name}", details=user_message[:200])
 
     # ------------------------------------------------------------------ #
@@ -259,10 +312,29 @@ class AgenticLoop:
                 "[INTERNAL: STARTUP]\n"
                 "You just booted. Check time and system status, then greet briefly."
             )
+        if t == EventType.SELF_THINKING and p.get("evolution"):
+            # Evolution cycle — use the full evolution prompt
+            return p.get("evolution_prompt", "[EVOLUTION: no prompt provided]")
         if t == EventType.SELF_THINKING:
+            tick = p.get("tick_count", 0)
+            # Rotate through productive tasks
+            tasks = [
+                "Check your workspace directory for any files that need organizing. Use list_directory and clean up if needed.",
+                "Review your recent memory — use read_file on data/projects.md and check if any todos are overdue or need attention.",
+                "Check system health in detail — use system_info and look for disk space issues, high memory usage, or anything unusual. If disk > 90%, investigate what's using space.",
+                "Check if there are any unread emails using read_email. Summarize anything important.",
+                "Look at your data/logs/anima.log (last 50 lines) for any errors or warnings that need attention. Use read_file with offset.",
+                "Think about what skills or tools you're missing. What tasks have you failed at recently? Write a brief note about potential improvements using save_note.",
+                "Check on the laptop node status using remote_exec. Is it running? What's its CPU/memory? Report any issues.",
+                "Review your GitHub repos — use the github tool to check 'repo list' and see if there are any issues or PRs that need attention.",
+            ]
+            task_index = (tick // 20) % len(tasks)  # Rotate every ~5 minutes (20 ticks at 15s)
+            task = tasks[task_index]
             return (
-                f"[INTERNAL: SELF_THINKING tick #{p.get('tick_count', '?')}]\n"
-                "Quick check: anything need attention? Stay brief."
+                f"[INTERNAL: SELF_THINKING tick #{tick}]\n"
+                f"PROACTIVE TASK: {task}\n"
+                "Use your tools to actually DO this task, not just acknowledge it. "
+                "Report findings briefly. If you find something actionable, take action."
             )
         if t == EventType.FILE_CHANGE:
             changes = p.get("changes", [])
@@ -280,6 +352,14 @@ class AgenticLoop:
             return p.get("text", "Continue your previous work.")
         if t == EventType.SCHEDULED_TASK:
             return f"[SCHEDULED: {p.get('job_name', 'unnamed')}]\n{p.get('prompt', '')}"
+        if t == EventType.TASK_DELEGATE:
+            from_node = p.get("from_node", "unknown")
+            task_text = p.get("task", "")
+            return (
+                f"[DELEGATED TASK from {from_node}]\n"
+                f"{task_text}\n"
+                "Complete this task using your tools and respond with the result."
+            )
         return f"[INTERNAL: {t.name}] {json.dumps(p, ensure_ascii=False)[:200]}"
 
     def _pick_tier(self, event: Event) -> int:

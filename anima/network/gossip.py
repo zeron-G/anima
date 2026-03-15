@@ -216,7 +216,11 @@ class GossipMesh:
             except Exception as e:
                 log.error("Gossip thread error: %s", e)
 
-            time.sleep(self.GOSSIP_INTERVAL)
+            # Sleep to the next absolute tick — prevents interval drift
+            next_tick = time.time() + self.GOSSIP_INTERVAL
+            elapsed = time.time() - (next_tick - self.GOSSIP_INTERVAL)
+            sleep_time = max(0, self.GOSSIP_INTERVAL - elapsed)
+            time.sleep(sleep_time)
 
         pub.close()
         sub.close()

@@ -21,6 +21,7 @@ class EventType(IntEnum):
     SELF_THINKING = auto()  # Periodic proactive thought (LLM heartbeat)
     FOLLOW_UP = auto()      # Agent wants to continue working on something
     SCHEDULED_TASK = auto()  # Cron scheduler fired a job
+    TASK_DELEGATE = auto()  # Task delegated from another node
 
 
 class EventPriority(IntEnum):

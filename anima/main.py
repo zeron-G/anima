@@ -208,6 +208,23 @@ async def run() -> None:
                     event_data.get("node_id", ""),
                 )
                 return
+            if etype == "task_delegate":
+                target = event_data.get("target_node", "")
+                # Check if this task is for us (match node_id, wildcard, or hostname alias)
+                hostname = __import__("socket").gethostname().lower()
+                if target in (node_identity.node_id, "*", hostname) or target.lower() == hostname:
+                    import asyncio as _aio
+                    try:
+                        loop = _aio.get_running_loop()
+                        loop.create_task(event_queue.put(Event(
+                            type=EventType.TASK_DELEGATE,
+                            payload=event_data,
+                            priority=EventPriority.NORMAL,
+                            source="gossip",
+                        )))
+                    except Exception:
+                        pass
+                return
             # Regular event — forward to ANIMA if we own the session or it's unowned
             on_network_event(event_data)
 
@@ -221,6 +238,10 @@ async def run() -> None:
             on_node_dead=on_node_dead,
         )
         heartbeat.set_gossip_mesh(gossip_mesh)
+
+        # Wire gossip mesh to remote tools for task delegation
+        from anima.tools.builtin.remote import set_gossip_mesh as set_remote_gossip
+        set_remote_gossip(gossip_mesh, node_identity.node_id)
 
         await gossip_mesh.start()
 
@@ -315,6 +336,8 @@ async def run() -> None:
         tool_registry=tool_registry,
         config=config,
     )
+    if gossip_mesh:
+        cognitive.set_gossip_mesh(gossip_mesh)
 
     terminal = TerminalUI(event_queue=event_queue)
 

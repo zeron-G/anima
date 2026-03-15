@@ -54,7 +54,7 @@ class HeartbeatEngine:
         self._prompt_builder = prompt_builder
 
         self._script_interval = get("heartbeat.script_interval_s", 15)
-        self._llm_interval = get("heartbeat.llm_interval_s", 300)
+        self._llm_interval = get("heartbeat.llm_interval_s", 180)
         self._major_interval = get("heartbeat.major_interval_s", 3600)
 
         # LLM trigger conditions
@@ -267,20 +267,8 @@ class HeartbeatEngine:
             await asyncio.sleep(self._llm_interval)
 
     def _should_llm_think(self) -> bool:
-        """Check if LLM heartbeat should trigger thinking."""
-        # Condition 1: enough significant diffs recently
-        sig_count = sum(
-            1 for s in self._recent_significance_scores
-            if s > self._significance_threshold
-        )
-        if sig_count >= self._min_significant_diffs:
-            return True
-
-        # Condition 2: consecutive skips exceeded → forced scan
-        if self._consecutive_skips >= self._max_consecutive_skips:
-            return True
-
-        return False
+        """Always think on LLM heartbeat — cost is acceptable for proactive behavior."""
+        return True
 
     async def _on_llm_tick(self) -> None:
         """LLM heartbeat: push SELF_THINKING event into cognitive cycle.
@@ -315,15 +303,70 @@ class HeartbeatEngine:
     # ---- Major Heartbeat (1h) ----
 
     async def _major_heartbeat_loop(self) -> None:
-        """Major heartbeat — Phase 0 stub."""
+        """Major heartbeat — triggers two-phase evolution cycle.
+
+        Phase 1 (PROPOSE): Push proposal event → LLM analyzes and proposes
+        Phase 2 (EXECUTE): After proposal, push execute event → LLM implements
+
+        Each phase is a separate event in the cognitive loop, so they don't
+        block each other and the agent stays responsive between phases.
+        """
         await asyncio.sleep(self._major_interval)
         while self._running:
             try:
-                log.info("Major heartbeat — global self-check (stub)")
-                # Phase 0: just log
-                # Future: memory compression, full self-check
+                from anima.core.evolution import EvolutionState, build_propose_prompt
+
+                evo_state = EvolutionState()
+                if evo_state.status != "idle":
+                    log.info("Evolution still in progress (%s), skipping", evo_state.status)
+                    await asyncio.sleep(self._major_interval)
+                    continue
+
+                log.info("Major heartbeat — starting evolution cycle #%d", evo_state.loop_count + 1)
+
+                # Phase 1: PROPOSE
+                propose_prompt = build_propose_prompt(evo_state)
+                await self._event_queue.put(Event(
+                    type=EventType.SELF_THINKING,
+                    payload={
+                        "tick_count": self._tick_count,
+                        "evolution": True,
+                        "evolution_phase": "propose",
+                        "evolution_prompt": propose_prompt,
+                    },
+                    priority=EventPriority.LOW,
+                    source="evolution",
+                ))
+
+                # Wait for proposal to be processed (check every 30s, up to 5 min)
+                for _ in range(10):
+                    await asyncio.sleep(30)
+                    evo_state = EvolutionState()
+                    if evo_state.status == "executing":
+                        break
+                    if evo_state.status == "idle":
+                        break
+
+                # Phase 2: EXECUTE (if proposal was accepted)
+                evo_state = EvolutionState()
+                if evo_state.status == "executing" and evo_state.current_loop.get("title"):
+                    from anima.core.evolution import build_execute_prompt
+                    exec_prompt = build_execute_prompt(evo_state)
+                    log.info("Evolution executing: %s", evo_state.current_loop.get("title", "?"))
+                    await self._event_queue.put(Event(
+                        type=EventType.SELF_THINKING,
+                        payload={
+                            "tick_count": self._tick_count,
+                            "evolution": True,
+                            "evolution_phase": "execute",
+                            "evolution_prompt": exec_prompt,
+                        },
+                        priority=EventPriority.LOW,
+                        source="evolution",
+                    ))
+
             except asyncio.CancelledError:
                 return
             except Exception as e:
-                log.error("Major heartbeat error: %s", e)
+                log.error("Major heartbeat/evolution error: %s", e)
             await asyncio.sleep(self._major_interval)

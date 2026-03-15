@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import tempfile
 import os
+import time
 
 from anima.models.tool_spec import ToolSpec, RiskLevel
 from anima.utils.logging import get_logger
@@ -12,6 +13,15 @@ from anima.utils.logging import get_logger
 log = get_logger("tools.remote")
 
 _KNOWN_NODES: dict[str, dict] = {}
+_gossip_mesh = None
+_local_node_id: str = ""
+
+
+def set_gossip_mesh(mesh, node_id: str) -> None:
+    """Set the gossip mesh reference for task delegation."""
+    global _gossip_mesh, _local_node_id
+    _gossip_mesh = mesh
+    _local_node_id = node_id
 
 
 def register_node(name: str, host: str, user: str, password: str) -> None:
@@ -88,6 +98,26 @@ async def _remote_write(node: str, path: str, content: str) -> dict:
     return await asyncio.get_event_loop().run_in_executor(None, _write_sync, node, path, content)
 
 
+async def _delegate_task(node: str, task: str, timeout: int = 120) -> dict:
+    """Delegate a task to another ANIMA node via the gossip network.
+
+    Unlike remote_exec (SSH), this sends the task to the OTHER node's Eva,
+    who processes it with her own tools and reasoning.
+    """
+    if _gossip_mesh is None:
+        return {"success": False, "error": "Not connected to gossip network"}
+
+    await _gossip_mesh.broadcast_event({
+        "type": "task_delegate",
+        "from_node": _local_node_id,
+        "target_node": node,
+        "task": task,
+        "timestamp": time.time(),
+    })
+
+    return {"success": True, "result": f"Task delegated to {node}. They will process it autonomously."}
+
+
 def get_remote_tools() -> list[ToolSpec]:
     return [
         ToolSpec(
@@ -119,5 +149,20 @@ def get_remote_tools() -> list[ToolSpec]:
             },
             risk_level=RiskLevel.MEDIUM,
             handler=_remote_write,
+        ),
+        ToolSpec(
+            name="delegate_task",
+            description="Delegate a task to another ANIMA node via the gossip network. Unlike remote_exec (SSH), this sends the task to the other node's Eva, who processes it with her own tools and reasoning. Available nodes: 'laptop'.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "node": {"type": "string", "description": "Target node name (e.g., 'laptop')"},
+                    "task": {"type": "string", "description": "Natural language task description for the other Eva to execute"},
+                    "timeout": {"type": "integer", "default": 120, "description": "Timeout in seconds"},
+                },
+                "required": ["node", "task"],
+            },
+            risk_level=RiskLevel.LOW,
+            handler=_delegate_task,
         ),
     ]

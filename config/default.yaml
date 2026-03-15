@@ -6,8 +6,8 @@ agent:
 
 heartbeat:
   script_interval_s: 15
-  llm_interval_s: 300       # 5 minutes
-  major_interval_s: 3600    # 1 hour
+  llm_interval_s: 180       # 3 minutes
+  major_interval_s: 120     # 2 minutes for test (normally 1800)
 
 # LLM heartbeat trigger conditions
 llm_trigger:
