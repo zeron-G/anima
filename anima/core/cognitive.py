@@ -206,12 +206,23 @@ class AgenticLoop:
         event_type_name = event.type.name
         needs_tools = event_type_name in ("USER_MESSAGE", "STARTUP", "SELF_THINKING", "SCHEDULED_TASK", "TASK_DELEGATE")
 
+        # For SELF_THINKING: extract recent self-thought snippets to avoid repetition
+        recent_self_thoughts: list[str] | None = None
+        if event_type_name == "SELF_THINKING":
+            recent_self_thoughts = [
+                m["content"][:150]
+                for m in self._conversation[-20:]
+                if m.get("role") == "assistant" and "[self-thought]" not in m.get("content", "")
+                and m.get("content", "").strip()
+            ][-4:]  # last 4 assistant responses
+
         system_prompt = self._prompt_builder.build_for_event(
             event_type_name,
             tools_description=self._build_tools_description() if needs_tools else "",
             system_state=system_state,
             emotion_state=self._emotion.to_dict() if event_type_name == "USER_MESSAGE" else None,
             working_memory_summary=self._get_memory_summary() if event_type_name == "USER_MESSAGE" else "",
+            recent_self_thoughts=recent_self_thoughts,
         )
 
         messages: list[dict] = [{"role": "system", "content": system_prompt}]

@@ -71,6 +71,7 @@ class PromptBuilder:
         system_state: dict | None = None,
         emotion_state: dict | None = None,
         working_memory_summary: str = "",
+        recent_self_thoughts: list[str] | None = None,
     ) -> str:
         """Build a system prompt tailored to the event type.
 
@@ -104,6 +105,10 @@ class PromptBuilder:
                 sections.append(self._build_system_state_section(system_state))
             if tools_description:
                 sections.append(f"## Tools Available\n{tools_description}")
+            # Inject recent self-thoughts so she knows what she just thought about
+            if recent_self_thoughts:
+                thoughts_text = "\n".join(f"- {t[:120]}" for t in recent_self_thoughts[-4:])
+                sections.append(f"## Your Recent Self-Thoughts (avoid repeating these)\n{thoughts_text}")
 
         # FILE_CHANGE, SYSTEM_ALERT: just core (soul + rules + runtime)
         # No extra context needed — the event message itself has the details
