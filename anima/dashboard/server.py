@@ -256,7 +256,8 @@ class DashboardServer:
         path = data_dir() / "voice" / filename
         if not path.exists():
             return web.Response(status=404)
-        return web.FileResponse(path, headers={"Content-Type": "audio/mpeg"})
+        ct = "audio/wav" if path.suffix == ".wav" else "audio/mpeg"
+        return web.FileResponse(path, headers={"Content-Type": ct})
 
     # ── WebSocket push loop ──
 
