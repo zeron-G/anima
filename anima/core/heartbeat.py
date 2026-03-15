@@ -187,7 +187,9 @@ class HeartbeatEngine:
                 c for c in changes
                 if not any(skip in c.get("path", "") for skip in
                           ("__pycache__", ".pyc", "data/notes/", "data/logs/",
-                           "anima.db", ".egg-info", ".pytest_cache"))
+                           "anima.db", ".egg-info", ".pytest_cache",
+                           "watchdog_heartbeat", "restart_checkpoint",
+                           "evolution_state.json", "sync_watermarks"))
             ]
             if real_changes:
                 await self._event_queue.put(Event(

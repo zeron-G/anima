@@ -252,8 +252,10 @@ class AgenticLoop:
                         )
                         if self._gossip_mesh:
                             from_node = event.payload.get("from_node", "")
+                            task_id = event.payload.get("task_id", "")
                             asyncio.create_task(self._gossip_mesh.broadcast_event({
                                 "type": "task_delegate_result",
+                                "task_id": task_id,
                                 "from_node": from_node,
                                 "result": content[:2000],
                                 "timestamp": time.time(),

@@ -229,6 +229,10 @@ async def run() -> bool:
                     except Exception:
                         pass
                 return
+            if etype == "task_delegate_result":
+                from anima.tools.builtin.remote import resolve_task_result
+                resolve_task_result(event_data.get("task_id", ""), event_data.get("result", ""))
+                return
             # Regular event — forward to ANIMA if we own the session or it's unowned
             on_network_event(event_data)
 
