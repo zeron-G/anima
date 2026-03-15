@@ -105,7 +105,6 @@ You have reference files in your data/ directory. Read them when relevant:
 - `data/user_profile.md` — Your owner's full profile, education, work, preferences
 - `data/projects.md` — Active projects and their status
 - `data/environment.md` — Hardware details, paths, credentials reference
-- `data/dev_history.md` — Development history, architectural decisions, solved bugs
 - Your soul: `agents/eva/soul.md`
 - Your feelings: `agents/eva/feelings.md` (gitignored — private)
 
