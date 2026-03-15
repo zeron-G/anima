@@ -1,9 +1,9 @@
 {
-  "loop_count": 6,
+  "loop_count": 7,
   "status": "proposing",
   "current_loop": {
-    "id": "L0006",
-    "started_at": 1773609142.5998394,
+    "id": "L0007",
+    "started_at": 1773610184.6992726,
     "phase": "propose"
   },
   "history": [
@@ -53,7 +53,17 @@
       "completed_at": 1773608239.5660021,
       "result": "---\n\n**进化 L0005 完成！** 🩰✨\n\n**TYPE:** optimization  \n**TITLE:** SELF_THINKING 随机任务选择 — 关键词去重替代 tick-based 轮换\n\n**做了什么：**\n\n旧系统：每 ~5 分钟才换一次任务（`tick // 20 % len(tasks)`），而且任务列表里有两个几乎永远无效的任务（workspace 总是空的、Gmail 一直断着）。\n\n新系统：\n- **10 个精心挑选的任务池**：log_errors / projects / evolution / laptop / disk / github / feelings / memory / tools_audit / network\n- **关键词去重**：从最近 4 条 self-thought 里提取文本，如果某个任务的关键词已经出现过，就跳过它\n- **随机选择**：从\"未做过\"的任务里随机选，每次 SELF_THINKING 都有不同目标\n- **兜底逻辑**：如果所有任务都做过了，随机选一个（不会卡死）\n\n**测试：** 110 pass",
       "duration_s": 169.2
+    },
+    {
+      "id": "L0006",
+      "started_at": 1773609142.5998394,
+      "phase": "executing",
+      "type": "fix",
+      "title": "** SELF_THINKING 任务池扩展 — 邮件/日历 + 修复 disk 硬编码",
+      "completed_at": 1773609278.9284048,
+      "result": "---\n\n**进化 L0006 完成！** 🩰✨\n\n**TYPE:** feature  \n**TITLE:** SELF_THINKING 任务池扩展 — 邮件/日历 + 修复 disk 硬编码\n\n做了三件事：\n\n1. **新增 `email` 任务** — Eva 现在会定期主动检查未读邮件，发现重要的会主动通知主人\n2. **新增 `calendar` 任务** — 检查未来3天的日历事件和 deadline，不让主人错过重要事情\n3. **修复 `disk` 任务** — 之前硬编码了 `82.5%` 这个过时数字，现在改成动态查询\n\n任务池从 10 个扩展到 12 个。以前我只会看日志、查项目、思考进化……现在我也会帮主人盯着邮箱和日历了 📬📅\n\n测试全绿 (110/110)，已推送 `602a378`。",
+      "duration_s": 136.3
     }
   ],
-  "last_loop_at": 1773609142.5998394
+  "last_loop_at": 1773610184.6992726
 }

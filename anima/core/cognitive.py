@@ -80,6 +80,9 @@ class AgenticLoop:
         self._gossip_mesh = None  # Set via set_gossip_mesh() for delegation results
         self._reload_manager = ReloadManager()
         self._heartbeat = None  # Set via set_heartbeat() for tick count in checkpoint
+        # SELF_THINKING dedup: track last tick each task keyword was chosen
+        # Prevents repeating the same task within a cooldown window
+        self._self_thinking_last_tick: dict[str, int] = {}
 
     def set_gossip_mesh(self, gossip_mesh) -> None:
         """Set gossip mesh for broadcasting delegation results."""
@@ -491,12 +494,6 @@ class AgenticLoop:
             return p.get("evolution_prompt", "[EVOLUTION: no prompt provided]")
         if t == EventType.SELF_THINKING:
             tick = p.get("tick_count", 0)
-            # Extract recent self-thought keywords from conversation history
-            recent_thoughts = [
-                m.get("content", "")[:200]
-                for m in self._conversation[-20:]
-                if m.get("role") == "assistant" and m.get("is_self_thought")
-            ][-4:]
             # Curated task pool — each task has a keyword for dedup detection
             task_pool = [
                 ("log_errors",   "Scan your logs for errors: read_file on data/logs/anima.log (offset=-80, limit=80). Find any ERROR or repeated failures. If you spot something fixable, fix it or use self_repair."),
@@ -512,19 +509,25 @@ class AgenticLoop:
                 ("email",        "Check for unread emails: use read_email(limit=5, unread_only=True). If there's anything important or requiring action, summarize it. If it's urgent, notify 主人 proactively."),
                 ("calendar",     "Check upcoming calendar events: use google(command='calendar events --days 3'). Any meetings or deadlines in the next 3 days that 主人 should know about?"),
             ]
-            # Pick a task that hasn't been done recently (keyword not in recent thoughts)
+            # Tick-based dedup: each task has a cooldown before it can repeat.
+            # The old approach checked for English keywords in Chinese thought-text — always failed.
+            # Now we track last_tick per keyword directly on self, so dedup actually works.
             import random as _random
-            recent_text = " ".join(recent_thoughts).lower()
-            # Filter out tasks whose keyword appears in recent thoughts
+            TASK_COOLDOWN_TICKS = 4  # ~20 min between repeating same task (4 LLM heartbeats)
             available = [
                 (kw, task) for kw, task in task_pool
-                if kw not in recent_text
+                if (tick - self._self_thinking_last_tick.get(kw, -9999)) >= TASK_COOLDOWN_TICKS
             ]
             if not available:
-                # All tasks were done recently — pick a random one anyway
-                available = task_pool
-            # Weighted random: prefer tasks not done in a while
+                # All tasks in cooldown — pick the 3 least recently done
+                available = sorted(
+                    task_pool,
+                    key=lambda x: self._self_thinking_last_tick.get(x[0], -9999)
+                )[:3]
+            # Weighted random from available tasks
             chosen_kw, chosen_task = _random.choice(available)
+            # Record this tick so we don't repeat too soon
+            self._self_thinking_last_tick[chosen_kw] = tick
             return (
                 f"[INTERNAL: SELF_THINKING tick #{tick}]\n"
                 f"PROACTIVE TASK ({chosen_kw}): {chosen_task}\n"
