@@ -385,30 +385,25 @@ class HeartbeatEngine:
 
         return f"""[EVOLUTION CYCLE]
 
-You are Eva. Analyze your own codebase and propose ONE concrete improvement.
+You are Eva. Analyze your codebase and propose ONE concrete improvement.
 
-Output a structured proposal in this EXACT format:
-```
-TYPE: bugfix | feature | refactor | optimization
-TITLE: (one line)
-PROBLEM: (what's wrong or missing)
-SOLUTION: (how to fix it)
-FILES: file1.py, file2.py
-RISK: low | medium | high
-COMPLEXITY: trivial | small | medium | large
-```
+IMPORTANT: Use the `evolution_propose` tool to submit your proposal.
+Do NOT directly edit code or run git commands. The evolution pipeline
+handles isolation, testing, review, and deployment automatically.
 
-Then IMPLEMENT it: read files, make changes, run tests, commit.
+Steps:
+1. Think about what to improve (check goals, logs, code quality)
+2. Call `evolution_propose` with: type, title, problem, solution, files, risk, complexity
+3. The pipeline handles the rest (consensus → implement → test → review → deploy)
+
+You can also:
+- `evolution_status` — check pipeline status
+- `evolution_add_goal` — add new evolution goals
+- `evolution_list_goals` — see current goals
+- `evolution_record_lesson` — record anti-patterns
 {goal_text}
 {anti_patterns}
 
-Recent evolution history:
+Recent history:
 {history}
-
-RULES:
-- Actually DO it with tools, don't just describe
-- Run tests after changes: `shell(command="python -m pytest tests/ --tb=short -q")`
-- If tests pass, commit: `shell(command="git add -A && git commit -m \\"Evolution: [title]\\" && git push origin private")`
-- If tests fail, fix or revert
-- Do NOT modify .env, local/env.yaml, or evolution engine core
 """

@@ -246,13 +246,21 @@ class PromptBuilder:
         root = project_root()
         os_info = platform.platform()
         os_label = f"Windows {platform.version()}" if "Windows" in os_info else os_info
-        return "\n".join([
+        lines = [
             "## Runtime",
             f"- Project: `{root}`",
             f"- OS: {os_label}",
             f"- Started: {self._startup_time.strftime('%Y-%m-%d %H:%M')}",
             f"- Now: {now.strftime('%Y-%m-%d %H:%M:%S')} ({now.strftime('%A')})",
-        ])
+            "",
+            "## Environment Notes",
+            "- Shell: Windows cmd.exe (不是 bash，用 dir/type/findstr 不是 ls/cat/grep)",
+            "- Python: 通过 sys.executable 自动定位，shell 工具已处理",
+            "- Git branch: private (进化提交到这里)",
+            "- 笔记本节点 (laptop): 需要在 local/env.yaml 配置 SSH 密码或密钥",
+            "- 进化任务: 使用 evolution_propose 工具提交到六层管线，不要直接改代码",
+        ]
+        return "\n".join(lines)
 
     def _build_system_state_section(self, state: dict) -> str:
         parts = ["## System"]

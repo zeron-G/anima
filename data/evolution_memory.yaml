@@ -1,0 +1,28 @@
+successes: []
+failures: []
+anti_patterns:
+  - "不要用 display:none 切换 canvas — 用 z-index"
+  - "three-vrm v3 的 lookAt 没有 .target 属性 — 用 .lookAt(vec3)"
+  - "不要在 Python raw string 里写大段 JS"
+  - "不要用 top-level await import — 会阻塞模块加载链"
+  - "骨骼重置时跳过 hips — 否则会清掉 rotateVRM0 旋转"
+  - "不要在 config 里写明文密码 — 用 local/env.yaml 或 .env"
+  - "不要硬编码路径 — 用 project_root() 或 sys.executable"
+  - "shell 命令在 Windows 上用 cmd 语法不是 bash"
+  - "createMediaElementSource 只能对每个 Audio 元素调用一次"
+  - "TTS 引擎是 Qwen3-TTS Base + voice clone — 不是 edge-tts 或 CosyVoice"
+goals:
+  - id: "GOAL-001"
+    title: "完善分布式网络功能 — Gossip mesh 稳定性、消息协议、跨节点任务委派"
+    status: "planned"
+    priority: 5
+    progress: 0.0
+    evolutions: []
+    created: 1710547200
+  - id: "GOAL-002"
+    title: "进化管线全流程跑通 — proposal→consensus→implement→test→review→deploy"
+    status: "in_progress"
+    priority: 5
+    progress: 0.5
+    evolutions: []
+    created: 1710547200

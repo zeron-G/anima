@@ -87,6 +87,11 @@ async def run() -> bool:
     tool_registry = ToolRegistry()
     tool_registry.register_builtins()
 
+    # Register evolution tools
+    from anima.tools.builtin.evolution_tools import get_evolution_tools, set_evolution_engine as set_evo_tools_engine
+    for tool in get_evolution_tools():
+        tool_registry.register(tool)
+
     # Register known remote nodes for cross-node communication
     from anima.tools.builtin.remote import register_node
     for node_cfg in get("network.remote_nodes", []):
@@ -147,6 +152,7 @@ async def run() -> bool:
     from anima.evolution.engine import EvolutionEngine
     evolution_engine = EvolutionEngine()
     heartbeat.set_evolution_engine(evolution_engine)
+    set_evo_tools_engine(evolution_engine)
 
     # Active channels for response routing (populated if network enabled)
     _active_channels: dict[str, Any] = {}
