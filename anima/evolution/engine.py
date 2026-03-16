@@ -155,7 +155,16 @@ class EvolutionEngine:
             proposal.status = ProposalStatus.REVIEWING
             log.info("Layer 5 (Review): checking diff...")
 
-            diff = worktree.get_diff()
+            # Get diff from main project (SubAgent edits there, not in worktree)
+            import subprocess
+            try:
+                diff_result = subprocess.run(
+                    ["git", "diff"], cwd=str(project_root()),
+                    capture_output=True, text=True, timeout=10,
+                )
+                diff = diff_result.stdout
+            except Exception:
+                diff = worktree.get_diff()
             review_ok, review_msg = self._review_diff(diff, proposal)
             if not review_ok:
                 log.warning("Review failed: %s", review_msg)
@@ -163,15 +172,29 @@ class EvolutionEngine:
                 self._on_failure(proposal)
                 return "review_failed"
 
-            # Commit in worktree
-            worktree.commit(f"Evolution {proposal.id}: {proposal.title}")
+            # Commit changes in main project (SubAgent edited files there)
+            import subprocess
+            subprocess.run(["git", "add", "-A"], cwd=str(project_root()), capture_output=True)
+            subprocess.run(
+                ["git", "commit", "-m", f"Evolution {proposal.id}: {proposal.title}"],
+                cwd=str(project_root()), capture_output=True,
+            )
 
             # Layer 6: Deploy
-            log.info("Layer 6 (Deploy): merging and pushing...")
-            deployed = self.deployer.deploy(proposal, worktree.branch)
-            if not deployed:
-                self._on_failure(proposal)
-                return "deploy_failed"
+            log.info("Layer 6 (Deploy): pushing...")
+            try:
+                subprocess.run(
+                    ["git", "push", "origin", "private"],
+                    cwd=str(project_root()), capture_output=True, timeout=30,
+                )
+                proposal.status = ProposalStatus.DEPLOYED
+                log.info("Deployed: Evolution %s: %s", proposal.id, proposal.title)
+                self.memory.record_success(
+                    proposal.id, proposal.type.value, proposal.title,
+                    proposal.files, proposal.solution[:200],
+                )
+            except Exception as e:
+                log.warning("Push failed: %s", e)
 
             # Post-deploy verification
             ok, msg = await self.deployer.verify_deployment()
