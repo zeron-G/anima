@@ -1,5 +1,11 @@
 successes: []
-failures: []
+failures:
+  - id: "EVO-20260316-9eb08e"
+    type: "refactor"
+    title: "Self-thinking 去重"
+    reason: "Level 1 test failed — file path missing anima/ prefix in worktree"
+    lesson: "sandbox TestRunner 需要处理相对路径的 anima/ 前缀"
+    timestamp: 1710550137
 anti_patterns:
   - "不要用 display:none 切换 canvas — 用 z-index"
   - "three-vrm v3 的 lookAt 没有 .target 属性 — 用 .lookAt(vec3)"
@@ -11,6 +17,8 @@ anti_patterns:
   - "shell 命令在 Windows 上用 cmd 语法不是 bash"
   - "createMediaElementSource 只能对每个 Audio 元素调用一次"
   - "TTS 引擎是 Qwen3-TTS Base + voice clone — 不是 edge-tts 或 CosyVoice"
+  - "spawn_agent 后必须有超时检查和用户反馈 — 不能静默卡死"
+  - "用户消息必须在合理时间内得到回复 — 即使是中间状态也要告知"
 goals:
   - id: "GOAL-001"
     title: "完善分布式网络功能 — Gossip mesh 稳定性、消息协议、跨节点任务委派"
@@ -23,6 +31,20 @@ goals:
     title: "进化管线全流程跑通 — proposal→consensus→implement→test→review→deploy"
     status: "in_progress"
     priority: 5
-    progress: 0.5
-    evolutions: []
+    progress: 0.6
+    evolutions: ["EVO-20260316-9eb08e"]
     created: 1710547200
+  - id: "GOAL-003"
+    title: "任务追踪与用户反馈 — spawn_agent 超时检查、心跳追踪活跃任务、用户等待中间状态通知"
+    status: "planned"
+    priority: 5
+    progress: 0.0
+    evolutions: []
+    created: 1710550200
+  - id: "GOAL-004"
+    title: "用户消息中断机制 — 当用户发消息时立即中断 SELF_THINKING，优先回复用户"
+    status: "planned"
+    priority: 4
+    progress: 0.0
+    evolutions: []
+    created: 1710550200
