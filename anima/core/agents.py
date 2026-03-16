@@ -312,39 +312,49 @@ class AgentManager:
             self._emit("agent_done", f"internal: {session.status} ({session.completed_at - session.created_at:.1f}s)", agent_id=session.id)
 
     async def _run_claude_code(self, session: AgentSession, working_dir: str, timeout: int) -> None:
+        """Run Claude Code CLI in a thread (Windows SelectorEventLoop doesn't support async subprocess)."""
         session.status = "running"
         self._emit("agent_running", "claude_code started", agent_id=session.id)
-        proc = None
-        try:
-            proc = await asyncio.create_subprocess_exec(
-                "claude", "--print", session.prompt,
-                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-                cwd=working_dir or None, env=os.environ.copy(),
-            )
-            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
-            session.result = stdout.decode("utf-8", errors="replace").strip()
-            if proc.returncode != 0:
-                session.error = stderr.decode("utf-8", errors="replace").strip()
+
+        def _run_sync():
+            import subprocess
+            try:
+                result = subprocess.run(
+                    ["claude", "-p", session.prompt,
+                     "--output-format", "text",
+                     "--allowedTools", "Read,Edit,Bash,Grep,Glob,Write",
+                     "--model", "sonnet"],
+                    capture_output=True, text=True,
+                    timeout=timeout,
+                    cwd=working_dir or None,
+                    env={**os.environ, "CLAUDE_CODE_ENTRYPOINT": "evolution"},
+                )
+                session.result = result.stdout.strip()
+                if result.returncode != 0:
+                    session.error = result.stderr.strip()[:500]
+                    session.status = "failed"
+                else:
+                    session.status = "done"
+            except subprocess.TimeoutExpired:
+                session.status = "timeout"
+                session.error = f"Timed out after {timeout}s"
+            except FileNotFoundError:
                 session.status = "failed"
-            else:
-                session.status = "done"
-        except asyncio.TimeoutError:
-            session.status = "timeout"
-            session.error = f"Timed out after {timeout}s"
-            if proc:
-                try:
-                    proc.kill()
-                except Exception:
-                    pass
-        except FileNotFoundError:
-            session.status = "failed"
-            session.error = "Claude Code CLI not found"
+                session.error = "Claude Code CLI not found"
+            except Exception as e:
+                session.status = "failed"
+                session.error = str(e)
+            finally:
+                session.completed_at = time.time()
+
+        try:
+            await asyncio.get_event_loop().run_in_executor(None, _run_sync)
         except Exception as e:
             session.status = "failed"
             session.error = str(e)
-        finally:
             session.completed_at = time.time()
-            self._emit("agent_done", f"claude_code: {session.status}", agent_id=session.id)
+
+        self._emit("agent_done", f"claude_code: {session.status}", agent_id=session.id)
 
     async def _run_shell(self, session: AgentSession, command: str, timeout: int) -> None:
         session.status = "running"
