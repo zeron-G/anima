@@ -361,7 +361,7 @@ async def run() -> bool:
         cognitive.set_gossip_mesh(gossip_mesh)
 
     # Wire evolution engine with reload manager (created later via cognitive)
-    evolution_engine.wire(reload_manager=cognitive.reload_manager)
+    evolution_engine.wire(reload_manager=cognitive.reload_manager, agent_manager=agent_manager)
 
     # ── Restore conversation context ──
     # Always load recent conversation from DB — works for ANY restart type

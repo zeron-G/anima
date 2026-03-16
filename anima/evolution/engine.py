@@ -11,7 +11,7 @@ import asyncio
 import time
 from typing import Any
 
-from anima.config import get
+from anima.config import get, project_root
 from anima.evolution.proposal import Proposal, ProposalQueue, ProposalStatus, create_proposal
 from anima.evolution.consensus import ConsensusEngine
 from anima.evolution.sandbox import Worktree, TestRunner
@@ -46,14 +46,17 @@ class EvolutionEngine:
         self._last_hour_reset = time.time()
         self._cooldown_until = 0
 
-        # External references (set by main.py)
+        # External references (set by main.py via wire())
         self._gossip_mesh = None
         self._reload_manager = None
+        self._agent_manager = None
 
-    def wire(self, gossip_mesh=None, reload_manager=None) -> None:
+    def wire(self, gossip_mesh=None, reload_manager=None, agent_manager=None) -> None:
         """Wire external dependencies."""
         self._gossip_mesh = gossip_mesh
         self._reload_manager = reload_manager
+        if agent_manager:
+            self._agent_manager = agent_manager
         if gossip_mesh:
             self.consensus.set_gossip(gossip_mesh.broadcast_event)
         if reload_manager:
@@ -114,15 +117,21 @@ class EvolutionEngine:
             worktree_path = worktree.create()
             proposal.implementation_branch = worktree.branch
 
-            # TODO: actual implementation via LLM SubAgent
-            # For now, implementation happens externally (via cognitive.py agentic loop)
-            # This engine handles the testing/review/deploy layers
+            # Implementation: spawn a SubAgent with LLM agentic loop
+            impl_ok = await self._run_implementation(proposal, worktree_path)
+            if not impl_ok:
+                log.warning("Implementation failed for %s", proposal.id)
+                proposal.status = ProposalStatus.FAILED
+                self._on_failure(proposal)
+                worktree.cleanup()
+                return "implement_failed"
 
             # Layer 4: Test
             proposal.status = ProposalStatus.TESTING
             log.info("Layer 4 (Test): running three-level tests...")
 
-            runner = TestRunner(worktree_path)
+            # Test in project root (SubAgent edits files there, not in worktree)
+            runner = TestRunner(str(project_root()))
 
             # Level 1: Static
             ok, out = runner.level1_static(proposal.files)
@@ -190,6 +199,46 @@ class EvolutionEngine:
                 worktree.cleanup()
             # Clean up expired agents
             self.agent_pool.cleanup_expired()
+
+    async def _run_implementation(self, proposal: Proposal, worktree_path) -> bool:
+        """Layer 3: Run a SubAgent to implement the proposal."""
+        if not self._agent_manager:
+            log.error("No agent_manager wired — cannot implement")
+            return False
+
+        impl_prompt = (
+            f"EVOLUTION TASK: {proposal.title}\n\n"
+            f"PROBLEM: {proposal.problem}\n"
+            f"SOLUTION: {proposal.solution}\n"
+            f"FILES TO MODIFY: {', '.join(proposal.files) if proposal.files else 'determine from analysis'}\n"
+            f"RISK: {proposal.risk}\n\n"
+            "INSTRUCTIONS:\n"
+            "1. Read the relevant source files\n"
+            "2. Make the necessary code changes using edit_file or write_file\n"
+            "3. Run tests: shell(command=\"python -m pytest tests/ --tb=short -q\")\n"
+            "4. If tests fail, fix the issues\n"
+            "5. Report what you changed\n\n"
+            "IMPORTANT: Only modify files related to this task. Minimal changes."
+        )
+
+        log.info("Spawning implementation agent for %s", proposal.id)
+        session = await self._agent_manager.spawn_internal(
+            prompt=impl_prompt,
+            timeout=300,  # 5 min max
+        )
+
+        # Wait for the agent to finish
+        result = await self._agent_manager.wait_for(session.id, timeout=300)
+
+        if result.status == "completed":
+            log.info("Implementation agent completed: %s", proposal.id)
+            return True
+        elif result.status == "timeout":
+            log.warning("Implementation agent timed out: %s", proposal.id)
+            return False
+        else:
+            log.warning("Implementation agent failed: %s — %s", proposal.id, result.error or "unknown")
+            return False
 
     async def _handle_test_failure(self, proposal: Proposal, worktree: Worktree,
                                     level: str, output: str) -> str:
