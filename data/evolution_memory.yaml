@@ -125,3 +125,16 @@ successes:
   timestamp: 1773665287.6773317
   title: spawn_agent 超时检查与用户等待中间状态通知
   type: feature
+- files:
+  - anima/tools/builtin/remote.py
+  id: EVO-20260316-278644
+  lesson: '增强 `_delegate_task` 中的节点解析逻辑，按优先级多维匹配：
+
+
+    1. **精确 node_id 匹配**（保持现有逻辑）
+
+    2. **remote_nodes 配置名称匹配**：从 `anima.config.get("network.remote_nodes", [])` 读取配置，找到
+    name="laptop" 对应的 host IP，再与 alive peers 的 IP 比'
+  timestamp: 1773692590.7546654
+  title: delegate_task 节点名称解析增强 — 支持 name/hostname/IP 多维匹配
+  type: bugfix

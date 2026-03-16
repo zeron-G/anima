@@ -307,6 +307,13 @@ async def run() -> bool:
                     await memory_sync.sync_with_peer(sync_addr, peer_id)
                 # Cleanup stale registered nodes
                 node_identity.unregister_stale_nodes()
+                # Cleanup expired tasks and sessions
+                expired_tasks = task_delegate.cleanup_expired()
+                if expired_tasks:
+                    log.info("TaskDelegate: cleaned up %d expired tasks", expired_tasks)
+                expired_sessions = session_router.cleanup_expired()
+                if expired_sessions:
+                    log.info("SessionRouter: cleaned up %d expired sessions", len(expired_sessions))
 
         asyncio.create_task(_periodic_network_tasks(), name="network_tasks")
 
