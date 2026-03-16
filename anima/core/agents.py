@@ -329,9 +329,9 @@ class AgentManager:
                     cwd=working_dir or None,
                     env={**os.environ, "CLAUDE_CODE_ENTRYPOINT": "evolution"},
                 )
-                session.result = result.stdout.strip()
+                session.result = (result.stdout or "").strip()
                 if result.returncode != 0:
-                    session.error = result.stderr.strip()[:500]
+                    session.error = (result.stderr or "").strip()[:500]
                     session.status = "failed"
                 else:
                     session.status = "done"
