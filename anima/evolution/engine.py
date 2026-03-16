@@ -93,9 +93,11 @@ class EvolutionEngine:
         # Add to queue
         self.queue.add(proposal)
 
-        # Execute immediately if nothing else running
+        # Execute in background (don't block cognitive loop)
         if self._current_proposal is None:
-            return await self._execute_next()
+            import asyncio
+            asyncio.get_event_loop().create_task(self._execute_next())
+            return "approved_executing"
 
         return "queued"
 
