@@ -1,8 +1,10 @@
 """Logging configuration for ANIMA.
 
 Uses TimedRotatingFileHandler — keeps only last 24 hours of logs.
+All handlers use UTF-8 encoding to prevent GBK emoji crashes on Windows.
 """
 
+import io
 import logging
 import sys
 from logging.handlers import TimedRotatingFileHandler
@@ -24,12 +26,26 @@ def setup_logging(
     )
 
     if console:
+        # Force UTF-8 on the console stream — multiple fallback layers
         stream = sys.stderr
-        if hasattr(stream, "reconfigure"):
-            try:
-                stream.reconfigure(encoding="utf-8", errors="replace")
-            except Exception:
-                pass
+        if stream:
+            if hasattr(stream, "reconfigure"):
+                try:
+                    stream.reconfigure(encoding="utf-8", errors="replace")
+                except Exception:
+                    pass
+
+            # If stream.encoding is still GBK/cp936, wrap it
+            enc = getattr(stream, "encoding", "").lower()
+            if enc and enc not in ("utf-8", "utf8"):
+                try:
+                    stream = io.TextIOWrapper(
+                        stream.buffer, encoding="utf-8", errors="replace",
+                        line_buffering=True,
+                    )
+                except Exception:
+                    pass  # pythonw.exe may not have .buffer
+
         ch = logging.StreamHandler(stream)
         ch.setFormatter(fmt)
         logger.addHandler(ch)
@@ -37,7 +53,6 @@ def setup_logging(
     if log_file:
         path = Path(log_file)
         path.parent.mkdir(parents=True, exist_ok=True)
-        # Rotate at midnight, keep 1 backup (= 24h of logs)
         fh = TimedRotatingFileHandler(
             str(path),
             when="midnight",

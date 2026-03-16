@@ -3,13 +3,23 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import signal
 import sys
 from typing import Any
 from pathlib import Path
 
-# Windows needs SelectorEventLoop for ZMQ async sockets
+# Global UTF-8 encoding (defense-in-depth, also set in __main__.py)
+os.environ.setdefault("PYTHONIOENCODING", "utf-8")
+os.environ.setdefault("PYTHONUTF8", "1")
+
 if sys.platform == "win32":
+    for _s in [sys.stdout, sys.stderr]:
+        if _s and hasattr(_s, "reconfigure"):
+            try:
+                _s.reconfigure(encoding="utf-8", errors="replace")
+            except Exception:
+                pass
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
 from anima.config import load_config, get

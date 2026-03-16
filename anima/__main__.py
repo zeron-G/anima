@@ -10,9 +10,31 @@ Usage:
 """
 
 import asyncio
+import os
 import sys
 
+# ═══ GLOBAL ENCODING FIX ═══
+# Windows uses GBK/cp936 by default. Eva's personality contains emoji (🩰💗✨)
+# which crash GBK encoding. Fix ALL I/O channels at the earliest entry point.
+#
+# This must happen BEFORE any imports that might write to stdout/stderr.
+#
+# Three layers of defense:
+#   1. PYTHONIOENCODING env var — affects subprocess children
+#   2. sys.stdout/stderr reconfigure — affects this process
+#   3. _locale coerce — affects C library defaults
+os.environ["PYTHONIOENCODING"] = "utf-8"
+os.environ["PYTHONUTF8"] = "1"  # Python UTF-8 mode (PEP 540)
+
 if sys.platform == "win32":
+    # Reconfigure stdout/stderr to UTF-8 with error replacement
+    for stream in [sys.stdout, sys.stderr]:
+        if stream and hasattr(stream, "reconfigure"):
+            try:
+                stream.reconfigure(encoding="utf-8", errors="replace")
+            except Exception:
+                pass
+
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
 
