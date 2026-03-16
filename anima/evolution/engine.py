@@ -314,7 +314,23 @@ class EvolutionEngine:
                     return True, "Already committed"
             except Exception:
                 pass
-            # No diff and no commit — SubAgent didn't change anything
+            # Check if there are any new commits since proposal started
+            try:
+                log_result = _sp.run(
+                    ["git", "log", "--oneline", "-3"],
+                    cwd=str(project_root()), capture_output=True, text=True, timeout=5,
+                )
+                recent = log_result.stdout.strip()
+                if "Evolution" in recent or "evolution" in recent:
+                    return True, "Changes already committed by Claude Code"
+            except Exception:
+                pass
+            # Claude Code may have made changes that just need staging
+            _sp.run(["git", "add", "-A"], cwd=str(project_root()), capture_output=True)
+            diff_check = _sp.run(["git", "diff", "--cached", "--stat"], cwd=str(project_root()), capture_output=True, text=True)
+            if diff_check.stdout and diff_check.stdout.strip():
+                return True, "Staged changes found"
+            # Really no changes
             issues.append("No changes detected")
 
         # Check for obvious problems
