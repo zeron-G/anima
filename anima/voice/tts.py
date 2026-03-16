@@ -1,6 +1,7 @@
-"""Text-to-Speech via Qwen3-TTS (local PyTorch CUDA).
+"""Text-to-Speech via Qwen3-TTS voice clone (local PyTorch CUDA).
 
-Model: Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice (auto-downloaded from HuggingFace)
+Uses Eva's reference voice (data/voice/eva_reference_voice.wav) for cloning.
+Model: Qwen3-TTS Base (supports generate_voice_clone with ref_audio).
 Runs entirely in-process. No HTTP server, no WSL.
 """
 
@@ -13,18 +14,19 @@ import threading
 from pathlib import Path
 from typing import Any
 
-from anima.config import data_dir
+from anima.config import data_dir, local_get, project_root
 from anima.utils.logging import get_logger
 
 log = get_logger("voice.tts")
 
 VOICE_DIR = data_dir() / "voice"
-# Model ID from local/env.yaml, fallback to default
-_DEFAULT_MODEL_ID = "Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice"
+REF_VOICE = data_dir() / "voice" / "eva_reference_voice.wav"
+DEFAULT_MODEL_ID = "Qwen/Qwen3-TTS-12Hz-0.6B-Base"  # Base model for voice clone
 
 _model: Any = None
 _model_lock = threading.Lock()
 _model_failed = False
+_voice_prompt: Any = None  # Cached VoiceClonePromptItem
 
 
 def _clean_text(text: str) -> str:
@@ -42,8 +44,8 @@ def _clean_text(text: str) -> str:
 
 
 def _load_model() -> Any:
-    """Lazy-load Qwen3-TTS model."""
-    global _model, _model_failed
+    """Lazy-load Qwen3-TTS Base model for voice cloning."""
+    global _model, _model_failed, _voice_prompt
 
     if _model is not None:
         return _model
@@ -60,8 +62,7 @@ def _load_model() -> Any:
             import torch
             from qwen_tts import Qwen3TTSModel
 
-            from anima.config import local_get
-            model_id = local_get("tts.model_id", _DEFAULT_MODEL_ID)
+            model_id = local_get("tts.model_id", DEFAULT_MODEL_ID)
             log.info("Loading Qwen3-TTS: %s ...", model_id)
 
             model = Qwen3TTSModel.from_pretrained(
@@ -70,7 +71,20 @@ def _load_model() -> Any:
                 dtype=torch.bfloat16,
             )
             _model = model
-            log.info("Qwen3-TTS loaded on CUDA")
+
+            # Pre-build voice clone prompt from reference audio (cached for reuse)
+            ref_path = str(REF_VOICE)
+            if REF_VOICE.exists():
+                log.info("Building voice clone prompt from %s", REF_VOICE.name)
+                _voice_prompt = model.create_voice_clone_prompt(
+                    ref_audio=ref_path,
+                    x_vector_only_mode=True,  # Speaker embedding only, faster
+                )
+                log.info("Qwen3-TTS loaded with Eva voice clone")
+            else:
+                log.warning("Reference voice not found: %s — will use default voice", ref_path)
+                log.info("Qwen3-TTS loaded (no voice clone)")
+
             return model
 
         except Exception as e:
@@ -88,13 +102,34 @@ def _synthesize_sync(clean: str, out_path: Path) -> bool:
     try:
         import soundfile as sf
 
-        from anima.config import local_get
-        wavs, sr = model.generate_custom_voice(
-            text=clean,
-            language=local_get("tts.language", "Chinese"),
-            speaker=local_get("tts.speaker", "Vivian"),
-            instruct=local_get("tts.instruct", ""),
-        )
+        language = local_get("tts.language", "Chinese")
+
+        if _voice_prompt is not None:
+            # Voice clone mode — use Eva's reference voice
+            wavs, sr = model.generate_voice_clone(
+                text=clean,
+                language=language,
+                voice_clone_prompt=_voice_prompt,
+            )
+        else:
+            # Fallback — no reference voice, use custom voice if available
+            try:
+                speaker = local_get("tts.speaker", "Vivian")
+                instruct = local_get("tts.instruct", "")
+                wavs, sr = model.generate_custom_voice(
+                    text=clean,
+                    language=language,
+                    speaker=speaker,
+                    instruct=instruct,
+                )
+            except (AttributeError, ValueError):
+                # Base model doesn't have generate_custom_voice
+                wavs, sr = model.generate_voice_clone(
+                    text=clean,
+                    language=language,
+                    ref_audio=str(REF_VOICE) if REF_VOICE.exists() else None,
+                    x_vector_only_mode=True,
+                )
 
         if not wavs or len(wavs) == 0:
             return False
@@ -112,7 +147,7 @@ async def synthesize(
     text: str,
     emotion: str = "",
 ) -> Path | None:
-    """Generate TTS audio via Qwen3-TTS.
+    """Generate TTS audio with Eva's cloned voice.
 
     Returns path to wav file or None on failure.
     Uses caching by content hash.
@@ -147,10 +182,13 @@ async def synthesize(
 
 
 def cleanup_cache(max_files: int = 100) -> None:
-    """Remove old TTS cache files."""
+    """Remove old TTS cache files (keeps reference voice)."""
     if not VOICE_DIR.exists():
         return
-    files = sorted(VOICE_DIR.glob("tts_*.*"), key=lambda f: f.stat().st_mtime)
+    files = sorted(
+        [f for f in VOICE_DIR.glob("tts_*.*") if f.name != "eva_reference_voice.wav"],
+        key=lambda f: f.stat().st_mtime,
+    )
     if len(files) > max_files:
         for f in files[: len(files) - max_files]:
             try:

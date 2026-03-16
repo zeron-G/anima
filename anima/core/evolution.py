@@ -158,7 +158,7 @@ Do NOT wait for a separate execute phase — do the work right here, right now:
 1. Read target files with `read_file`
 2. Make changes with `edit_file` or `write_file`
 3. Run tests: `shell(command="python -m pytest tests/ --ignore=tests/test_oauth_live.py --ignore=tests/stress_test.py --tb=short -q")`
-4. If tests pass — commit: `shell(command="git add -A && git commit -m \\"Evolution {loop_id}: [title]\\" && git push origin main")`
+4. If tests pass — commit: `shell(command="git add -A && git commit -m \\"Evolution {loop_id}: [title]\\" && git push origin private")`
 5. Save a note: `save_note(title="Evolution {loop_id}", content="TYPE: ...\\nTITLE: ...\\nRESULT: ...")`
 
 This is a combined propose+execute cycle. The evolution only counts as successful if you ACTUALLY make changes and commit them.
@@ -183,7 +183,7 @@ FILES: {files}
    `shell(command="python -m pytest tests/ --ignore=tests/test_oauth_live.py --ignore=tests/stress_test.py --tb=short -q")`
 4. If tests FAIL — fix the issue or revert your changes and try again
 5. If tests PASS — commit and push to GitHub:
-   `shell(command="git add -A && git commit -m \\"Evolution {loop_id}: {title}\\" && git push origin main")`
+   `shell(command="git add -A && git commit -m \\"Evolution {loop_id}: {title}\\" && git push origin private")`
 6. Save an evolution log: `save_note(title="Evolution {loop_id}", content="TYPE: {evo_type}\\nTITLE: {title}\\nRESULT: [what you did]")`
 
 IMPORTANT: Actually DO it. Use tools. Don't just describe what you would do.
