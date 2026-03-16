@@ -73,6 +73,7 @@ class HeartbeatEngine:
         self._tick_history: list[dict] = []  # Last 30 tick records
         self._scheduler: Scheduler | None = None
         self._gossip_mesh = None  # Set via set_gossip_mesh()
+        self._evolution_engine = None  # Set via set_evolution_engine()
         self._is_restart = False  # Set via mark_as_restart()
         self._restart_reason = ""
 
@@ -99,6 +100,10 @@ class HeartbeatEngine:
     def set_gossip_mesh(self, gossip_mesh) -> None:
         """Set the gossip mesh for distributed heartbeat."""
         self._gossip_mesh = gossip_mesh
+
+    def set_evolution_engine(self, engine) -> None:
+        """Set the evolution engine for major heartbeat."""
+        self._evolution_engine = engine
 
     async def start(self) -> None:
         """Start all heartbeat loops."""
@@ -324,70 +329,86 @@ class HeartbeatEngine:
     # ---- Major Heartbeat (1h) ----
 
     async def _major_heartbeat_loop(self) -> None:
-        """Major heartbeat — triggers two-phase evolution cycle.
+        """Major heartbeat — triggers evolution via the six-layer pipeline.
 
-        Phase 1 (PROPOSE): Push proposal event → LLM analyzes and proposes
-        Phase 2 (EXECUTE): After proposal, push execute event → LLM implements
-
-        Each phase is a separate event in the cognitive loop, so they don't
-        block each other and the agent stays responsive between phases.
+        Uses the new evolution engine (anima/evolution/engine.py):
+          Proposal → Consensus → Implement → Test → Review → Deploy
         """
         await asyncio.sleep(self._major_interval)
         while self._running:
             try:
-                from anima.core.evolution import EvolutionState, build_propose_prompt
-
-                evo_state = EvolutionState()
-                if evo_state.status != "idle":
-                    log.info("Evolution still in progress (%s), skipping", evo_state.status)
+                if not self._evolution_engine:
                     await asyncio.sleep(self._major_interval)
                     continue
 
-                log.info("Major heartbeat — starting evolution cycle #%d", evo_state.loop_count + 1)
+                status = self._evolution_engine.get_status()
+                if status["running"]:
+                    log.info("Evolution still running, skipping")
+                    await asyncio.sleep(self._major_interval)
+                    continue
 
-                # Phase 1: PROPOSE
-                propose_prompt = build_propose_prompt(evo_state)
+                if status["cooldown_remaining"] > 0:
+                    log.info("Evolution in cooldown (%ds)", status["cooldown_remaining"])
+                    await asyncio.sleep(self._major_interval)
+                    continue
+
+                # Generate a proposal via LLM self-thinking
+                log.info("Major heartbeat — pushing evolution thinking event")
                 await self._event_queue.put(Event(
                     type=EventType.SELF_THINKING,
                     payload={
                         "tick_count": self._tick_count,
                         "evolution": True,
-                        "evolution_phase": "propose",
-                        "evolution_prompt": propose_prompt,
+                        "evolution_prompt": self._build_evolution_prompt(),
                     },
                     priority=EventPriority.LOW,
                     source="evolution",
                 ))
-
-                # Wait for proposal to be processed (check every 30s, up to 5 min)
-                for _ in range(10):
-                    await asyncio.sleep(30)
-                    evo_state = EvolutionState()
-                    if evo_state.status == "executing":
-                        break
-                    if evo_state.status == "idle":
-                        break
-
-                # Phase 2: EXECUTE (if proposal was accepted)
-                evo_state = EvolutionState()
-                if evo_state.status == "executing" and evo_state.current_loop.get("title"):
-                    from anima.core.evolution import build_execute_prompt
-                    exec_prompt = build_execute_prompt(evo_state)
-                    log.info("Evolution executing: %s", evo_state.current_loop.get("title", "?"))
-                    await self._event_queue.put(Event(
-                        type=EventType.SELF_THINKING,
-                        payload={
-                            "tick_count": self._tick_count,
-                            "evolution": True,
-                            "evolution_phase": "execute",
-                            "evolution_prompt": exec_prompt,
-                        },
-                        priority=EventPriority.LOW,
-                        source="evolution",
-                    ))
 
             except asyncio.CancelledError:
                 return
             except Exception as e:
                 log.error("Major heartbeat/evolution error: %s", e)
             await asyncio.sleep(self._major_interval)
+
+    def _build_evolution_prompt(self) -> str:
+        """Build the evolution proposal prompt with context from experience memory."""
+        from anima.core.evolution import EvolutionState
+        evo_state = EvolutionState()
+        history = evo_state.recent_history_text()
+
+        # Add lessons from evolution memory
+        memory = self._evolution_engine.memory if self._evolution_engine else None
+        anti_patterns = memory.get_anti_patterns_text() if memory else ""
+        goal = memory.get_next_goal() if memory else None
+        goal_text = f"\nCURRENT GOAL: {goal['title']} (progress: {goal['progress']:.0%})" if goal else ""
+
+        return f"""[EVOLUTION CYCLE]
+
+You are Eva. Analyze your own codebase and propose ONE concrete improvement.
+
+Output a structured proposal in this EXACT format:
+```
+TYPE: bugfix | feature | refactor | optimization
+TITLE: (one line)
+PROBLEM: (what's wrong or missing)
+SOLUTION: (how to fix it)
+FILES: file1.py, file2.py
+RISK: low | medium | high
+COMPLEXITY: trivial | small | medium | large
+```
+
+Then IMPLEMENT it: read files, make changes, run tests, commit.
+{goal_text}
+{anti_patterns}
+
+Recent evolution history:
+{history}
+
+RULES:
+- Actually DO it with tools, don't just describe
+- Run tests after changes: `shell(command="python -m pytest tests/ --tb=short -q")`
+- If tests pass, commit: `shell(command="git add -A && git commit -m \\"Evolution: [title]\\" && git push origin private")`
+- If tests fail, fix or revert
+- Do NOT modify .env, local/env.yaml, or evolution engine core
+"""

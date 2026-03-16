@@ -143,6 +143,11 @@ async def run() -> bool:
 
     heartbeat.set_scheduler(scheduler)
 
+    # ── Evolution engine v2 ──
+    from anima.evolution.engine import EvolutionEngine
+    evolution_engine = EvolutionEngine()
+    heartbeat.set_evolution_engine(evolution_engine)
+
     # Active channels for response routing (populated if network enabled)
     _active_channels: dict[str, Any] = {}
 
@@ -246,6 +251,7 @@ async def run() -> bool:
             on_node_dead=on_node_dead,
         )
         heartbeat.set_gossip_mesh(gossip_mesh)
+        evolution_engine.wire(gossip_mesh=gossip_mesh)
 
         # Wire gossip mesh to remote tools for task delegation
         from anima.tools.builtin.remote import set_gossip_mesh as set_remote_gossip
@@ -347,6 +353,9 @@ async def run() -> bool:
     cognitive.set_heartbeat(heartbeat)
     if gossip_mesh:
         cognitive.set_gossip_mesh(gossip_mesh)
+
+    # Wire evolution engine with reload manager (created later via cognitive)
+    evolution_engine.wire(reload_manager=cognitive.reload_manager)
 
     # ── Restore conversation context ──
     # Always load recent conversation from DB — works for ANY restart type
