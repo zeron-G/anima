@@ -8,6 +8,8 @@ This is the main entry point. Called by the major heartbeat.
 from __future__ import annotations
 
 import asyncio
+import json
+import os
 import subprocess as _sp
 import time
 from typing import Any
@@ -46,6 +48,7 @@ class EvolutionEngine:
         self._consecutive_failures = 0
         self._last_hour_reset = time.time()
         self._cooldown_until = 0
+        self._last_failure: dict | None = None
 
         # External references (set by main.py via wire())
         self._gossip_mesh = None
@@ -125,7 +128,7 @@ class EvolutionEngine:
             if not impl_ok:
                 log.warning("Implementation failed for %s", proposal.id)
                 proposal.status = ProposalStatus.FAILED
-                self._on_failure(proposal)
+                self._on_failure(proposal, stage="implement", error="Implementation agent failed or timed out")
                 worktree.cleanup()
                 return "implement_failed"
 
@@ -169,7 +172,7 @@ class EvolutionEngine:
             if not review_ok:
                 log.warning("Review failed: %s", review_msg)
                 proposal.status = ProposalStatus.FAILED
-                self._on_failure(proposal)
+                self._on_failure(proposal, stage="review", error=review_msg)
                 return "review_failed"
 
             # Commit changes in main project (SubAgent edited files there)
@@ -199,7 +202,7 @@ class EvolutionEngine:
             ok, msg = await self.deployer.verify_deployment()
             if not ok:
                 self.deployer.rollback(proposal, msg)
-                self._on_failure(proposal)
+                self._on_failure(proposal, stage="deploy", error=msg)
                 return "rolled_back"
 
             # Trigger hot-reload if needed
@@ -214,7 +217,7 @@ class EvolutionEngine:
         except Exception as e:
             log.error("Evolution pipeline error: %s", e)
             proposal.status = ProposalStatus.FAILED
-            self._on_failure(proposal)
+            self._on_failure(proposal, stage="pipeline", error=str(e))
             return "error"
 
         finally:
@@ -290,7 +293,7 @@ class EvolutionEngine:
                 f"Test {level} failed after {proposal.max_retries} attempts",
                 f"Test output: {output[:300]}",
             )
-            self._on_failure(proposal)
+            self._on_failure(proposal, stage=f"test_{level.lower().replace(' ', '_')}", error=output[:300])
             return "abandoned"
 
         # Retry — go back to implement
@@ -356,8 +359,23 @@ class EvolutionEngine:
         self._consecutive_failures = 0
         self._evolution_count_this_hour += 1
 
-    def _on_failure(self, proposal: Proposal) -> None:
+    def _on_failure(self, proposal: Proposal, stage: str = "unknown", error: str = "") -> None:
         self._consecutive_failures += 1
+        self._last_failure = {
+            "title": proposal.title,
+            "proposal_id": proposal.id,
+            "stage": stage,
+            "error": error or proposal.status.value,
+            "timestamp": time.time(),
+        }
+        # Persist to structured log for post-mortem diagnosis
+        try:
+            log_path = os.path.join(str(__import__("anima.config", fromlist=["project_root"]).project_root()), "data", "logs", "evolution_failures.jsonl")
+            os.makedirs(os.path.dirname(log_path), exist_ok=True)
+            with open(log_path, "a", encoding="utf-8") as f:
+                f.write(json.dumps(self._last_failure) + "\n")
+        except Exception as exc:
+            log.warning("Could not write failure log: %s", exc)
         if self._consecutive_failures >= MAX_CONSECUTIVE_FAILURES:
             self._cooldown_until = time.time() + FAILURE_COOLDOWN_S
             log.warning("Too many failures (%d) — cooling down for %ds",
@@ -382,6 +400,7 @@ class EvolutionEngine:
             "evolutions_this_hour": self._evolution_count_this_hour,
             "consecutive_failures": self._consecutive_failures,
             "cooldown_remaining": max(0, int(self._cooldown_until - time.time())),
+            "last_failure": self._last_failure,
             "memory": {
                 "successes": len(self.memory.successes),
                 "failures": len(self.memory.failures),
