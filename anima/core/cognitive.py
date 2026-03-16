@@ -323,6 +323,10 @@ class AgenticLoop:
                             chosen_kw = getattr(self, "_last_chosen_kw", "")
                             summary = content[:200].replace("\n", " ")
                             self._last_proactive_result = f"[上次任务 {chosen_kw}]: {summary}" if chosen_kw else f"[上次]: {summary}"
+                        # If flagged to notify user (e.g. agent status update), also output
+                        if event.payload and event.payload.get("notify_user") and content.strip():
+                            await self._output(content)
+                            self._save_chat("assistant", content)
                     else:
                         self._emit_status({"stage": "responding", "detail": content[:80]})
                         await self._output(content)
@@ -528,6 +532,18 @@ class AgenticLoop:
             return (
                 "[INTERNAL: STARTUP]\n"
                 "You just booted. Check time and system status, then greet briefly."
+            )
+        if t == EventType.SELF_THINKING and p.get("running_agents"):
+            agents_info = "\n".join(
+                f"  - {a['type']} agent (id={a['id'][:12]}): running {a['runtime_s']}s — task: {a['prompt']}"
+                for a in p["running_agents"]
+            )
+            return (
+                f"[INTERNAL: AGENT_STATUS tick #{p.get('tick_count', 0)}]\n"
+                f"You have sub-agents that have been running for a while:\n{agents_info}\n\n"
+                "TASK: Send the user a brief friendly status update, e.g. "
+                "'Still working on: [task summary] (running Xs, please wait)'. "
+                "Keep it short. No need to use tools — just reply with the update."
             )
         if t == EventType.SELF_THINKING and p.get("evolution"):
             # Evolution cycle — use the full evolution prompt

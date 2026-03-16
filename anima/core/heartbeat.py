@@ -74,6 +74,8 @@ class HeartbeatEngine:
         self._scheduler: Scheduler | None = None
         self._gossip_mesh = None  # Set via set_gossip_mesh()
         self._evolution_engine = None  # Set via set_evolution_engine()
+        self._agent_manager = None  # Set via set_agent_manager()
+        self._agent_warned_ids: set[str] = set()  # Sessions warned at 60s
         self._is_restart = False  # Set via mark_as_restart()
         self._restart_reason = ""
 
@@ -104,6 +106,10 @@ class HeartbeatEngine:
     def set_evolution_engine(self, engine) -> None:
         """Set the evolution engine for major heartbeat."""
         self._evolution_engine = engine
+
+    def set_agent_manager(self, manager) -> None:
+        """Set the agent manager for active-agent tracking."""
+        self._agent_manager = manager
 
     async def start(self) -> None:
         """Start all heartbeat loops."""
@@ -160,6 +166,7 @@ class HeartbeatEngine:
         changes = await self._detect_file_changes()
         await self._decay_emotion()
         await self._confirm_alive()
+        await self._check_agent_timeouts()
 
         # Update snapshot cache (bridge to cognitive cycle)
         self._snapshot_cache.update(snapshot, changes)
@@ -270,6 +277,32 @@ class HeartbeatEngine:
                      self._working_memory.size,
                      self._working_memory.capacity)
 
+    async def _check_agent_timeouts(self) -> None:
+        """Check active sub-agents for slow/hung status and auto-timeout at 5min."""
+        if not self._agent_manager:
+            return
+        now = time.time()
+        for session in list(self._agent_manager._sessions.values()):
+            if session.status != "running":
+                continue
+            runtime = now - session.created_at
+            sid = session.id
+            # Auto-timeout at 5 minutes
+            if runtime > 300:
+                session.status = "timeout"
+                session.error = f"Auto-timed out after {runtime:.0f}s (heartbeat watchdog)"
+                session.completed_at = now
+                task = self._agent_manager._tasks.get(sid)
+                if task and not task.done():
+                    task.cancel()
+                log.warning("Agent %s auto-timed out after %.0fs", sid, runtime)
+                self._agent_warned_ids.discard(sid)  # Clean up
+            # Warn at 60s (once per session)
+            elif runtime > 60 and sid not in self._agent_warned_ids:
+                self._agent_warned_ids.add(sid)
+                log.warning("Agent %s running for %.0fs — may be slow or hung: %s",
+                            sid, runtime, session.prompt[:60])
+
     # ---- LLM Heartbeat (5min) ----
 
     async def _llm_heartbeat_loop(self) -> None:
@@ -311,15 +344,37 @@ class HeartbeatEngine:
         recent_sigs = [f"{s:.2f}" for s in self._recent_significance_scores[-5:]]
         wm_summary = self._working_memory.get_summary()
 
+        # Check for running agents that need user notification (running > 15s)
+        running_agents = []
+        if self._agent_manager:
+            now = time.time()
+            for session in self._agent_manager._sessions.values():
+                if session.status == "running":
+                    runtime = now - session.created_at
+                    if runtime > 15:
+                        running_agents.append({
+                            "id": session.id,
+                            "type": session.type,
+                            "prompt": session.prompt[:80],
+                            "runtime_s": int(runtime),
+                        })
+
+        payload: dict = {
+            "reason": "periodic proactive thinking",
+            "recent_significance": recent_sigs,
+            "working_memory_summary": wm_summary,
+            "tick_count": self._tick_count,
+            "consecutive_skips": self._consecutive_skips,
+        }
+        if running_agents:
+            payload["running_agents"] = running_agents
+            payload["notify_user"] = True
+            log.info("LLM heartbeat: %d running agent(s) > 15s — will notify user",
+                     len(running_agents))
+
         await self._event_queue.put(Event(
             type=EventType.SELF_THINKING,
-            payload={
-                "reason": "periodic proactive thinking",
-                "recent_significance": recent_sigs,
-                "working_memory_summary": wm_summary,
-                "tick_count": self._tick_count,
-                "consecutive_skips": self._consecutive_skips,
-            },
+            payload=payload,
             priority=EventPriority.LOW,  # lower than user messages
             source="heartbeat",
         ))

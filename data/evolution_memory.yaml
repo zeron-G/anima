@@ -105,3 +105,13 @@ successes:
   timestamp: 1773657966.0924482
   title: 修复 deployer.py 调用 request_reload 缺少必填参数
   type: bugfix
+- files:
+  - agents/eva/proactive_tasks.py
+  - data/todo_reminder_state.json
+  id: EVO-20260316-082a6d
+  lesson: 在 SELF_THINKING 的 proactive_tasks 中增加一个 "todo_reminder" 任务类型：每天早上（8:00-9:00
+    首次触发）读取 data/projects.md，提取未完成 TODO，与上次提醒时间对比，如果某个 TODO 超过 3 天未被提及，则在下次用户交互时主动提一句。状态存储在
+    data/todo_reminder_state.json 中。
+  timestamp: 1773664206.896302
+  title: 主动 TODO 提醒：定期检查 projects.md 并在早晨提醒主人
+  type: feature
