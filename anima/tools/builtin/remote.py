@@ -113,14 +113,66 @@ async def _delegate_task(node: str, task: str, timeout: int = 120) -> dict:
     if _task_delegate is None:
         return {"success": False, "error": "Not connected to gossip network (TaskDelegate not initialised)"}
 
-    # Resolve node name to node_id via hostname matching in alive peers
-    target_node_id = node
+    # Resolve node name → node_id via multi-dimensional matching:
+    # 1. exact node_id match
+    # 2. remote_nodes config: name → host IP → peer IP
+    # 3. hostname case-insensitive match
+    # 4. peer IP direct match against remote_nodes host
+    target_node_id: str | None = None
     if _gossip_mesh is not None:
         alive = _gossip_mesh.get_alive_peers()
+
+        # Build a host→node_id lookup from alive peers (IP matching)
+        ip_to_peer: dict[str, str] = {}
         for peer_id, peer_state in alive.items():
-            if peer_state.hostname.lower() == node.lower() or peer_id == node:
+            peer_ip = getattr(peer_state, "ip", None) or getattr(peer_state, "address", None)
+            if peer_ip:
+                ip_to_peer[peer_ip] = peer_id
+
+        for peer_id, peer_state in alive.items():
+            # 1. exact node_id
+            if peer_id == node:
                 target_node_id = peer_id
                 break
+            # 3. hostname case-insensitive
+            if getattr(peer_state, "hostname", "").lower() == node.lower():
+                target_node_id = peer_id
+                break
+
+        if target_node_id is None:
+            # 2 & 4. look up in remote_nodes config, then match by IP
+            from anima.config import get as cfg_get
+            remote_nodes: list[dict] = cfg_get("network.remote_nodes", [])
+            for rn in remote_nodes:
+                if rn.get("name", "").lower() == node.lower():
+                    host_ip = rn.get("host", "")
+                    matched = ip_to_peer.get(host_ip)
+                    if matched:
+                        target_node_id = matched
+                        log.info("Resolved '%s' via remote_nodes config → host %s → peer %s", node, host_ip, matched)
+                    else:
+                        log.warning(
+                            "remote_nodes config maps '%s' → host %s, but no alive peer has that IP. "
+                            "Alive peers: %s",
+                            node, host_ip, list(alive.keys()),
+                        )
+                    break
+
+    if target_node_id is None:
+        # No resolution succeeded — fail fast instead of silent timeout
+        alive_ids = list(_gossip_mesh.get_alive_peers().keys()) if _gossip_mesh else []
+        log.warning(
+            "Cannot resolve node '%s' to a known peer. Alive peers: %s. "
+            "Check remote_nodes config or that the node is online.",
+            node, alive_ids,
+        )
+        return {
+            "success": False,
+            "error": (
+                f"Cannot resolve node '{node}' — no alive peer matched by node_id, hostname, or remote_nodes config. "
+                f"Alive peers: {alive_ids}"
+            ),
+        }
 
     log.info("Delegating task to %s (resolved: %s), timeout=%ds", node, target_node_id, timeout)
     try:

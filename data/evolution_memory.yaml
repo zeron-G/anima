@@ -115,3 +115,13 @@ successes:
   timestamp: 1773664206.896302
   title: 主动 TODO 提醒：定期检查 projects.md 并在早晨提醒主人
   type: feature
+- files:
+  - anima/core/heartbeat.py
+  - anima/core/cognitive.py
+  id: EVO-20260316-30d528
+  lesson: 在心跳层面追踪活跃的 agent 任务：1) 心跳每 15s 检查活跃 agent 列表，若某 agent 已运行超过阈值（如 60s）则记录警告；2)
+    在 cognitive engine 或 heartbeat 中加入「任务等待中」状态提示逻辑 — 当有 agent 运行超过 15s 时，下次 LLM heartbeat
+    触发时主动告知用户进度；3) 超过 5 分钟的 agent 自动标记为超
+  timestamp: 1773665287.6773317
+  title: spawn_agent 超时检查与用户等待中间状态通知
+  type: feature
