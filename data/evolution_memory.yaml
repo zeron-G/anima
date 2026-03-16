@@ -96,3 +96,12 @@ successes:
   timestamp: 1773655995.1808238
   title: Discord Token 从环境变量自动读取
   type: bugfix
+- files:
+  - anima/core/reload.py
+  id: EVO-20260316-7d2d9d
+  lesson: 将 reload.py 中 request_reload() 的 conversation 和 emotion_state 参数改为可选参数（默认值分别为
+    None/[] 和 None/{}），这样 deployer.py 无需传入完整上下文也能触发热重载。同时在函数内部做 None 检查，保证向后兼容。deployer.py
+    不需要改动。
+  timestamp: 1773657966.0924482
+  title: 修复 deployer.py 调用 request_reload 缺少必填参数
+  type: bugfix
