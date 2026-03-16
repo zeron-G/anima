@@ -137,7 +137,7 @@ class Deployer:
         """Trigger ANIMA hot-reload if .py files were modified."""
         py_files = [f for f in proposal.files if f.endswith(".py")]
         if py_files and self._reload_manager:
-            self._reload_manager.request_restart(
+            self._reload_manager.request_reload(
                 reason=f"Evolution {proposal.id}: {proposal.title}",
             )
             log.info("Hot-reload triggered for %s", proposal.id)
