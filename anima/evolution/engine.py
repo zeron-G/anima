@@ -232,14 +232,14 @@ class EvolutionEngine:
         # Wait for the agent to finish
         result = await self._agent_manager.wait_for(session.id, timeout=300)
 
-        if result.status == "completed":
+        if result.status in ("completed", "done"):
             log.info("Implementation agent completed: %s", proposal.id)
             return True
         elif result.status == "timeout":
             log.warning("Implementation agent timed out: %s", proposal.id)
             return False
         else:
-            log.warning("Implementation agent failed: %s — %s", proposal.id, result.error or "unknown")
+            log.warning("Implementation agent %s: status=%s error=%s", proposal.id, result.status, result.error or "none")
             return False
 
     async def _handle_test_failure(self, proposal: Proposal, worktree: Worktree,
