@@ -77,6 +77,9 @@ def _run_backend_loop(ready_event: threading.Event) -> None:
     When evolution triggers hot-reload, run() returns True.
     We sleep briefly, then re-run — the window stays open.
     """
+    # Prevent GBK encoding crashes on Windows with emoji in logs
+    os.environ["PYTHONIOENCODING"] = "utf-8"
+
     if sys.platform == "win32":
         asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
@@ -97,8 +100,8 @@ def _run_backend_loop(ready_event: threading.Event) -> None:
         except (KeyboardInterrupt, SystemExit):
             break
         except Exception as e:
-            log.error("Backend crashed: %s", e)
-            restart = False
+            log.error("Backend crashed: %s — restarting in 3s", e)
+            restart = True  # Auto-restart on crash, don't give up
         finally:
             loop.close()
 
