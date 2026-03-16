@@ -140,8 +140,19 @@ class TerminalUI:
                 return
             except EOFError:
                 return
+            except ValueError as e:
+                # stdin unavailable in non-interactive mode — not a real error
+                log.debug("Terminal input unavailable: %s", e)
+                return
             except Exception as e:
+                err_str = str(e)
+                # stdin lost / non-interactive — not a real error, just exit cleanly
+                if "sys.stdin" in err_str or "lost" in err_str:
+                    log.debug("Terminal stdin unavailable, stopping input loop: %s", e)
+                    return
                 log.error("Terminal input error: %s", e)
+                # Don't tight-loop on repeated errors — back off briefly
+                await asyncio.sleep(1.0)
 
     def _blocking_input(self) -> str | None:
         """Blocking input call — runs in thread."""
