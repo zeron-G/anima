@@ -76,7 +76,7 @@ async def _self_repair(error_description: str, max_budget: float = 1.5) -> dict:
 
 Project: ANIMA — a heartbeat-driven autonomous AI agent system
 Location: {root}
-Test command: D:/program/codesupport/anaconda/envs/anima/python.exe -m pytest tests/ --ignore=tests/test_oauth_live.py --ignore=tests/stress_test.py --tb=short -q
+Test command: python -m pytest tests/ --tb=short -q
 
 Eva's error report:
 {error_description}

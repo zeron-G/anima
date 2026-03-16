@@ -1,125 +1,103 @@
-# ANIMA Phase 0 Configuration
+# ═══════════════════════════════════════
+# ANIMA Default Configuration
+# ═══════════════════════════════════════
+#
+# Project defaults only. No machine-specific values.
+# Machine-specific settings go in local/env.yaml (gitignored).
+# Secrets go in .env (gitignored).
 
-# Active agent — loads persona from agents/<name>/
 agent:
   name: "eva"
 
+# ── Heartbeat ──
 heartbeat:
-  script_interval_s: 30       # was 15 — less frequent scanning
-  llm_interval_s: 600         # was 180 (3min) → 10min — Eva thinks less often
-  major_interval_s: 1800      # was 900 → 30min
+  script_interval_s: 30
+  llm_interval_s: 600
+  major_interval_s: 1800
 
-# LLM heartbeat trigger conditions
 llm_trigger:
-  min_significant_diffs: 5    # was 3 — need more changes to trigger thinking
-  significance_threshold: 0.5 # was 0.3 — higher bar
-  max_consecutive_skips: 10   # was 3 — allow more skips
+  min_significant_diffs: 5
+  significance_threshold: 0.5
+  max_consecutive_skips: 10
 
-# Field-level diff thresholds
+# ── Perception ──
 diff_rules:
-  cpu_percent:
-    threshold: 15
-  memory_percent:
-    threshold: 10
-  disk_percent:
-    threshold: 5
-  file_changes:
-    threshold: 0      # any file change
-  process_count:
-    threshold: 5
+  cpu_percent: { threshold: 15 }
+  memory_percent: { threshold: 10 }
+  disk_percent: { threshold: 5 }
+  file_changes: { threshold: 0 }
+  process_count: { threshold: 5 }
 
-# LLM routing — latest model IDs (2025-06)
-# Available: claude-opus-4-6, claude-sonnet-4-6, claude-haiku-4-5-20251001
+perception:
+  watch_paths: ["."]
+  watch_extensions: [".py", ".md", ".yaml", ".yml", ".json", ".txt"]
+  snapshot_history_size: 10
+
+# ── LLM ──
 llm:
-  tier1:
-    model: "claude-opus-4-6"
-    max_tokens: 8192
-  tier2:
-    model: "claude-sonnet-4-6"
-    max_tokens: 4096
-  budget:
-    daily_limit_usd: 10.0
+  tier1: { model: "claude-opus-4-6", max_tokens: 8192 }
+  tier2: { model: "claude-sonnet-4-6", max_tokens: 4096 }
+  budget: { daily_limit_usd: 10.0 }
 
-# Decision significance thresholds
 decision:
-  low_threshold: 0.3       # below → rule engine
-  high_threshold: 0.7      # above → Tier1
+  low_threshold: 0.3
+  high_threshold: 0.7
 
-# Memory
+# ── Memory ──
 memory:
   working_capacity: 20
   db_path: "data/anima.db"
 
-# Perception
-perception:
-  watch_paths:
-    - "."
-  watch_extensions:
-    - ".py"
-    - ".md"
-    - ".yaml"
-    - ".yml"
-    - ".json"
-    - ".txt"
-  snapshot_history_size: 10
-
-# Emotion
+# ── Emotion ──
 emotion:
-  decay_rate: 0.05          # per script heartbeat
+  decay_rate: 0.05
   baseline:
     engagement: 0.5
     confidence: 0.6
     curiosity: 0.7
     concern: 0.2
 
-# Tools
+# ── Tools ──
 tools:
   safety:
-    max_risk_level: 3       # 0=safe, 1=low, 2=medium, 3=high, X=blocked
+    max_risk_level: 3
     require_confirm_level: 3
 
-# Skills — external skill directories (opt-in, not auto-discovered)
-# OpenClaw skills are NOT loaded by default. Add the path here to enable:
-#   - "/path/to/openclaw/workspace/skills"
+# ── Skills ──
 skills:
   extra_dirs: []
 
-# Distributed Network (Phase 1)
+# ── Network ──
+# Peers, secrets, remote_nodes are in local/env.yaml
 network:
   enabled: true
   listen_port: 9420
-  secret: ""                  # Set via ANIMA_NETWORK_SECRET env var
-  peers: []                   # Add peer IPs here: ["192.168.1.x:9420"]
+  secret: ""
+  peers: []
   gossip_interval_s: 5
   suspect_phi: 8
   dead_phi: 16
   remote_nodes: []
-    # Configure via environment variables, NOT here
-    # - name: "laptop"
-    #   host: ""
-    #   user: ""
-    #   password: ""  # Use ANIMA_REMOTE_PASSWORD env var
 
-# Communication Channels
+# ── Channels ──
 channels:
   discord:
-    enabled: true
-    token: ""                 # Read from DISCORD_BOT_TOKEN env var
-    allowed_users: []         # Empty = allow all
+    enabled: false      # Enable in local/env.yaml
+    token: ""           # Set via DISCORD_BOT_TOKEN env var
+    allowed_users: []
   webhook:
     enabled: false
     port: 9421
-    secret: ""                # Bearer token for webhook auth
+    secret: ""
 
-# Dashboard
+# ── Dashboard ──
 dashboard:
   port: 8420
 
-# Shutdown
+# ── System ──
 shutdown:
   timeout_s: 5
 
-# Logging
 logging:
   level: "INFO"
   file: "data/logs/anima.log"

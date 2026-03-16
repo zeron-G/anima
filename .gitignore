@@ -12,7 +12,7 @@ build/
 .venv/
 venv/
 
-# Runtime data
+# Runtime data (local, regenerated at runtime)
 data/anima.db
 data/chroma/
 data/logs/*
@@ -26,21 +26,26 @@ data/projects.md
 data/node.json
 data/scheduler.json
 data/sync_watermarks.json
-data/evolution_state.json
 data/watchdog_heartbeat.json
 data/spawn*.tar.gz
 data/memory.db
 data/anima.lock
 data/voice/
+data/evolution_checkpoint.json
+!data/.gitkeep
 !data/**/.gitkeep
 !data/user_profile.md.example
 
-# Secrets
+# Local environment (machine-specific, NEVER commit)
+local/env.yaml
+!local/env.yaml.example
+
+# Secrets (NEVER commit)
 .env
 .env.*
 !.env.example
 
-# Agent private memory
+# Agent private memory (personal, not shared)
 agents/*/feelings.md
 agents/*/memory.md
 agents/*/diary.md
@@ -58,8 +63,12 @@ Thumbs.db
 desktop.ini
 $null
 
-# Large model files
+# Large model/binary files
 *.vrm
+anima/dashboard/static/model/PurpleBird/*.moc3
+anima/dashboard/static/model/PurpleBird/*.png
+anima/dashboard/static/model/PurpleBird/*.cfg
+anima/desktop/frontend/model/
 
 # Test/build
 .pytest_cache/
@@ -67,5 +76,5 @@ htmlcov/
 .coverage
 tests/_*.py
 
-# Tools (development only)
+# Dev tools output
 tools/vrm_report.txt

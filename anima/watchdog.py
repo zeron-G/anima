@@ -138,11 +138,44 @@ def _check_heartbeat() -> bool:
         return True  # Can't read → assume OK
 
 
+_claude_available: bool | None = None  # Cached check result
+
+
+def _check_claude_cli() -> bool:
+    """Check if Claude Code CLI is available. Cached after first check."""
+    global _claude_available
+    if _claude_available is not None:
+        return _claude_available
+
+    try:
+        result = subprocess.run(
+            ["claude", "--version"],
+            capture_output=True, text=True, timeout=10,
+        )
+        _claude_available = result.returncode == 0
+        if _claude_available:
+            _log(f"Claude Code CLI available: {result.stdout.strip()}")
+        else:
+            _log("Claude Code CLI found but returned error")
+    except FileNotFoundError:
+        _claude_available = False
+        _log("Claude Code CLI not installed — watchdog will only do restarts, no auto-diagnosis")
+    except Exception as e:
+        _claude_available = False
+        _log(f"Claude Code CLI check failed: {e}")
+
+    return _claude_available
+
+
 def _invoke_claude_code(prompt: str, max_budget: float = 2.0) -> tuple[bool, str]:
     """Invoke Claude Code CLI to diagnose and fix an issue.
 
-    Returns (success, output).
+    Returns (success, output). Returns (False, "unavailable") if CLI not installed.
     """
+    if not _check_claude_cli():
+        _log("Skipping Claude Code (not available) — restart only")
+        return False, "Claude Code CLI not available"
+
     _log(f"Invoking Claude Code for repair...")
     _log(f"Prompt: {prompt[:200]}...")
 
@@ -256,8 +289,7 @@ def _build_health_check_prompt(health_issues: str, log_context: str) -> str:
 ## Instructions:
 1. Diagnose why the subsystem(s) failed to start
 2. Common fixes:
-   - Missing package: install with `uv pip install --python D:/data/code/github/anima/.venv/Scripts/python.exe <package>`
-     OR `D:/program/codesupport/anaconda/envs/anima/python.exe -m pip install <package>`
+   - Missing package: `python -m pip install <package>`
    - Import error: check the module exists, fix typos
    - Config issue: check config/default.yaml
 3. Fix the root cause
@@ -283,7 +315,7 @@ Your job: diagnose the crash, fix the root cause, run tests, and commit.
 1. Read the relevant source files mentioned in the traceback
 2. Identify the root cause
 3. Fix the issue with minimal, targeted changes
-4. Run tests: `D:/data/code/github/anima/.venv/Scripts/python.exe -m pytest tests/ --ignore=tests/test_oauth_live.py --ignore=tests/stress_test.py --tb=short -q`
+4. Run tests: `python -m pytest tests/ --tb=short -q`
 5. If tests pass, commit: `git add -A && git commit -m "watchdog: fix <brief description>"`
 6. Do NOT push to remote — the watchdog will handle that after restart verification
 
@@ -311,7 +343,7 @@ Total errors: {error_info['total_errors']}, unique patterns: {error_info['unique
 ## Instructions:
 1. Read the source files involved in this error
 2. Fix the root cause (not just suppress the error)
-3. Run tests: `D:/data/code/github/anima/.venv/Scripts/python.exe -m pytest tests/ --ignore=tests/test_oauth_live.py --ignore=tests/stress_test.py --tb=short -q`
+3. Run tests: `python -m pytest tests/ --tb=short -q`
 4. If tests pass, commit: `git add -A && git commit -m "watchdog: fix <brief description>"`
 5. Do NOT push to remote
 
@@ -327,11 +359,8 @@ def run_watchdog(dry_run: bool = False) -> None:
     _log(f"Dry run: {dry_run}")
     _log("=" * 60)
 
-    # Prefer anaconda env (has all deps including discord.py, paramiko, etc.)
-    # Fall back to .venv only if anaconda env doesn't exist
-    anaconda_python = r"D:\program\codesupport\anaconda\envs\anima\python.exe"
-    venv_python = str(PROJECT_ROOT / ".venv" / "Scripts" / "python.exe")
-    python_exe = anaconda_python if Path(anaconda_python).exists() else venv_python
+    # Use the same Python that's running the watchdog
+    python_exe = sys.executable
 
     consecutive_fixes = 0
     last_crash_time = 0

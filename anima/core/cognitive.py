@@ -1,13 +1,12 @@
-"""Agentic loop with rule-engine pre-filter — LLM-native decision making
-with persistent life capabilities.
+"""Agentic loop — LLM-native decision making with tool use.
+
+Responsibilities (after refactor):
+  - cognitive.py: LLM agentic loop execution (this file)
+  - event_router.py: event → message formatting, tier selection
+  - conversation.py: conversation buffer lifecycle
 
 Architecture:
-  Event arrives → rule engine tries first (zero cost)
-    → if handled: execute + done (no LLM)
-    → if not handled: LLM agentic loop (multi-turn tool use)
-
-This hybrid saves ~80% of LLM calls compared to "everything goes to LLM"
-while preserving full autonomous capability for complex events.
+  Event → rule engine (zero cost) → LLM agentic loop (multi-turn tool use)
 """
 
 from __future__ import annotations
@@ -30,6 +29,8 @@ from anima.perception.snapshot_cache import SnapshotCache
 from anima.tools.executor import ToolExecutor
 from anima.tools.registry import ToolRegistry
 from anima.core.reload import ReloadManager
+from anima.core.event_router import event_to_message, pick_tier, is_self_event
+from anima.core.conversation import ConversationManager
 from anima.utils.logging import get_logger
 
 log = get_logger("cognitive")

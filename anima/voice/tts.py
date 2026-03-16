@@ -19,7 +19,8 @@ from anima.utils.logging import get_logger
 log = get_logger("voice.tts")
 
 VOICE_DIR = data_dir() / "voice"
-MODEL_ID = "Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice"
+# Model ID from local/env.yaml, fallback to default
+_DEFAULT_MODEL_ID = "Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice"
 
 _model: Any = None
 _model_lock = threading.Lock()
@@ -59,10 +60,12 @@ def _load_model() -> Any:
             import torch
             from qwen_tts import Qwen3TTSModel
 
-            log.info("Loading Qwen3-TTS model: %s ...", MODEL_ID)
+            from anima.config import local_get
+            model_id = local_get("tts.model_id", _DEFAULT_MODEL_ID)
+            log.info("Loading Qwen3-TTS: %s ...", model_id)
 
             model = Qwen3TTSModel.from_pretrained(
-                MODEL_ID,
+                model_id,
                 device_map="cuda:0",
                 dtype=torch.bfloat16,
             )
@@ -85,11 +88,12 @@ def _synthesize_sync(clean: str, out_path: Path) -> bool:
     try:
         import soundfile as sf
 
+        from anima.config import local_get
         wavs, sr = model.generate_custom_voice(
             text=clean,
-            language="Chinese",
-            speaker="Vivian",
-            instruct="用温柔甜美的少女声音说话",
+            language=local_get("tts.language", "Chinese"),
+            speaker=local_get("tts.speaker", "Vivian"),
+            instruct=local_get("tts.instruct", ""),
         )
 
         if not wavs or len(wavs) == 0:

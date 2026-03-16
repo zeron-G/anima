@@ -32,10 +32,13 @@ def _run_shell_sync(command: str, timeout: int = 30, working_directory: str | No
     elif command == "python":
         command = _PYTHON_PATH
 
-    # Resolve working directory
+    # Resolve working directory — default to project root
     cwd = None
     if working_directory:
         cwd = os.path.expandvars(os.path.expanduser(working_directory))
+    else:
+        from anima.config import project_root
+        cwd = str(project_root())
         if not os.path.isdir(cwd):
             return {
                 "returncode": -1,
