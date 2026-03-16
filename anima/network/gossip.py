@@ -93,6 +93,18 @@ class GossipMesh:
         self._on_node_suspect: Callable | None = None
         self._on_node_dead: Callable | None = None
         self._on_event: Callable | None = None
+        self._on_task_delegate: Callable | None = None      # async(task_dict) — called when a task arrives
+        self._on_task_result: Callable | None = None      # sync(result_dict) — called when a result arrives
+        self._on_task_cancel: Callable | None = None      # async(task_id) — called when a cancel arrives
+        self._on_task_status_query: Callable | None = None  # async(msg) — status query from remote node
+        self._on_task_status_reply: Callable | None = None  # sync(msg) — status reply to a query we sent
+
+        # Pending outbound task messages (task_delegate / task_result)
+        self._outbound_task_msgs: list[dict] = []
+
+        # Event loop reference captured at start() time so the gossip thread
+        # can safely post callbacks via call_soon_threadsafe.
+        self._event_loop: asyncio.AbstractEventLoop | None = None
 
     def set_callbacks(self, **kwargs: Any) -> None:
         for k, v in kwargs.items():
@@ -107,9 +119,20 @@ class GossipMesh:
 
     async def start(self) -> None:
         self._running = True
+        # Capture the running event loop so the gossip thread can post
+        # callbacks back onto it safely via call_soon_threadsafe.
+        try:
+            self._event_loop = asyncio.get_running_loop()
+        except RuntimeError:
+            self._event_loop = None
         self._thread = threading.Thread(target=self._gossip_thread, daemon=True)
         self._thread.start()
         log.info("Gossip mesh started on port %d", self._port)
+
+    def set_event_loop(self, loop: asyncio.AbstractEventLoop) -> None:
+        """Explicitly set the event loop (useful when start() is not awaited
+        inside a running loop, e.g. during testing)."""
+        self._event_loop = loop
 
     async def stop(self) -> None:
         self._running = False
@@ -123,6 +146,46 @@ class GossipMesh:
         # Store it and send on next gossip tick.
         with self._lock:
             self._incoming_events.append(event_data)
+
+    async def send_task_message(self, msg_type: str, payload: dict) -> None:
+        """Queue a task protocol message for broadcast on the next gossip tick.
+
+        Supported types: task_delegate, task_result, task_cancel,
+                         task_status_query, task_status_reply.
+        """
+        with self._lock:
+            self._outbound_task_msgs.append({"_msg_type": msg_type, **payload})
+
+    def attach_task_delegate(self, delegate: "Any") -> None:
+        """Wire a TaskDelegate instance into the gossip mesh.
+
+        This sets up:
+          - delegate.broadcast_fn  → gossip send_task_message (so the delegate
+            can send task_delegate / task_result messages over the network)
+          - gossip._on_task_delegate → delegate.handle_incoming_task
+          - gossip._on_task_result  → delegate.handle_task_result
+          - delegate._loop          → the captured asyncio event loop so that
+            future resolution from the gossip thread works correctly
+
+        Call this after constructing both objects, before start().
+        """
+
+        async def _broadcast(msg: dict) -> None:
+            # Allow task_delegate, task_result, and task_cancel
+            msg_type = msg.pop("type", "task_delegate")
+            await self.send_task_message(msg_type, msg)
+
+        delegate.set_broadcast(_broadcast)
+        # Share the event loop reference so handle_task_result can safely
+        # resolve futures from the gossip background thread.
+        if self._event_loop is not None:
+            delegate.set_loop(self._event_loop)
+        self._on_task_delegate = delegate.handle_incoming_task      # async coroutine
+        self._on_task_result = delegate.handle_task_result           # sync callback
+        self._on_task_cancel = delegate.handle_cancel                # async coroutine
+        self._on_task_status_query = delegate.handle_status_query    # async coroutine
+        self._on_task_status_reply = delegate.handle_status_reply    # sync callback
+        log.debug("TaskDelegate attached to GossipMesh")
 
     def get_peers(self) -> dict[str, NodeState]:
         with self._lock:
@@ -177,6 +240,8 @@ class GossipMesh:
                 with self._lock:
                     pending = list(self._incoming_events)
                     self._incoming_events.clear()
+                    pending_tasks = list(self._outbound_task_msgs)
+                    self._outbound_task_msgs.clear()
                 for evt in pending:
                     emsg = NetworkMessage(
                         type="event",
@@ -187,6 +252,27 @@ class GossipMesh:
                     if self._secret:
                         emsg.sign(self._secret)
                     pub.send(emsg.pack())
+
+                # 3b. Send pending task messages (task_delegate / task_result / task_cancel)
+                for task_msg in pending_tasks:
+                    msg_type = task_msg.pop("_msg_type", "task_delegate")
+                    # Resolve target node: check nested task dict first, then
+                    # top-level target_node (used by status query/reply and cancel).
+                    target = (
+                        task_msg.get("task", {}).get("target_node")
+                        or task_msg.get("target_node")
+                        or "*"
+                    )
+                    tmsg = NetworkMessage(
+                        type=msg_type,
+                        source_node=self._identity.node_id,
+                        target_node=target,
+                        payload=task_msg,
+                    )
+                    if self._secret:
+                        tmsg.sign(self._secret)
+                    pub.send(tmsg.pack())
+                    log.debug("Sent %s to %s", msg_type, target)
 
                 # 4. Receive messages
                 for _ in range(50):  # drain up to 50 messages per tick
@@ -207,6 +293,16 @@ class GossipMesh:
                         elif rmsg.type == "event":
                             if self._on_event:
                                 self._on_event(rmsg.payload)
+                        elif rmsg.type == "task_delegate":
+                            self._handle_task_delegate(rmsg)
+                        elif rmsg.type == "task_result":
+                            self._handle_task_result(rmsg)
+                        elif rmsg.type == "task_cancel":
+                            self._handle_task_cancel(rmsg)
+                        elif rmsg.type == "task_status_query":
+                            self._handle_task_status_query(rmsg)
+                        elif rmsg.type == "task_status_reply":
+                            self._handle_task_status_reply(rmsg)
                     except Exception as e:
                         log.debug("Message processing error: %s", e)
 
@@ -259,6 +355,122 @@ class GossipMesh:
             if self._on_node_alive:
                 self._on_node_alive(nid, remote)
             log.info("Node recovered: %s (%s)", nid, remote.hostname)
+
+    def _handle_task_delegate(self, msg: NetworkMessage) -> None:
+        """Handle an incoming task_delegate message from a remote node."""
+        target_node = msg.target_node
+        if target_node and target_node != "*" and target_node != self._identity.node_id:
+            return  # Not for us
+
+        if self._on_task_delegate:
+            task_dict = msg.payload.get("task", msg.payload)
+            loop = self._event_loop
+            if loop is not None and loop.is_running():
+                # Post the coroutine onto the main event loop from this thread.
+                asyncio.run_coroutine_threadsafe(
+                    self._on_task_delegate(task_dict), loop
+                )
+            else:
+                log.debug(
+                    "No running event loop for task_delegate; dropping task %s",
+                    task_dict.get("task_id"),
+                )
+        log.debug(
+            "Received task_delegate from %s: %s",
+            msg.source_node, msg.payload.get("task", {}).get("task_id"),
+        )
+
+    def _handle_task_result(self, msg: NetworkMessage) -> None:
+        """Handle an incoming task_result message from a remote node.
+
+        ``source_node`` in the payload is the original task requester.
+        We only act on results destined for this node; results for other nodes
+        are forwarded by the PUB/SUB topology naturally (every subscriber sees
+        every message) so we simply ignore ones not addressed to us.
+        """
+        # Ignore our own re-broadcast
+        if msg.source_node == self._identity.node_id:
+            return
+
+        # Only process results that were requested by this node
+        requester = msg.payload.get("source_node", "")
+        if requester and requester != self._identity.node_id:
+            return  # Result is for a different node
+
+        if self._on_task_result:
+            self._on_task_result(msg.payload)
+        log.debug(
+            "Received task_result from %s: task=%s status=%s",
+            msg.source_node,
+            msg.payload.get("task_id"),
+            msg.payload.get("status"),
+        )
+
+    def _handle_task_cancel(self, msg: NetworkMessage) -> None:
+        """Handle an incoming task_cancel message from the originating node.
+
+        Forwards the cancellation to the TaskDelegate so it can stop executing
+        (or mark as cancelled if not yet started).
+        """
+        # Only process if this node is the target executor
+        target_node = msg.payload.get("target_node", "")
+        if target_node and target_node != "*" and target_node != self._identity.node_id:
+            return
+
+        if self._on_task_cancel:
+            task_id = msg.payload.get("task_id", "")
+            loop = self._event_loop
+            if loop is not None and loop.is_running():
+                asyncio.run_coroutine_threadsafe(
+                    self._on_task_cancel(task_id), loop
+                )
+            else:
+                log.debug("No running event loop for task_cancel; dropping cancel for %s", task_id)
+        log.debug("Received task_cancel from %s: task=%s", msg.source_node, msg.payload.get("task_id"))
+
+    def _handle_task_status_query(self, msg: NetworkMessage) -> None:
+        """Handle an incoming task_status_query from a remote node.
+
+        Only act on queries addressed to this node (or broadcast queries).
+        Forwards to the TaskDelegate which sends back a task_status_reply.
+        """
+        target_node = msg.payload.get("target_node", "")
+        if target_node and target_node != "*" and target_node != self._identity.node_id:
+            return
+
+        if self._on_task_status_query:
+            loop = self._event_loop
+            if loop is not None and loop.is_running():
+                asyncio.run_coroutine_threadsafe(
+                    self._on_task_status_query(msg.payload), loop
+                )
+            else:
+                log.debug(
+                    "No running event loop for task_status_query; dropping query %s",
+                    msg.payload.get("correlation_id"),
+                )
+        log.debug(
+            "Received task_status_query from %s: task=%s",
+            msg.source_node, msg.payload.get("task_id"),
+        )
+
+    def _handle_task_status_reply(self, msg: NetworkMessage) -> None:
+        """Handle an incoming task_status_reply (sync — resolves a Future).
+
+        Only act on replies addressed to this node.
+        """
+        target_node = msg.payload.get("target_node", "")
+        if target_node and target_node != "*" and target_node != self._identity.node_id:
+            return
+
+        if self._on_task_status_reply:
+            self._on_task_status_reply(msg.payload)
+        log.debug(
+            "Received task_status_reply from %s: task=%s status=%s",
+            msg.source_node,
+            msg.payload.get("task_id"),
+            msg.payload.get("status"),
+        )
 
     def _check_failures(self) -> None:
         with self._lock:
