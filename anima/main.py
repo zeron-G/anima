@@ -156,6 +156,8 @@ async def run() -> bool:
 
     # Active channels for response routing (populated if network enabled)
     _active_channels: dict[str, Any] = {}
+    # Futures for gossip-delegated task results: source_tag → Future
+    _gossip_task_futures: dict[str, asyncio.Future] = {}
 
     # ── Distributed network (Phase 1) ──
     gossip_mesh = None
@@ -223,27 +225,6 @@ async def run() -> bool:
                     event_data.get("node_id", ""),
                 )
                 return
-            if etype == "task_delegate":
-                target = event_data.get("target_node", "")
-                # Check if this task is for us (match node_id, wildcard, or hostname alias)
-                hostname = __import__("socket").gethostname().lower()
-                if target in (node_identity.node_id, "*", hostname) or target.lower() == hostname:
-                    import asyncio as _aio
-                    try:
-                        loop = _aio.get_running_loop()
-                        loop.create_task(event_queue.put(Event(
-                            type=EventType.TASK_DELEGATE,
-                            payload=event_data,
-                            priority=EventPriority.NORMAL,
-                            source="gossip",
-                        )))
-                    except Exception:
-                        pass
-                return
-            if etype == "task_delegate_result":
-                from anima.tools.builtin.remote import resolve_task_result
-                resolve_task_result(event_data.get("task_id", ""), event_data.get("result", ""))
-                return
             # Regular event — forward to ANIMA if we own the session or it's unowned
             on_network_event(event_data)
 
@@ -262,6 +243,42 @@ async def run() -> bool:
         # Wire gossip mesh to remote tools for task delegation
         from anima.tools.builtin.remote import set_gossip_mesh as set_remote_gossip
         set_remote_gossip(gossip_mesh, node_identity.node_id)
+
+        # ── TaskDelegate: full task protocol over gossip mesh ──
+        from anima.network.session_router import TaskDelegate
+        from anima.tools.builtin.remote import set_task_delegate as set_remote_task_delegate
+
+        task_delegate = TaskDelegate(node_identity.node_id)
+
+        async def _eva_task_handler(task):
+            """Process a delegated task by injecting it into the cognitive loop."""
+            task_msg = task.payload.get("task", "")
+            if not task_msg:
+                return {"error": "No task message in payload"}
+
+            source_tag = f"gossip_task:{task.task_id}"
+            loop = asyncio.get_running_loop()
+            fut: asyncio.Future = loop.create_future()
+            _gossip_task_futures[source_tag] = fut
+
+            await event_queue.put(Event(
+                type=EventType.USER_MESSAGE,
+                payload={"text": task_msg, "source": source_tag},
+                priority=EventPriority.NORMAL,
+                source=source_tag,
+            ))
+
+            try:
+                result_text = await asyncio.wait_for(asyncio.shield(fut), timeout=task.timeout)
+                return {"result": result_text}
+            except asyncio.TimeoutError:
+                return {"error": f"Task timed out after {task.timeout}s"}
+            finally:
+                _gossip_task_futures.pop(source_tag, None)
+
+        task_delegate.register_handler("eva_task", _eva_task_handler)
+        gossip_mesh.attach_task_delegate(task_delegate)
+        set_remote_task_delegate(task_delegate)
 
         await gossip_mesh.start()
 
@@ -419,6 +436,12 @@ async def run() -> bool:
             log.warning("Terminal display failed: %s", e)
 
         dashboard_hub.add_chat_message("agent", text)
+
+        # Route response back to a gossip-delegated task
+        if source and source.startswith("gossip_task:"):
+            fut = _gossip_task_futures.get(source)
+            if fut and not fut.done():
+                fut.set_result(text)
 
         # Route response back to the originating channel
         if source and source.startswith("discord:"):

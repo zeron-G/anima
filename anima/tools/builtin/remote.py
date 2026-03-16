@@ -3,10 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-import tempfile
-import os
 import time
-import uuid
 
 from anima.models.tool_spec import ToolSpec, RiskLevel
 from anima.utils.logging import get_logger
@@ -16,9 +13,7 @@ log = get_logger("tools.remote")
 _KNOWN_NODES: dict[str, dict] = {}
 _gossip_mesh = None
 _local_node_id: str = ""
-
-# Pending delegated tasks: task_id → (Future, event_loop)
-_pending_tasks: dict[str, tuple] = {}
+_task_delegate = None
 
 
 def set_gossip_mesh(mesh, node_id: str) -> None:
@@ -28,15 +23,10 @@ def set_gossip_mesh(mesh, node_id: str) -> None:
     _local_node_id = node_id
 
 
-def resolve_task_result(task_id: str, result: str) -> None:
-    """Resolve a pending delegated task. Called from the gossip thread."""
-    entry = _pending_tasks.pop(task_id, None)
-    if entry is None:
-        log.debug("resolve_task_result: unknown task_id %s", task_id)
-        return
-    future, loop = entry
-    loop.call_soon_threadsafe(future.set_result, result)
-    log.info("Resolved delegated task %s", task_id)
+def set_task_delegate(td) -> None:
+    """Set the TaskDelegate instance for the new task protocol."""
+    global _task_delegate
+    _task_delegate = td
 
 
 def register_node(name: str, host: str, user: str, password: str) -> None:
@@ -120,30 +110,32 @@ async def _delegate_task(node: str, task: str, timeout: int = 120) -> dict:
     who processes it with her own tools and reasoning. Blocks until the
     result arrives or times out.
     """
-    if _gossip_mesh is None:
-        return {"success": False, "error": "Not connected to gossip network"}
+    if _task_delegate is None:
+        return {"success": False, "error": "Not connected to gossip network (TaskDelegate not initialised)"}
 
-    task_id = str(uuid.uuid4())
-    loop = asyncio.get_event_loop()
-    future: asyncio.Future = loop.create_future()
-    _pending_tasks[task_id] = (future, loop)
+    # Resolve node name to node_id via hostname matching in alive peers
+    target_node_id = node
+    if _gossip_mesh is not None:
+        alive = _gossip_mesh.get_alive_peers()
+        for peer_id, peer_state in alive.items():
+            if peer_state.hostname.lower() == node.lower() or peer_id == node:
+                target_node_id = peer_id
+                break
 
-    await _gossip_mesh.broadcast_event({
-        "type": "task_delegate",
-        "task_id": task_id,
-        "from_node": _local_node_id,
-        "target_node": node,
-        "task": task,
-        "timestamp": time.time(),
-    })
-
-    log.info("Delegated task %s to %s, awaiting result (timeout=%ds)", task_id, node, timeout)
+    log.info("Delegating task to %s (resolved: %s), timeout=%ds", node, target_node_id, timeout)
     try:
-        result = await asyncio.wait_for(future, timeout=float(timeout))
-        return {"success": True, "result": result}
-    except asyncio.TimeoutError:
-        _pending_tasks.pop(task_id, None)
-        return {"success": False, "error": f"Timeout: no response from {node} within {timeout}s"}
+        task_id = await _task_delegate.delegate(
+            task_type="eva_task",
+            payload={"task": task},
+            target_node=target_node_id,
+            timeout=float(timeout),
+        )
+        result = await _task_delegate.wait_result(task_id, timeout=float(timeout))
+        return {"success": True, "result": result.get("result", str(result))}
+    except TimeoutError as e:
+        return {"success": False, "error": str(e)}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
 
 
 def get_remote_tools() -> list[ToolSpec]:

@@ -54,7 +54,7 @@ def load_config(path: Path | str | None = None) -> dict[str, Any]:
     if _LOCAL_CONFIG_PATH.exists():
         with open(_LOCAL_CONFIG_PATH, "r", encoding="utf-8") as f:
             _local = yaml.safe_load(f) or {}
-        # Merge network settings from local into config
+        # Merge local settings into config
         if "network" in _local:
             local_net = _local["network"]
             cfg_net = _config.setdefault("network", {})
@@ -64,6 +64,8 @@ def load_config(path: Path | str | None = None) -> dict[str, Any]:
                 cfg_net["peers"] = local_net["peers"]
             if local_net.get("remote_nodes"):
                 cfg_net["remote_nodes"] = local_net["remote_nodes"]
+        if "channels" in _local:
+            _deep_merge(_config.setdefault("channels", {}), _local["channels"])
 
     return _config
 

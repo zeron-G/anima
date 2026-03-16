@@ -64,3 +64,13 @@ successes:
   timestamp: 1773651500.7979975
   title: SELF_THINKING 日志检查：自动扫描进化失败原因
   type: feature
+- files:
+  - agents/eva/heartbeat.py
+  - agents/eva/prompts.py
+  id: EVO-20260316-e738b0
+  lesson: 1. 在 heartbeat/self_thinking 逻辑里，把最近 3 次 self-thought 的摘要注入到 prompt context（已有
+    recent_self_thoughts 字段，但需要保证它真正被用来去重）。2. 添加一个「上次 proactive 任务」记录，让下一次 tick 能感知到「上次已经做过
+    X」，从而选择不同的行动。3. 可选：给 notes 目录添加自动
+  timestamp: 1773652087.9589937
+  title: Self-thinking 去重：避免重复「系统正常」陷阱
+  type: optimization
