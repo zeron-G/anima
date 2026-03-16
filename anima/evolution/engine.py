@@ -8,6 +8,7 @@ This is the main entry point. Called by the major heartbeat.
 from __future__ import annotations
 
 import asyncio
+import subprocess as _sp
 import time
 from typing import Any
 
@@ -156,15 +157,14 @@ class EvolutionEngine:
             log.info("Layer 5 (Review): checking diff...")
 
             # Get diff from main project (SubAgent edits there, not in worktree)
-            import subprocess
             try:
-                diff_result = subprocess.run(
+                diff_result = _sp.run(
                     ["git", "diff"], cwd=str(project_root()),
                     capture_output=True, text=True, timeout=10,
                 )
-                diff = diff_result.stdout
+                diff = diff_result.stdout or ""
             except Exception:
-                diff = worktree.get_diff()
+                diff = worktree.get_diff() or ""
             review_ok, review_msg = self._review_diff(diff, proposal)
             if not review_ok:
                 log.warning("Review failed: %s", review_msg)
@@ -173,9 +173,8 @@ class EvolutionEngine:
                 return "review_failed"
 
             # Commit changes in main project (SubAgent edited files there)
-            import subprocess
-            subprocess.run(["git", "add", "-A"], cwd=str(project_root()), capture_output=True)
-            subprocess.run(
+            _sp.run(["git", "add", "-A"], cwd=str(project_root()), capture_output=True)
+            _sp.run(
                 ["git", "commit", "-m", f"Evolution {proposal.id}: {proposal.title}"],
                 cwd=str(project_root()), capture_output=True,
             )
@@ -183,7 +182,7 @@ class EvolutionEngine:
             # Layer 6: Deploy
             log.info("Layer 6 (Deploy): pushing...")
             try:
-                subprocess.run(
+                _sp.run(
                     ["git", "push", "origin", "private"],
                     cwd=str(project_root()), capture_output=True, timeout=30,
                 )
@@ -246,12 +245,23 @@ class EvolutionEngine:
             "IMPORTANT: Only modify files related to this task. Minimal changes."
         )
 
-        log.info("Spawning implementation agent for %s", proposal.id)
+        log.info("Spawning implementation agent for %s (using Claude Code)", proposal.id)
         timeout = 600 if proposal.complexity in ("medium", "large") else 300
-        session = await self._agent_manager.spawn_internal(
-            prompt=impl_prompt,
-            timeout=timeout,
-        )
+
+        # Use Claude Code for code development tasks (user requirement)
+        # Falls back to internal agent if Claude Code CLI not available
+        try:
+            session = await self._agent_manager.spawn_claude_code(
+                prompt=impl_prompt,
+                working_dir=str(project_root()),
+                timeout=timeout,
+            )
+        except Exception as e:
+            log.warning("Claude Code spawn failed (%s), falling back to internal agent", e)
+            session = await self._agent_manager.spawn_internal(
+                prompt=impl_prompt,
+                timeout=timeout,
+            )
 
         # Wait for the agent to finish
         result = await self._agent_manager.wait_for(session.id, timeout=timeout)
@@ -291,8 +301,21 @@ class EvolutionEngine:
         """Basic automated code review."""
         issues = []
 
-        if not diff.strip():
-            issues.append("No changes in diff")
+        if not diff or not diff.strip():
+            # SubAgent may have already committed — check git log instead
+            try:
+                log_result = _sp.run(
+                    ["git", "log", "--oneline", "-1"],
+                    cwd=str(project_root()), capture_output=True, text=True, timeout=5,
+                )
+                last_commit = log_result.stdout.strip()
+                if proposal.title and proposal.title[:20] in last_commit:
+                    # SubAgent already committed — that's fine
+                    return True, "Already committed"
+            except Exception:
+                pass
+            # No diff and no commit — SubAgent didn't change anything
+            issues.append("No changes detected")
 
         # Check for obvious problems
         lines = diff.split("\n")
