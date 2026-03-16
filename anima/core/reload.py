@@ -49,8 +49,8 @@ class ReloadManager:
     def request_reload(
         self,
         reason: str,
-        conversation: list[dict],
-        emotion_state: dict,
+        conversation: list[dict] | None = None,
+        emotion_state: dict | None = None,
         tick_count: int = 0,
         discord_targets: dict | None = None,
         evolution_title: str = "",
@@ -64,8 +64,8 @@ class ReloadManager:
         checkpoint = {
             "timestamp": time.time(),
             "reason": reason,
-            "conversation": conversation[-50:],  # Keep last 50 turns
-            "emotion": emotion_state,
+            "conversation": (conversation or [])[-50:],  # Keep last 50 turns
+            "emotion": emotion_state or {},
             "tick_count": tick_count,
             "discord_targets": discord_targets or {},
             "evolution_title": evolution_title,

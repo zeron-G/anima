@@ -88,3 +88,11 @@ successes:
   timestamp: 1773654707.5948553
   title: 接入 TaskDelegate 到 gossip mesh — 修复 delegate_task 工具
   type: bugfix
+- files:
+  - anima/config.py
+  id: EVO-20260316-2adece
+  lesson: 在 config.py 的 Discord 配置加载逻辑中，检查 channels.discord.token 是否为空，如果为空则从环境变量
+    DISCORD_BOT_TOKEN 自动读取并注入。确保 .env 文件在 config 初始化时已被 load_dotenv() 加载。
+  timestamp: 1773655995.1808238
+  title: Discord Token 从环境变量自动读取
+  type: bugfix
