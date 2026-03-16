@@ -205,19 +205,28 @@ class AgentManager:
         try:
             # Build a focused system prompt for this sub-agent
             system_prompt = (
-                "You are a focused sub-agent within the ANIMA system. "
-                "You have access to tools: shell, read_file, write_file, list_directory, "
-                "system_info, get_datetime, web_fetch, save_note.\n\n"
-                "Your task is specific and focused. Complete it thoroughly, then respond "
-                "with your findings/results as text. Be concise but complete.\n\n"
-                "Do NOT greet the user or use personality. Just do the work and report."
+                "You are a focused sub-agent within the ANIMA system.\n\n"
+                "Available tools:\n"
+                "- read_file(path) — read file contents\n"
+                "- edit_file(path, old_text, new_text) — replace text in file\n"
+                "- write_file(path, content) — write entire file (MUST include content param)\n"
+                "- shell(command) — run shell command (MUST include command param)\n"
+                "- list_directory(path) — list directory\n"
+                "- glob_search(pattern) — find files by pattern\n"
+                "- grep_search(pattern, path) — search file contents\n\n"
+                "CRITICAL: When calling tools, always provide ALL required parameters.\n"
+                "For write_file: MUST include both 'path' and 'content'.\n"
+                "For shell: MUST include 'command'.\n"
+                "For edit_file: MUST include 'path', 'old_text', and 'new_text'.\n\n"
+                "Complete the task thoroughly, then respond with results. Be concise."
             )
 
             # Build tool schemas
             tool_schemas = []
             # Give sub-agents a subset of tools (no agent spawning to prevent infinite recursion)
-            safe_tools = {"shell", "read_file", "write_file", "list_directory",
-                         "system_info", "get_datetime", "web_fetch", "save_note"}
+            safe_tools = {"shell", "read_file", "write_file", "edit_file", "list_directory",
+                         "glob_search", "grep_search", "system_info", "get_datetime",
+                         "web_fetch", "save_note"}
             for spec in self._tool_registry.list_tools():
                 if spec.name in safe_tools:
                     tool_schemas.append({

@@ -58,7 +58,7 @@ class ToolExecutor:
             return {"success": False, "error": f"Tool {tool_name} has no handler"}
 
         try:
-            # Filter args to only those accepted by the handler (defensive against LLM hallucinating params)
+            # Filter args and check required params
             filtered_args = args
             if spec.handler is not None:
                 try:
@@ -73,8 +73,18 @@ class ToolExecutor:
                         if unknown:
                             log.warning("Tool %s: dropping unknown args %s", tool_name, unknown)
                             filtered_args = {k: v for k, v in args.items() if k in valid_params}
+
+                    # Check required params are present
+                    required = [
+                        p.name for p in sig.parameters.values()
+                        if p.default is inspect.Parameter.empty
+                        and p.kind in (inspect.Parameter.POSITIONAL_OR_KEYWORD, inspect.Parameter.KEYWORD_ONLY)
+                    ]
+                    missing = [r for r in required if r not in filtered_args]
+                    if missing:
+                        return {"success": False, "error": f"Missing required arguments: {missing}"}
                 except (ValueError, TypeError):
-                    pass  # Can't inspect — pass args as-is
+                    pass
 
             result = await spec.handler(**filtered_args)
             # For shell commands, check returncode
