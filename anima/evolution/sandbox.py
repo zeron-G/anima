@@ -131,11 +131,21 @@ class TestRunner:
 
     def level1_static(self, changed_files: list[str]) -> tuple[bool, str]:
         """Level 1: Static checks — syntax and imports."""
+        if not changed_files:
+            return True, "No files to check"
+
         errors = []
         for f in changed_files:
             if not f.endswith(".py"):
                 continue
-            ok, out = self._run([_PYTHON, "-m", "py_compile", f], timeout=10)
+            # Resolve relative path — try as-is, then with anima/ prefix
+            fpath = Path(self._cwd) / f
+            if not fpath.exists():
+                fpath = Path(self._cwd) / "anima" / f
+            if not fpath.exists():
+                # Skip files that don't exist (might be new/deleted)
+                continue
+            ok, out = self._run([_PYTHON, "-m", "py_compile", str(fpath)], timeout=10)
             if not ok:
                 errors.append(f"{f}: {out}")
 
