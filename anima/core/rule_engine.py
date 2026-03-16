@@ -31,23 +31,13 @@ class RuleEngine:
         state_diff = context.get("state_diff")
         system_state = context.get("system_state", {})
 
-        # Rule: file change → save note
+        # Rule: file change → NOOP (changes are already logged; save_note created too much noise)
         if event_type == EventType.FILE_CHANGE.name or event_type == "FILE_CHANGE":
-            changes = payload.get("changes", [])
-            if changes:
-                summary = "; ".join(
-                    f"{c['path']} ({c['change']})" for c in changes[:5]
-                )
-                return Decision(
-                    action=ActionType.TOOL_CALL,
-                    reasoning="Detected file changes, recording observation",
-                    tool_name="save_note",
-                    tool_args={
-                        "title": "File Changes Detected",
-                        "content": summary,
-                    },
-                    source="rule_engine",
-                )
+            return Decision(
+                action=ActionType.NOOP,
+                reasoning="File change noted (no save_note needed, already in logs)",
+                source="rule_engine",
+            )
 
         # Rule: system alert — high CPU
         if event_type == EventType.SYSTEM_ALERT.name or event_type == "SYSTEM_ALERT":

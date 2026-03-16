@@ -25,6 +25,12 @@ def _run_shell_sync(command: str, timeout: int = 30, working_directory: str | No
     if _EXTRA_PATH not in path:
         env["PATH"] = _EXTRA_PATH + os.pathsep + path
     env["PYTHONIOENCODING"] = "utf-8"
+    # Ensure 'python' command resolves to our Python, not Windows Store stub
+    # Replace 'python ' at start of command with full path
+    if command.startswith("python ") or command.startswith("python\n"):
+        command = _PYTHON_PATH + command[6:]
+    elif command == "python":
+        command = _PYTHON_PATH
 
     # Resolve working directory
     cwd = None

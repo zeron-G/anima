@@ -12,7 +12,7 @@ build/
 .venv/
 venv/
 
-# Runtime data (local, not source)
+# Runtime data
 data/anima.db
 data/chroma/
 data/logs/*
@@ -26,16 +26,21 @@ data/projects.md
 data/node.json
 data/scheduler.json
 data/sync_watermarks.json
+data/evolution_state.json
+data/watchdog_heartbeat.json
 data/spawn*.tar.gz
+data/memory.db
+data/anima.lock
+data/voice/
 !data/**/.gitkeep
 !data/user_profile.md.example
 
-# Secrets — NEVER commit
+# Secrets
 .env
 .env.*
 !.env.example
 
-# Agent private memory — local only
+# Agent private memory
 agents/*/feelings.md
 agents/*/memory.md
 agents/*/diary.md
@@ -51,11 +56,16 @@ agents/*/diary.md
 .DS_Store
 Thumbs.db
 desktop.ini
+$null
 
-# Test / build cache
+# Large model files
+*.vrm
+
+# Test/build
 .pytest_cache/
 htmlcov/
 .coverage
-
-# Deploy scripts (temp)
 tests/_*.py
+
+# Tools (development only)
+tools/vrm_report.txt

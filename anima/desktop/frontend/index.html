@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ANIMA</title>
+<link rel="stylesheet" href="/desktop/static/css/style.css">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
+</head>
+<body>
+
+<!-- ═══ BOOT ═══ -->
+<div id="boot" class="boot">
+  <div class="boot-center">
+    <div class="boot-ring"></div>
+    <div class="boot-text">ANIMA</div>
+    <div class="boot-sub" id="boot-msg">Initializing...</div>
+    <div class="boot-bar"><div class="boot-fill" id="boot-fill"></div></div>
+  </div>
+</div>
+
+<!-- ═══ APP ═══ -->
+<div id="app" class="app" style="display:none">
+
+  <!-- Nav bar (left) -->
+  <nav class="nav">
+    <div class="nav-top">
+      <button class="nav-btn active" data-page="avatar" title="Avatar">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="8" r="4"/><path d="M5 20c0-4 3.5-7 7-7s7 3 7 7"/></svg>
+      </button>
+      <button class="nav-btn" data-page="overview" title="Overview">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+      </button>
+      <button class="nav-btn" data-page="network" title="Network">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="3"/><circle cx="4" cy="6" r="2"/><circle cx="20" cy="6" r="2"/><circle cx="4" cy="18" r="2"/><circle cx="20" cy="18" r="2"/><path d="M9.5 10.5L5.5 7.5M14.5 10.5L18.5 7.5M9.5 13.5L5.5 16.5M14.5 13.5L18.5 16.5"/></svg>
+      </button>
+      <button class="nav-btn" data-page="settings" title="Settings">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="3"/><path d="M12 1v4M12 19v4M4.22 4.22l2.83 2.83M16.95 16.95l2.83 2.83M1 12h4M19 12h4M4.22 19.78l2.83-2.83M16.95 7.05l2.83-2.83"/></svg>
+      </button>
+    </div>
+    <div class="nav-bottom">
+      <div class="nav-status">
+        <span class="nav-dot" id="nav-dot"></span>
+      </div>
+    </div>
+  </nav>
+
+  <!-- Pages -->
+  <div class="pages">
+
+    <!-- PAGE: Avatar + Chat -->
+    <div class="page active" id="page-avatar">
+      <div class="avatar-layout">
+        <!-- Avatar viewport -->
+        <div class="avatar-vp" id="avatar-vp">
+          <!-- Both canvases always exist, layered via z-index -->
+          <canvas id="live2d-canvas" class="av-canvas"></canvas>
+          <canvas id="vrm-canvas" class="av-canvas av-front"></canvas>
+
+          <!-- Floating bubble -->
+          <div class="bubble" id="bubble" style="display:none">
+            <div class="bubble-text" id="bubble-text"></div>
+          </div>
+
+          <!-- Mode switch -->
+          <div class="av-controls">
+            <button class="av-btn active" data-mode="vrm">3D</button>
+            <button class="av-btn" data-mode="live2d">2D</button>
+          </div>
+
+          <!-- Costume toggles (3D only, positioned separately) -->
+          <div class="outfit-panel" id="outfit-panel"></div>
+
+          <!-- Info pills -->
+          <div class="av-pills">
+            <span class="pill" id="pill-status"><span class="pill-dot" id="pill-dot"></span>Online</span>
+            <span class="pill" id="pill-emo">Neutral</span>
+            <span class="pill" id="pill-hb">#0</span>
+          </div>
+        </div>
+
+        <!-- Chat -->
+        <div class="chat">
+          <div class="chat-head">
+            <span class="chat-title">Chat</span>
+            <span class="chat-agent" id="chat-agent">Eva</span>
+          </div>
+          <div class="chat-body">
+            <div class="chat-msgs" id="chat-msgs"></div>
+          </div>
+          <div class="chat-typing" id="chat-typing">
+            <span class="tdot"></span><span class="tdot"></span><span class="tdot"></span>
+            <span>Thinking...</span>
+          </div>
+          <div class="chat-input">
+            <button class="ci-btn" id="btn-mic" title="Hold to speak">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="8" y="3" width="8" height="12" rx="4"/><path d="M5 12c0 4 3 7 7 7s7-3 7-7"/><line x1="12" y1="19" x2="12" y2="22"/></svg>
+            </button>
+            <input type="text" id="chat-text" placeholder="Message..." autocomplete="off" spellcheck="false">
+            <button class="ci-btn tts-active" id="btn-tts" title="Auto TTS">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><polygon points="4,8 8,8 14,4 14,20 8,16 4,16"/><path d="M17 8c1.5 1.5 2 3 2 4s-.5 2.5-2 4"/></svg>
+            </button>
+            <button class="ci-btn ci-send" id="btn-send" title="Send">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 12h16M13 5l7 7-7 7"/></svg>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- PAGE: Overview -->
+    <div class="page" id="page-overview">
+      <div class="page-scroll">
+        <h2 class="page-title">Overview</h2>
+        <div class="card-grid">
+          <div class="card">
+            <div class="card-label">Status</div>
+            <div class="card-value" id="ov-status">--</div>
+          </div>
+          <div class="card">
+            <div class="card-label">Uptime</div>
+            <div class="card-value" id="ov-uptime">--</div>
+          </div>
+          <div class="card">
+            <div class="card-label">Heartbeat</div>
+            <div class="card-value" id="ov-tick">--</div>
+          </div>
+          <div class="card">
+            <div class="card-label">Queue</div>
+            <div class="card-value" id="ov-queue">0</div>
+          </div>
+        </div>
+        <div class="card-grid">
+          <div class="card">
+            <div class="card-label">CPU</div>
+            <div class="card-value" id="ov-cpu">--</div>
+            <div class="card-bar"><div class="card-bar-fill" id="ov-cpu-bar"></div></div>
+          </div>
+          <div class="card">
+            <div class="card-label">Memory</div>
+            <div class="card-value" id="ov-mem">--</div>
+            <div class="card-bar"><div class="card-bar-fill" id="ov-mem-bar"></div></div>
+          </div>
+          <div class="card">
+            <div class="card-label">Disk</div>
+            <div class="card-value" id="ov-disk">--</div>
+            <div class="card-bar"><div class="card-bar-fill" id="ov-disk-bar"></div></div>
+          </div>
+          <div class="card">
+            <div class="card-label">Processes</div>
+            <div class="card-value" id="ov-proc">--</div>
+          </div>
+        </div>
+        <h3 class="section-title">Emotion State</h3>
+        <div class="card-grid cols-2">
+          <div class="card"><div class="card-label">Engagement</div><div class="card-bar"><div class="card-bar-fill" id="ov-eng"></div></div></div>
+          <div class="card"><div class="card-label">Confidence</div><div class="card-bar"><div class="card-bar-fill" id="ov-conf"></div></div></div>
+          <div class="card"><div class="card-label">Curiosity</div><div class="card-bar"><div class="card-bar-fill" id="ov-cur"></div></div></div>
+          <div class="card"><div class="card-label">Concern</div><div class="card-bar"><div class="card-bar-fill" id="ov-con"></div></div></div>
+        </div>
+        <h3 class="section-title">LLM Usage</h3>
+        <div class="card-grid">
+          <div class="card"><div class="card-label">Calls</div><div class="card-value" id="ov-calls">0</div></div>
+          <div class="card"><div class="card-label">Tokens</div><div class="card-value" id="ov-tokens">0</div></div>
+          <div class="card"><div class="card-label">Cost</div><div class="card-value" id="ov-cost">$0.00</div></div>
+          <div class="card"><div class="card-label">Budget</div><div class="card-value" id="ov-budget">--</div></div>
+        </div>
+        <h3 class="section-title">Working Memory</h3>
+        <div class="card wide" id="ov-wm"><span class="card-label">No items</span></div>
+        <h3 class="section-title">Activity</h3>
+        <div class="card wide mono" id="ov-activity"><span class="card-label">No activity</span></div>
+      </div>
+    </div>
+
+    <!-- PAGE: Network -->
+    <div class="page" id="page-network">
+      <div class="page-scroll">
+        <h2 class="page-title">Network</h2>
+        <div class="card-grid cols-3">
+          <div class="card"><div class="card-label">Node ID</div><div class="card-value mono" id="net-id">--</div></div>
+          <div class="card"><div class="card-label">Status</div><div class="card-value" id="net-status">--</div></div>
+          <div class="card"><div class="card-label">Alive Peers</div><div class="card-value" id="net-alive">0</div></div>
+        </div>
+        <h3 class="section-title">Peers</h3>
+        <div class="card wide" id="net-peers"><span class="card-label">No peers connected</span></div>
+      </div>
+    </div>
+
+    <!-- PAGE: Settings -->
+    <div class="page" id="page-settings">
+      <div class="page-scroll">
+        <h2 class="page-title">Settings</h2>
+        <h3 class="section-title">Authentication</h3>
+        <div class="card wide" id="set-auth"><span class="card-label">Loading...</span></div>
+        <h3 class="section-title">Models</h3>
+        <div class="card-grid cols-3">
+          <div class="card"><div class="card-label">Tier 1</div><div class="card-value mono" id="set-t1">--</div></div>
+          <div class="card"><div class="card-label">Tier 2</div><div class="card-value mono" id="set-t2">--</div></div>
+          <div class="card"><div class="card-label">Budget</div><div class="card-value" id="set-budget">--</div></div>
+        </div>
+        <h3 class="section-title">Tools</h3>
+        <div class="card wide" id="set-tools"><span class="card-label">Loading...</span></div>
+        <h3 class="section-title">Controls</h3>
+        <div class="card-grid cols-2">
+          <button class="ctrl-btn" onclick="fetch('/api/control',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'restart'})})">Restart ANIMA</button>
+          <button class="ctrl-btn danger" onclick="fetch('/api/control',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'shutdown'})})">Shutdown</button>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- SDKs -->
+<script src="/static/live2dcubismcore.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/pixi.js@7.x/dist/pixi.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/pixi-live2d-display@0.4.0/dist/cubism4.min.js"></script>
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.min.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/",
+    "@pixiv/three-vrm": "https://cdn.jsdelivr.net/npm/@pixiv/three-vrm@3.3.3/lib/three-vrm.module.min.js"
+  }
+}
+</script>
+<!-- Debug: catches all JS errors, pushes to backend log + visual overlay -->
+<div id="dbg" style="position:fixed;bottom:0;left:60px;right:0;max-height:100px;overflow-y:auto;background:rgba(0,0,0,.9);color:#0f0;font:10px/1.5 monospace;padding:4px 8px;z-index:9999;display:none"><span onclick="this.parentElement.style.display='none'" style="position:absolute;top:2px;right:8px;cursor:pointer;color:#666">✕</span></div>
+<script>
+const _dbg = document.getElementById('dbg');
+let _dbgQueue = [];
+let _dbgTimer = null;
+
+function dbgLog(msg, color, level) {
+  if (level === 'error' || level === 'warning') _dbg.style.display = 'block';
+  const t = new Date().toLocaleTimeString('en',{hour12:false});
+  _dbg.innerHTML += '<div style="color:'+(color||'#0f0')+'">'+t+' '+msg+'</div>';
+  _dbg.scrollTop = _dbg.scrollHeight;
+  // Batch push to backend
+  _dbgQueue.push({level: level||'info', msg: t+' '+msg, source:'frontend'});
+  if (!_dbgTimer) {
+    _dbgTimer = setTimeout(_flushDbg, 500);
+  }
+}
+
+function _flushDbg() {
+  _dbgTimer = null;
+  if (!_dbgQueue.length) return;
+  const batch = _dbgQueue.splice(0, 20);
+  for (const entry of batch) {
+    fetch('/api/debug', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(entry)}).catch(()=>{});
+  }
+}
+
+window.onerror = (msg, src, line) => { dbgLog('ERROR: '+msg+' ('+src.split('/').pop()+':'+line+')', '#f44', 'error'); };
+window.addEventListener('unhandledrejection', (e) => { dbgLog('REJECT: '+(e.reason?.message||e.reason), '#f80', 'error'); });
+
+const _origErr = console.error, _origWarn = console.warn, _origLog = console.log;
+console.error = (...a) => { dbgLog('ERR: '+a.join(' '), '#f44', 'error'); _origErr.apply(console, a); };
+console.warn = (...a) => { dbgLog('WARN: '+a.join(' '), '#fa0', 'warning'); _origWarn.apply(console, a); };
+console.log = (...a) => {
+  const s = a.join(' ');
+  // Only push to backend log, never show overlay for info
+  if (s.startsWith('VRM:') || s.startsWith('Live2D:')) {
+    _dbgQueue.push({level:'info', msg:s, source:'frontend'});
+    if (!_dbgTimer) _dbgTimer = setTimeout(_flushDbg, 500);
+  }
+  _origLog.apply(console, a);
+};
+</script>
+<script src="/desktop/static/js/app.js" type="module"></script>
+</body>
+</html>

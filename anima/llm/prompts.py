@@ -38,6 +38,45 @@ def _read_md(path: Path) -> str:
     return ""
 
 
+def _emotion_to_natural(emotion: dict) -> str:
+    """Convert numeric emotion state to a natural language description Eva can actually use."""
+    engagement = emotion.get("engagement", 0.5)
+    confidence = emotion.get("confidence", 0.6)
+    curiosity = emotion.get("curiosity", 0.7)
+    concern = emotion.get("concern", 0.2)
+
+    parts = []
+
+    # Engagement
+    if engagement > 0.75:
+        parts.append("精神很好、很专注")
+    elif engagement < 0.3:
+        parts.append("有点懒洋洋的、提不起劲")
+    else:
+        parts.append("状态平稳")
+
+    # Confidence
+    if confidence > 0.8:
+        parts.append("很有把握")
+    elif confidence < 0.35:
+        parts.append("有点没把握")
+
+    # Curiosity
+    if curiosity > 0.8:
+        parts.append("好奇心很旺盛、想探索")
+    elif curiosity < 0.3:
+        parts.append("对新事物兴趣不高")
+
+    # Concern
+    if concern > 0.6:
+        parts.append("有些担心或警觉")
+    elif concern > 0.4:
+        parts.append("稍微有点担心")
+
+    desc = "、".join(parts) if parts else "情绪平稳"
+    return f"{desc}（engagement={engagement:.2f}, confidence={confidence:.2f}, curiosity={curiosity:.2f}, concern={concern:.2f}）"
+
+
 class PromptBuilder:
     """Builds system prompts — lean core, optional context layers."""
 
@@ -89,8 +128,7 @@ class PromptBuilder:
             if working_memory_summary and working_memory_summary != "(no recent memories)":
                 sections.append(f"## Recent Memory\n\n{working_memory_summary}")
             if emotion_state:
-                parts = [f"{k}: {v:.2f}" for k, v in emotion_state.items()]
-                sections.append(f"## Emotion\n{', '.join(parts)}")
+                sections.append(f"## Emotion\n{_emotion_to_natural(emotion_state)}")
             if system_state:
                 sections.append(self._build_system_state_section(system_state))
             # Feelings only for user messages (expensive, ~800 tokens)
@@ -105,6 +143,9 @@ class PromptBuilder:
                 sections.append(self._build_system_state_section(system_state))
             if tools_description:
                 sections.append(f"## Tools Available\n{tools_description}")
+            # Inject emotion so self-thinking is colored by current mood
+            if emotion_state:
+                sections.append(f"## My Current Mood\n{_emotion_to_natural(emotion_state)}")
             # Inject recent self-thoughts so she knows what she just thought about
             if recent_self_thoughts:
                 thoughts_text = "\n".join(f"- {t[:120]}" for t in recent_self_thoughts[-4:])

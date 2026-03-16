@@ -114,11 +114,38 @@ class DashboardHub:
         return snapshot
 
     def add_chat_message(self, role: str, content: str) -> None:
-        self._chat_history.append({
+        entry = {
             "role": role,
             "content": content,
             "timestamp": time.time(),
-        })
+        }
+        self._chat_history.append(entry)
+
+        # Fire-and-forget TTS generation for agent messages
+        if role == "agent":
+            self._generate_tts_async(entry)
+
+    def _generate_tts_async(self, entry: dict) -> None:
+        """Generate TTS audio in background, attach URL to entry when done."""
+        import asyncio
+        try:
+            from anima.voice.tts import synthesize, _clean_text
+            clean = _clean_text(entry["content"])
+            if not clean or len(clean) < 2:
+                return
+
+            async def _do():
+                try:
+                    path = await synthesize(clean)
+                    if path and path.exists():
+                        entry["tts_url"] = f"/api/voice/{path.name}"
+                except Exception:
+                    pass
+
+            loop = asyncio.get_event_loop()
+            loop.create_task(_do())
+        except Exception:
+            pass
 
     def get_chat_history(self) -> list[dict]:
         return self._chat_history[-50:]

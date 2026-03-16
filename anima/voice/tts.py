@@ -1,11 +1,7 @@
-"""Text-to-Speech via Qwen3-TTS server (localhost:9001).
+"""Text-to-Speech via Qwen3-TTS (local PyTorch CUDA).
 
-Calls the local Qwen3-TTS FastAPI server's OpenAI-compatible endpoint.
-Server runs in WSL: `source ~/qwen3-tts-env/bin/activate && python tools/eva_tts_server.py`
-
-API: POST http://localhost:9001/v1/audio/speech
-  {"model": "qwen3-tts", "input": "text", "voice": "eva"}
-  → audio/wav response
+Model: Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice (auto-downloaded from HuggingFace)
+Runs entirely in-process. No HTTP server, no WSL.
 """
 
 from __future__ import annotations
@@ -13,15 +9,21 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import re
+import threading
 from pathlib import Path
+from typing import Any
 
 from anima.config import data_dir
 from anima.utils.logging import get_logger
 
 log = get_logger("voice.tts")
 
-TTS_API = "http://localhost:9001/v1/audio/speech"
 VOICE_DIR = data_dir() / "voice"
+MODEL_ID = "Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice"
+
+_model: Any = None
+_model_lock = threading.Lock()
+_model_failed = False
 
 
 def _clean_text(text: str) -> str:
@@ -38,34 +40,67 @@ def _clean_text(text: str) -> str:
     return text
 
 
+def _load_model() -> Any:
+    """Lazy-load Qwen3-TTS model."""
+    global _model, _model_failed
+
+    if _model is not None:
+        return _model
+    if _model_failed:
+        return None
+
+    with _model_lock:
+        if _model is not None:
+            return _model
+        if _model_failed:
+            return None
+
+        try:
+            import torch
+            from qwen_tts import Qwen3TTSModel
+
+            log.info("Loading Qwen3-TTS model: %s ...", MODEL_ID)
+
+            model = Qwen3TTSModel.from_pretrained(
+                MODEL_ID,
+                device_map="cuda:0",
+                dtype=torch.bfloat16,
+            )
+            _model = model
+            log.info("Qwen3-TTS loaded on CUDA")
+            return model
+
+        except Exception as e:
+            log.error("Failed to load Qwen3-TTS: %s", e)
+            _model_failed = True
+            return None
+
+
 def _synthesize_sync(clean: str, out_path: Path) -> bool:
-    """Call Qwen3-TTS server synchronously (runs in thread)."""
-    import urllib.request
-    import json
-
-    body = json.dumps({
-        "model": "qwen3-tts",
-        "input": clean,
-        "voice": "eva",
-    }).encode("utf-8")
-
-    req = urllib.request.Request(
-        TTS_API,
-        data=body,
-        headers={"Content-Type": "application/json"},
-        method="POST",
-    )
+    """Generate speech synchronously (runs in thread)."""
+    model = _load_model()
+    if model is None:
+        return False
 
     try:
-        with urllib.request.urlopen(req, timeout=30) as resp:
-            audio_data = resp.read()
-            if len(audio_data) > 100:
-                out_path.parent.mkdir(parents=True, exist_ok=True)
-                out_path.write_bytes(audio_data)
-                return True
+        import soundfile as sf
+
+        wavs, sr = model.generate_custom_voice(
+            text=clean,
+            language="Chinese",
+            speaker="Vivian",
+            instruct="用温柔甜美的少女声音说话",
+        )
+
+        if not wavs or len(wavs) == 0:
             return False
+
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        sf.write(str(out_path), wavs[0], sr)
+        return out_path.exists() and out_path.stat().st_size > 100
+
     except Exception as e:
-        log.error("Qwen3-TTS request failed: %s", e)
+        log.error("Qwen3-TTS synthesis failed: %s", e)
         return False
 
 
@@ -73,7 +108,7 @@ async def synthesize(
     text: str,
     emotion: str = "",
 ) -> Path | None:
-    """Generate TTS audio via Qwen3-TTS server.
+    """Generate TTS audio via Qwen3-TTS.
 
     Returns path to wav file or None on failure.
     Uses caching by content hash.
@@ -97,7 +132,7 @@ async def synthesize(
     )
 
     if ok:
-        log.debug("TTS synthesized: %s (%d bytes)", out_path.name, out_path.stat().st_size)
+        log.debug("TTS: %s (%d bytes)", out_path.name, out_path.stat().st_size)
         return out_path
 
     try:

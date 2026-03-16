@@ -21,7 +21,7 @@
 - **Status:** Core complete, narrative system in progress
 
 ## Eva Evolution History
-- **Total loops:** 0 (fresh start on ANIMA)
+- **Total loops:** 7 (L0001~L0007, last: SELF_THINKING去重修复 2026-03-15)
 - **Architecture:** Proposal → Execute → Test → Commit → Hot-reload
 
 ## Todos

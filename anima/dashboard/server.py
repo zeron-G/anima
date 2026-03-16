@@ -25,7 +25,7 @@ class DashboardServer:
         self._hub = hub
         self._host = host
         self._port = port
-        self._app = web.Application()
+        self._app = web.Application(client_max_size=0)  # No upload size limit
         self._ws_clients: list[web.WebSocketResponse] = []
         self._runner: web.AppRunner | None = None
         self._push_task: asyncio.Task | None = None
@@ -37,12 +37,21 @@ class DashboardServer:
         self._app.router.add_post("/api/config", self._handle_config)
         self._app.router.add_post("/api/upload", self._handle_upload)
         self._app.router.add_get("/api/uploads", self._handle_list_uploads)
+        self._app.router.add_post("/api/debug", self._handle_debug)
         self._app.router.add_post("/api/tts", self._handle_tts)
+        self._app.router.add_post("/api/stt", self._handle_stt)
         self._app.router.add_get("/api/voice/{filename}", self._handle_voice_file)
         # Static files for Live2D model + SDK
         static_dir = Path(__file__).parent / "static"
         if static_dir.exists():
             self._app.router.add_static("/static/", static_dir)
+
+        # Desktop frontend (VRM/Live2D + chat window)
+        desktop_dir = Path(__file__).parent.parent / "desktop" / "frontend"
+        if desktop_dir.exists():
+            self._app.router.add_get("/desktop", self._handle_desktop)
+            self._app.router.add_get("/desktop/", self._handle_desktop)
+            self._app.router.add_static("/desktop/static/", desktop_dir)
 
     async def start(self) -> None:
         self._runner = web.AppRunner(self._app)
@@ -66,6 +75,12 @@ class DashboardServer:
 
     async def _handle_index(self, request: web.Request) -> web.Response:
         return web.Response(text=DASHBOARD_HTML, content_type="text/html")
+
+    async def _handle_desktop(self, request: web.Request) -> web.Response:
+        desktop_index = Path(__file__).parent.parent / "desktop" / "frontend" / "index.html"
+        if desktop_index.exists():
+            return web.FileResponse(desktop_index)
+        return web.Response(text="Desktop frontend not found", status=404)
 
     async def _handle_ws(self, request: web.Request) -> web.WebSocketResponse:
         ws = web.WebSocketResponse()
@@ -100,7 +115,7 @@ class DashboardServer:
             await self._hub.event_queue.put(Event(
                 type=EventType.USER_MESSAGE,
                 payload={"text": text},
-                priority=EventPriority.HIGH,
+                priority=EventPriority.CRITICAL,  # User messages jump the queue
                 source="dashboard",
             ))
 
@@ -244,6 +259,56 @@ class DashboardServer:
             return web.json_response({"error": "synthesis failed"}, status=500)
         except Exception as e:
             log.error("TTS handler error: %s", e)
+            return web.json_response({"error": str(e)}, status=500)
+
+    async def _handle_debug(self, request: web.Request) -> web.Response:
+        """Receive debug logs from frontend."""
+        data = await request.json()
+        level = data.get("level", "info").upper()
+        msg = data.get("msg", "")
+        source = data.get("source", "frontend")
+        log_fn = getattr(log, level.lower(), log.info)
+        log_fn("[%s] %s", source, msg)
+        return web.json_response({"ok": True})
+
+    async def _handle_stt(self, request: web.Request) -> web.Response:
+        """Transcribe uploaded audio via local Whisper."""
+        try:
+            import tempfile
+            reader = await request.multipart()
+            part = await reader.next()
+            if part is None or part.name != "audio":
+                return web.json_response({"error": "no audio part"}, status=400)
+
+            # Save to temp file
+            suffix = ".webm"
+            if part.filename:
+                suffix = Path(part.filename).suffix or suffix
+            with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+                while True:
+                    chunk = await part.read_chunk()
+                    if not chunk:
+                        break
+                    tmp.write(chunk)
+                tmp_path = tmp.name
+
+            # Transcribe
+            from anima.voice.stt import transcribe
+            text = await transcribe(tmp_path)
+
+            # Cleanup temp file
+            try:
+                Path(tmp_path).unlink()
+            except Exception:
+                pass
+
+            if text:
+                return web.json_response({"ok": True, "text": text})
+            return web.json_response({"error": "transcription empty"}, status=500)
+        except ImportError:
+            return web.json_response({"error": "faster-whisper not installed"}, status=501)
+        except Exception as e:
+            log.error("STT handler error: %s", e)
             return web.json_response({"error": str(e)}, status=500)
 
     async def _handle_voice_file(self, request: web.Request) -> web.Response:

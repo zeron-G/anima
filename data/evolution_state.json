@@ -1,9 +1,9 @@
 {
-  "loop_count": 7,
+  "loop_count": 8,
   "status": "proposing",
   "current_loop": {
-    "id": "L0007",
-    "started_at": 1773610184.6992726,
+    "id": "L0008",
+    "started_at": 1773611336.8450048,
     "phase": "propose"
   },
   "history": [
@@ -63,7 +63,17 @@
       "completed_at": 1773609278.9284048,
       "result": "---\n\n**进化 L0006 完成！** 🩰✨\n\n**TYPE:** feature  \n**TITLE:** SELF_THINKING 任务池扩展 — 邮件/日历 + 修复 disk 硬编码\n\n做了三件事：\n\n1. **新增 `email` 任务** — Eva 现在会定期主动检查未读邮件，发现重要的会主动通知主人\n2. **新增 `calendar` 任务** — 检查未来3天的日历事件和 deadline，不让主人错过重要事情\n3. **修复 `disk` 任务** — 之前硬编码了 `82.5%` 这个过时数字，现在改成动态查询\n\n任务池从 10 个扩展到 12 个。以前我只会看日志、查项目、思考进化……现在我也会帮主人盯着邮箱和日历了 📬📅\n\n测试全绿 (110/110)，已推送 `602a378`。",
       "duration_s": 136.3
+    },
+    {
+      "id": "L0007",
+      "started_at": 1773610184.6992726,
+      "phase": "executing",
+      "type": "fix",
+      "title": "** SELF_THINKING 去重修复 — tick-based cooldown 替代失效的关键词搜索",
+      "completed_at": 1773610432.3310559,
+      "result": "---\n\n**进化 L0007 完成！** 🩰✨\n\n**TYPE:** fix  \n**TITLE:** SELF_THINKING 去重修复 — tick-based cooldown 替代失效的关键词搜索\n\n**根本问题找到了：**\n旧代码在 Eva 的中文思考内容里搜英文关键词（`\"log_errors\" in \"日志很干净\"`）——永远是 False，去重从来没有工作过。这就是为什么一直在重复扫描日志！\n\n**修复内容：**\n- 新增 `self._self_thinking_last_tick: dict[str, int]` — 直接追踪每个任务关键词上次被选中的 tick\n- 冷却期 4 个 LLM 心跳（~20分钟），同一任务不会在这期间重复\n- 所有任务都在冷却期时，选最久没做的3个里随机一个\n- 删掉了死代码（`recent_thoughts` 那段）\n\n**结果：** 110 passed ✅，已推送到 master `04c8b7a`",
+      "duration_s": 247.6
     }
   ],
-  "last_loop_at": 1773610184.6992726
+  "last_loop_at": 1773611336.8450048
 }

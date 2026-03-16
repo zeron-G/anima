@@ -1,18 +1,17 @@
 """Entry point for `python -m anima`.
 
 Usage:
-    python -m anima                  # Start ANIMA normally
-    python -m anima watchdog         # Start with watchdog (auto-repair on crash)
-    python -m anima watchdog --dry   # Watchdog monitor only (no auto-fix)
-    python -m anima spawn user@host  # Deploy to remote machine
-    python -m anima spawn --local /path  # Deploy locally (testing)
-    python -m anima spawn --pack-only    # Just create the package
+    python -m anima                  # Desktop app (PyWebView native window)
+    python -m anima --headless       # Backend only (browser access)
+    python -m anima --legacy         # Legacy terminal mode
+    python -m anima --experimental   # Allow second instance
+    python -m anima watchdog         # Watchdog mode
+    python -m anima spawn user@host  # Deploy to remote
 """
 
 import asyncio
 import sys
 
-# Windows needs SelectorEventLoop for ZMQ async sockets
 if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
@@ -21,25 +20,23 @@ def main():
     args = sys.argv[1:]
 
     if args and args[0] == "watchdog":
-        _run_watchdog(args[1:])
+        from anima.watchdog import run_watchdog
+        run_watchdog(dry_run="--dry" in args)
     elif args and args[0] == "spawn":
         _handle_spawn(args[1:])
     elif "--watch" in args:
         _run_with_watch()
-    else:
+    elif "--legacy" in args:
         from anima.main import main_entry
         main_entry()
-
-
-def _run_watchdog(args: list[str]):
-    """Start ANIMA under watchdog supervision with auto-repair."""
-    from anima.watchdog import run_watchdog
-    dry_run = "--dry" in args
-    run_watchdog(dry_run=dry_run)
+    else:
+        experimental = "--experimental" in args
+        headless = "--headless" in args
+        from anima.desktop.app import launch_desktop
+        launch_desktop(headless=headless, experimental=experimental)
 
 
 def _run_with_watch():
-    """Run ANIMA with auto-restart on code changes."""
     import subprocess
     import time
     from pathlib import Path
@@ -59,7 +56,7 @@ def _run_with_watch():
     print("[watch] Starting ANIMA with hot-reload...")
     while True:
         old_mtimes = get_mtimes()
-        proc = subprocess.Popen([sys.executable, "-m", "anima"], cwd=str(root))
+        proc = subprocess.Popen([sys.executable, "-m", "anima", "--legacy"], cwd=str(root))
 
         try:
             while proc.poll() is None:
@@ -92,11 +89,6 @@ def _handle_spawn(args: list[str]):
         print("  python -m anima spawn user@host       Deploy via SSH")
         print("  python -m anima spawn --local /path    Deploy locally")
         print("  python -m anima spawn --pack-only      Create package only")
-        print()
-        print("Options:")
-        print("  --python CMD    Python command on remote (default: python3)")
-        print("  --secret KEY    Network secret")
-        print("  --no-env        Don't include .env file")
         return
 
     python_cmd = "python3"

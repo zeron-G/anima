@@ -1,376 +1,136 @@
 [English](README.md) | [中文](README_ZH.md)
 
-# PROJECT ANIMA
+# ANIMA
 
-**A heartbeat-driven, distributed, self-evolving AI life system.**
+**Heartbeat-driven, distributed, self-evolving AI life system.**
 
-> *ANIMA* — Latin for "soul". Not another chatbot framework.
-
----
-
-## The Problem: Why Current AI Agents Are Not Enough
-
-Every AI agent framework in 2025-2026 shares the same fundamental limitation: **they are all passive-reactive systems.**
-
-```
-User sends message -> Agent processes -> Returns response -> Waits for next message
-```
-
-Close the terminal, and the agent dies. It never observes anything on its own, never discovers problems you haven't asked about, never learns while you sleep. This is not an intelligent agent. It is an auto-responder.
-
-This is not a missing feature that can be patched. The entire data flow of passive systems assumes "input comes from the user" — context management, memory structures, tool invocation, everything. Building autonomous behavior on top of a passive architecture is like constructing a building that needs an active foundation on passive ground. The foundation is wrong.
-
-## The Core Question
-
-**If AI is not a tool waiting for commands, but a continuously running life form, what would it look like?**
-
-It would operate like a biological organism:
-
-- It has a **heartbeat** — continuously perceiving the world and reacting
-- It has a **nervous system** — distributed nodes sharing senses and consciousness
-- It **self-heals** — automatic recovery when nodes fail
-- It **evolves** — learns, creates tools, optimizes itself
-- It has a **body** — reaches into the physical world through smart home devices and robots
-- It has **personality** — develops unique interaction styles over time
-
-## Five Design Principles
-
-### 1. One Loop to Rule Them All
-
-All inputs — user messages, sensor data, timers, node broadcasts — enter the same event queue, processed by the same cognitive loop. A user saying "check the weather" and a temperature sensor reporting 35C are the same thing to ANIMA: an event that needs perception and response. One brain, one state, zero synchronization problems.
-
-### 2. Heartbeat = Life
-
-A multi-tier biological clock keeps ANIMA alive without burning tokens. Low-level heartbeats (1s/15s) are pure scripts checking "did anything happen?" — zero LLM cost. Mid-level heartbeats (1min/5min) use rule engines. High-level heartbeats (30min/1h) invoke real thinking, but infrequently. Daily LLM cost target: ~$1.50.
-
-### 3. "No Change, No Thought"
-
-Before every heartbeat invokes the LLM, a pure-script diff check runs: what changed since last time? If nothing changed, skip. This reduces actual daily LLM calls from a theoretical 86,400+ to approximately 50-70. Cost reduction: over 1000x.
-
-### 4. Nodes = Organs
-
-Every ANIMA node runs the same core code (heartbeat engine, cognitive loop, memory, communication). Different nodes differ only in configuration: which heartbeat tiers to run, which tools to register, which sensors to connect. A Raspberry Pi controlling an air conditioner and a PC running shell commands are architecturally identical.
-
-### 5. Privacy First, Local First
-
-All data stays local by default. Sensor data, behavior patterns, ANIMA's memories — everything on your own hardware. Cloud LLMs (Claude/GPT) are optional enhancements, not requirements. ANIMA can run fully offline with local models.
-
-## Comparison with Existing Paradigms
-
-| Dimension | Traditional AI Agent | ANIMA |
-|-----------|---------------------|-------|
-| Runtime | Passive: user input -> AI output | Autonomous: heartbeat-driven continuous cognition |
-| Lifecycle | Session-level: dies when you close the window | Persistent: 7x24, sleeps but never stops |
-| User input | Only input source | One of many event types |
-| Architecture | Monolithic single process | Distributed multi-node mesh |
-| Fault tolerance | Crash = stop | Self-healing: 5-level hot repair + node takeover |
-| Evolution | Static: manual developer updates only | Self-evolving: learns, creates tools, optimizes code |
-| Physical presence | Pure software | Embodied: robots + smart home + environment control |
-| Cost model | Every interaction calls LLM | "No change, no thought": 90%+ heartbeats need no LLM |
-
-## Architecture (Phase 0 — Current)
-
-```
-+-----------------------------------------------------------------+
-|  ANIMA Platform (95 .py files, ~11,000 LOC)                      |
-|                                                                 |
-|  +---------+  +----------------+  +-------------------+         |
-|  |Heartbeat|  | Agentic Loop   |  |   Agent Manager   |         |
-|  | Engine  |--| Rule Engine    |--|internal/cli/shell |         |
-|  | 15s/5m  |  | first, then LLM|  | parallel spawn    |         |
-|  +----+----+  +-------+--------+  +-------------------+         |
-|       |               |                                         |
-|  +----+----+  +-------+--------+  +-------------------+         |
-|  |Snapshot |  |   26 Tools     |  |    Dashboard      |         |
-|  | Cache   |  | shell/files/   |  |  WebSocket SPA    |         |
-|  |CPU/Mem/ |  | search/edit/   |  | http://...:8420   |         |
-|  |  Disk   |  | web/agents/    |  +-------------------+         |
-|  +---------+  | scheduler/net/ |                                |
-|               | email/github   |  +-------------------+         |
-|               +----------------+  | Discord Channel   |         |
-|                                   +-------------------+         |
-|                                                                 |
-|  +----------+  +---------+  +----------+  +-----------------+  |
-|  | SQLite   |  |Emotion  |  |  Cron    |  | Agent Persona   |  |
-|  | Memory   |  | State   |  |Scheduler |  | agents/eva/     |  |
-|  |chat/usage|  | 4D+decay|  |persistent|  | soul.md         |  |
-|  +----------+  +---------+  +----------+  +-----------------+  |
-|                                                                 |
-|  +----------+  +------------------+                             |
-|  |  Skill   |  | Noise Filtering  |                             |
-|  |  System  |  | at heartbeat     |                             |
-|  | OpenClaw |  | level            |                             |
-|  +----------+  +------------------+                             |
-+-----------------------------------------------------------------+
-```
-
-## Phase 0 — What's Implemented Now
-
-ANIMA Phase 0 is a fully functional single-node autonomous AI system with 95 Python files (~11,000 LOC) and 110 passing unit tests. Phase 0 is complete; Phase 1 (distributed networking) is in progress.
-
-**Hybrid Rule Engine + LLM Architecture** — The cognitive loop tries the rule engine FIRST for cheap events (greetings, file changes, system alerts) before calling the LLM. This saves ~80% of LLM calls. For complex events, the LLM receives full context (system state, events, memory, tools) and decides what to do in a multi-turn reasoning cycle.
-
-**26 Built-in Tools** (+ dynamic skill-generated tools):
-
-| Tool | Description | Risk |
-|------|-------------|------|
-| `shell` | Execute shell commands (Python on PATH) | HIGH |
-| `read_file` | Read file contents (with offset/limit) | SAFE |
-| `write_file` | Write file contents | MEDIUM |
-| `edit_file` | Precise string-based editing | MEDIUM |
-| `list_directory` | List directory contents | SAFE |
-| `glob_search` | File pattern matching (\*\*/\*.py) | SAFE |
-| `grep_search` | Regex content search with context | SAFE |
-| `system_info` | CPU, memory, disk, OS info | SAFE |
-| `get_datetime` | Current date/time | SAFE |
-| `save_note` | Save observation to notes | LOW |
-| `web_fetch` | HTTP GET any URL | LOW |
-| `claude_code` | Delegate to Claude Code CLI | MEDIUM |
-| `spawn_agent` | Spawn sub-agent (internal/claude_code/shell) | HIGH |
-| `check_agent` | Check sub-agent status | SAFE |
-| `wait_agent` | Wait for sub-agent completion | SAFE |
-| `list_agents` | List all agent sessions | SAFE |
-| `schedule_job` | Schedule a cron task | LOW |
-| `list_jobs` | List scheduled jobs | SAFE |
-| `cancel_job` | Cancel a scheduled job | LOW |
-| `enable_job` | Enable/disable a scheduled job | LOW |
-| `remote_exec` | Execute command on remote node | HIGH |
-| `remote_write_file` | Write file on remote node via SFTP | MEDIUM |
-| `github` | GitHub CLI (gh) — repos, issues, PRs | MEDIUM |
-| `send_email` | Send email via SMTP | MEDIUM |
-| `read_email` | Read emails via IMAP | SAFE |
-| `google` | Google Workspace via gog CLI | MEDIUM |
-
-**Cron Scheduler** — Persistent cron jobs that fire events into the cognitive loop. Jobs survive restarts (persisted to `data/scheduler.json`). Integrated into heartbeat tick (checked every 15s).
-
-**Skill System** — Auto-discovers skills from `skills/` directory. Compatible with OpenClaw's `_meta.json` format. Generates tool specs and registers cron jobs from skill metadata. External skill dirs configurable via `config/default.yaml`.
-
-**Multi-Agent Orchestration:**
-
-```
-Eva (main loop)
-+-- spawn_agent(type="internal")     -> Sub-agent with own LLM loop + all tools
-+-- spawn_agent(type="claude_code")  -> Full Claude Code CLI instance
-+-- spawn_agent(type="shell")        -> Shell subprocess
-```
-
-- Internal agents run independent LLM reasoning loops with full tool access
-- Tools execute in parallel via `asyncio.gather`
-- Main event loop stays non-blocking (`get_timeout(2.0)` instead of blocking forever)
-
-**Dashboard** — 4-page SPA at `http://localhost:8420`:
-- Overview: heartbeat pulse, system metrics, emotion bars, activity feed
-- Chat: full chat with markdown rendering and file upload
-- Usage: token tracking by model/provider/day
-- Settings: hot-switch models, auth info, tool list, controls
-
-**Other systems:** OAuth auto-discovery (Claude Code local credentials), persistent memory (SQLite), 4D emotion state (engagement/confidence/curiosity/concern with decay), pluggable agent personas (ships with EVA), noise filtering at heartbeat level, budget calculation with real model pricing (Haiku $0.25/$1.25, Sonnet $3/$15, Opus $15/$75 per 1M tokens), self-thoughts stored in conversation buffer.
+ANIMA is not a chatbot — it's an autonomous AI life entity with its own heartbeat, emotions, memory, perception, and the ability to evolve its own code.
 
 ## Quick Start
 
-### Prerequisites
-
-- Python 3.11+
-- One of: Claude Code login / OAuth Token / Anthropic API Key
-
-### Install
-
 ```bash
-git clone https://github.com/your-username/anima.git
-cd anima
+# Windows: double-click
+ANIMA.bat
 
-# Create environment
-conda create -n anima python=3.11 -y && conda activate anima
-# or: python -m venv .venv && source .venv/bin/activate
-
-pip install -e ".[dev]"
+# Or from terminal
+python -m anima              # Desktop app (PyWebView window)
+python -m anima --headless   # Backend only (browser at localhost:8420/desktop)
+python -m anima --legacy     # Terminal mode (no GUI)
 ```
 
-### Configure Authentication
+## Architecture
 
-ANIMA supports three auth methods (in priority order):
-
-| Priority | Method | How |
-|----------|--------|-----|
-| 1 | Claude Code OAuth | Run `claude login` — ANIMA auto-discovers the token |
-| 2 | OAuth Token | Set `ANTHROPIC_OAUTH_TOKEN` in `.env` |
-| 3 | API Key | Set `ANTHROPIC_API_KEY` in `.env` |
-
-```bash
-cp .env.example .env
-# Edit .env if you need method 2 or 3
 ```
-
-### Run
-
-```bash
-python -m anima
-python -m anima --watch           # Development mode (auto-reload)
-python -m anima spawn user@host   # Deploy to remote node
-```
-
-Dashboard opens at **http://your-ip:8420**
-
-### Test
-
-```bash
-pytest tests/ -v                 # Unit tests (110)
-pytest tests/test_oauth_live.py  # Live API test
+ANIMA Desktop
+│
+├── PyWebView Window (WebView2)
+│   ├── VRM 3D Avatar (Three.js + three-vrm)
+│   ├── Live2D 2D Avatar (PIXI + pixi-live2d-display)
+│   ├── Chat + Real-time Activity Stream
+│   └── Qwen3-TTS Lip Sync
+│
+├── Python Backend (aiohttp)
+│   ├── Heartbeat Engine (script 30s / LLM 10min / major 30min)
+│   ├── Cognitive Loop (rule engine → LLM agentic)
+│   ├── Memory (SQLite + working memory)
+│   ├── Emotion (engagement / confidence / curiosity / concern)
+│   ├── Tools (13+ built-in)
+│   ├── Qwen3-TTS (local CUDA)
+│   └── Evolution Engine
+│
+├── Distributed Network
+│   ├── ZMQ Gossip + Memory Sync
+│   └── Session Router + Split-Brain Detection
+│
+└── Channels (Discord / Webhook)
 ```
 
 ## Project Structure
 
 ```
 anima/
-├── anima/                    # Platform source (95 .py files, ~11,000 LOC)
-│   ├── core/
-│   │   ├── cognitive.py      # AgenticLoop — hybrid rule-engine + LLM
-│   │   ├── agents.py         # Multi-agent manager with internal LLM sub-agents
-│   │   ├── heartbeat.py      # Three-tier heartbeat + cron scheduler integration
-│   │   ├── scheduler.py      # Persistent cron job scheduler
-│   │   ├── event_queue.py    # Async priority queue
-│   │   └── rule_engine.py    # Zero-cost deterministic rules
-│   ├── llm/
-│   │   ├── providers.py      # Anthropic API (OAuth + API Key, direct HTTP)
-│   │   ├── router.py         # Tier1/Tier2 routing with real-pricing budget
-│   │   ├── prompts.py        # Event-specific lean prompt builder
-│   │   └── usage.py          # Usage tracking with auth mode detection
-│   ├── memory/
-│   │   ├── store.py          # SQLite backend (chat, usage, audit, snapshots)
-│   │   └── working.py        # Importance-based working memory
-│   ├── perception/
-│   │   ├── system_monitor.py # CPU/memory/disk sampling
-│   │   ├── file_watcher.py   # File change detection with noise filtering
-│   │   ├── diff_engine.py    # Field-level threshold diffs
-│   │   └── snapshot_cache.py # Heartbeat-to-cognitive bridge
-│   ├── network/              # Distributed gossip mesh, session routing, sync
-│   ├── channels/             # Discord, webhook communication channels
-│   ├── spawn/                # Node deployment and reproduction
-│   ├── tools/
-│   │   ├── builtin/          # 26 tools: shell, files, search, edit, web, agents, scheduler, network, email, github
-│   │   ├── executor.py       # Parallel tool execution with safety checks
-│   │   ├── registry.py       # Tool registration + skill tool loading
-│   │   └── safety.py         # Command risk assessment (5-level)
-│   ├── skills/
-│   │   └── loader.py         # Skill discovery (OpenClaw-compatible _meta.json)
-│   ├── emotion/state.py      # 4D emotion state with decay
-│   ├── dashboard/            # 4-page SPA (aiohttp + WebSocket)
-│   ├── ui/terminal.py        # Rich terminal with markdown rendering
-│   ├── models/               # Data models (Event, MemoryItem, ToolSpec, Decision)
-│   └── main.py               # Orchestration + graceful shutdown
-├── agents/                   # Agent personas (pluggable)
-│   └── eva/
-│       ├── soul.md           # Personality and speech patterns
-│       ├── feelings.md       # Emotional memory (gitignored)
-│       └── config.yaml       # Agent-specific config overrides
-├── skills/                   # Native ANIMA skills (auto-discovered)
-├── config/
-│   └── default.yaml          # Runtime configuration
-├── prompts/                  # Platform prompt templates
-├── data/                     # Runtime data (gitignored)
-│   ├── anima.db              # SQLite (chat, usage, audit)
-│   ├── scheduler.json        # Persistent cron jobs
-│   ├── workspace/            # Agent's working directory
-│   ├── uploads/              # User-uploaded files
-│   └── logs/                 # Log files
-├── docs/
-│   └── deep_analysis_v3.md   # Full technical design document
-├── tests/                    # 110 unit tests
-├── .env.example              # Auth configuration template
-├── LICENSE                   # MIT
-└── pyproject.toml
+├── __main__.py           # CLI entry point
+├── main.py               # Async orchestration
+├── config.py             # YAML config loader
+├── core/                 # Heartbeat, cognitive loop, evolution, agents
+├── perception/           # System monitor, file watcher, diff engine
+├── memory/               # SQLite store + working memory
+├── emotion/              # 4-dim emotion state
+├── llm/                  # Router (Tier2→Tier1), prompts, usage tracking
+├── voice/                # Qwen3-TTS (tts.py), faster-whisper (stt.py)
+├── desktop/              # PyWebView app + frontend (HTML/CSS/JS)
+│   └── frontend/         # VRM/Live2D avatars, chat UI, viseme engine
+├── dashboard/            # Admin dashboard (aiohttp + WebSocket)
+├── network/              # ZMQ gossip mesh, memory sync, session router
+├── tools/                # Tool registry + 13 built-in tools
+├── channels/             # Discord bot, webhook receiver
+├── models/               # Event, Decision, MemoryItem dataclasses
+├── skills/               # External skill loader
+├── spawn/                # Remote deployment
+└── utils/                # Logging (24h rotation), ID generation
+
+config/default.yaml       # Master configuration
+agents/eva/               # Eva personality (soul.md, feelings.md)
+tools/                    # VRM development tools (viewer, lab, inspector)
 ```
 
-## Creating a New Agent Persona
+## Key Systems
+
+### Heartbeat
+Three independent timer loops:
+- **Script** (30s): sample CPU/memory/disk, detect file changes, decay emotions
+- **LLM** (10min): aggregate context, trigger self-thinking if significance threshold met
+- **Major** (30min): evaluate evolution candidates
+
+### Cognitive Loop
+```
+Event → Rule Engine (zero cost) → match? → execute
+                                → no match → LLM (Tier2 Sonnet → Tier1 Opus fallback)
+                                              → multi-turn tool use → response
+```
+
+### VRM Avatar
+- **Model**: Flare (72 expressions, 53 bones)
+- **Lip sync**: Audio → PCM → ZCR+RMS per 25ms frame → vowel classification → viseme timeline → 60fps interpolated playback
+- **Idle**: breathing + blink (2-7s random) + subtle sway
+- **Pose**: `getNormalizedBoneNode()` + `quaternion.setFromEuler()`
+- **Costume**: 3 toggleable clothing meshes
+
+### TTS
+- **Qwen3-TTS** (`Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice`)
+- Local PyTorch CUDA, no external server
+- Auto-generated on agent response, cached by content hash
+
+## Configuration
+
+`config/default.yaml` — key settings:
+```yaml
+heartbeat:
+  script_interval_s: 30
+  llm_interval_s: 600
+llm:
+  tier1: { model: "claude-opus-4-6" }
+  tier2: { model: "claude-sonnet-4-6" }
+  budget: { daily_limit_usd: 10.0 }
+```
+
+Secrets in `.env`:
+```
+ANTHROPIC_API_KEY=sk-...
+DISCORD_BOT_TOKEN=...
+```
+
+## Development
 
 ```bash
-mkdir agents/my_agent
+pip install -e ".[dev]"
+pytest
+
+# VRM tools (standalone)
+python tools/vrm_viewer.py   # Model viewer
+python tools/vrm_lab.py      # Expression/pose/lip sync lab
 ```
-
-Create `agents/my_agent/soul.md` with personality definition, then set in `config/default.yaml`:
-
-```yaml
-agent:
-  name: "my_agent"
-```
-
-## Phase 0 vs OpenClaw / Claude Code
-
-An honest assessment of where ANIMA stands relative to the ecosystem:
-
-### Caught up
-
-| Capability | ANIMA Phase 0 | OpenClaw | Claude Code |
-|------------|---------------|----------|-------------|
-| Agentic LLM loop | Hybrid rule-engine + LLM | LLM-only | LLM-only |
-| Tool count | 26 built-in + skill-generated | ~15 | ~20 native |
-| File search (Glob) | `glob_search` | N/A | Glob |
-| Content search (Grep) | `grep_search` | N/A | Grep |
-| Precise editing | `edit_file` | N/A | Edit |
-| Multi-agent | Internal LLM sub-agents + Claude Code + Shell | Single agent | Single agent |
-| Cron scheduling | Persistent, heartbeat-integrated | N/A | N/A |
-| Skill system | OpenClaw-compatible `_meta.json` | Native skills | N/A |
-| Parallel tool execution | `asyncio.gather` | Sequential | Parallel |
-| Cost optimization | Rule engine (~80% LLM savings) + noise filtering | N/A | N/A |
-
-### Phase 1 — Done
-
-| Capability | Status | Description |
-|------------|--------|-------------|
-| Gossip mesh | Done | Two-node gossip protocol with heartbeat exchange |
-| Discord channel | Done | Discord bot as communication channel |
-| Memory sync | Done | Cross-node memory synchronization |
-| Session routing | Done | Route sessions to appropriate node |
-
-### Still missing (Phase 1-4 roadmap items)
-
-| Capability | Target Phase | Description |
-|------------|-------------|-------------|
-| Task delegation | Phase 1 | Delegate tasks between nodes (in progress) |
-| Self-evolution | Phase 4 | Agent writes its own tools, modifies its own code |
-| API gateway | Phase 1 | External API for third-party integrations |
-| GUI operation | Phase 2 | Screen capture + mouse/keyboard control |
-| Self-healing mesh | Phase 3 | 5-level hot repair + node takeover |
-| Embodiment | Phase 6 | Robot integration (PiDog) |
-
-ANIMA's unique advantage is architectural: the heartbeat-driven event loop means autonomous behavior is native, not bolted on. The features above are planned extensions of this foundation, not fundamental redesigns.
-
-## Roadmap
-
-| Phase | Name | Goal | Timeline |
-|-------|------|------|----------|
-| **0** | **First Heartbeat** | Single-node autonomous AI with agentic loop, 26 tools, dashboard | **Done** |
-| **1** | **First Conversation** | Two-node gossip mesh, Discord, memory sync, session routing, spawn (2 active nodes: desktop + laptop) | **In progress** (network core done, task delegation pending) |
-| 2 | First Sight | Terminal + GUI operation with risk assessment | 7-9 weeks |
-| 3 | First Self-Heal | Multi-node mesh, rolling updates, 5-level hot repair | 7-9 weeks |
-| 4 | First Growth | Self-evolution engine: tool forge, safe self-modification | 8-10 weeks |
-| 5 | First Soul | 3D avatar, voice interaction, personality system | 7-9 weeks |
-| 6 | First Walk | Robot integration (PiDog), multi-node sensory fusion | 9-11 weeks |
-| 7 | First Home | Smart space ecosystem: edge nodes + IoT + NAS | 10-12 weeks |
-
-Total estimated timeline: **15-18 months** from Phase 0 to Phase 7.
-
-## Tech Stack
-
-| Purpose | Technology |
-|---------|-----------|
-| Core language | Python 3.11+ (Phase 0-4), TypeScript (Phase 5 frontend), Rust (Phase 6 if needed) |
-| Async runtime | asyncio (stdlib) |
-| LLM provider | Anthropic API (direct HTTP), with OAuth + API Key support |
-| Structured storage | SQLite (stdlib) |
-| Web backend | aiohttp |
-| Web frontend | Vanilla JS SPA + WebSocket |
-| System monitoring | psutil |
-| Future: node comms | ZeroMQ (pyzmq) |
-| Future: node discovery | zeroconf (mDNS) |
-| Future: vector store | ChromaDB |
 
 ## License
 
-MIT License. See [LICENSE](LICENSE).
-
----
-
-For the complete technical deep-dive into ANIMA's design philosophy, architecture decisions, and long-term vision, see **[docs/deep_analysis_v3.md](docs/deep_analysis_v3.md)**.
-
-> *"The first heartbeat is the hardest. After that, ANIMA lives."*
+See [LICENSE](LICENSE).

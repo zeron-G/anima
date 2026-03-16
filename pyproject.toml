@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "anima"
-version = "0.1.0"
+version = "0.2.0"
 description = "Heartbeat-driven, distributed, self-evolving AI life system"
 requires-python = ">=3.11"
 dependencies = [
@@ -17,9 +17,21 @@ dependencies = [
     "pyzmq>=25.0",
     "msgpack>=1.0",
     "zeroconf>=0.131",
+    "pywebview>=5.0",
 ]
 
 [project.optional-dependencies]
+tts = [
+    "qwen_tts",
+    "torch",
+    "torchaudio",
+    "soundfile",
+    "librosa",
+    "transformers==4.57.3",
+    "accelerate",
+    "einops",
+]
+stt = ["faster-whisper"]
 vector = ["chromadb>=0.5.0"]
 watch = ["watchdog>=4.0.0"]
 discord = ["discord.py>=2.3"]

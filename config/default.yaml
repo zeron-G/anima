@@ -5,15 +5,15 @@ agent:
   name: "eva"
 
 heartbeat:
-  script_interval_s: 15
-  llm_interval_s: 180       # 3 minutes
-  major_interval_s: 900     # 15 minutes (evolution cycle — accelerated)
+  script_interval_s: 30       # was 15 — less frequent scanning
+  llm_interval_s: 600         # was 180 (3min) → 10min — Eva thinks less often
+  major_interval_s: 1800      # was 900 → 30min
 
 # LLM heartbeat trigger conditions
 llm_trigger:
-  min_significant_diffs: 3
-  significance_threshold: 0.3
-  max_consecutive_skips: 3
+  min_significant_diffs: 5    # was 3 — need more changes to trigger thinking
+  significance_threshold: 0.5 # was 0.3 — higher bar
+  max_consecutive_skips: 10   # was 3 — allow more skips
 
 # Field-level diff thresholds
 diff_rules:
@@ -88,17 +88,17 @@ skills:
 network:
   enabled: true
   listen_port: 9420
-  secret: "anima-network-2026"
-  peers:
-    - "192.168.1.159:9420"    # Laptop
+  secret: ""                  # Set via ANIMA_NETWORK_SECRET env var
+  peers: []                   # Add peer IPs here: ["192.168.1.x:9420"]
   gossip_interval_s: 5
   suspect_phi: 8
   dead_phi: 16
-  remote_nodes:
-    - name: "laptop"
-      host: "100.109.112.90"
-      user: "29502"
-      password: "***REDACTED***"
+  remote_nodes: []
+    # Configure via environment variables, NOT here
+    # - name: "laptop"
+    #   host: ""
+    #   user: ""
+    #   password: ""  # Use ANIMA_REMOTE_PASSWORD env var
 
 # Communication Channels
 channels:

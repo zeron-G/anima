@@ -84,10 +84,14 @@ class FileWatcher:
                     if entry.name in {
                         "__pycache__", "node_modules", ".git", "venv", ".venv",
                         ".pytest_cache", "anima.egg-info", "logs", "notes", "chroma",
+                        "voice", "uploads", "data",
                     }:
                         continue
                     self._scan_dir(Path(entry.path), result)
                 elif entry.is_file(follow_symlinks=False):
+                    # Skip noisy runtime files
+                    if entry.name in {"scheduler.json", "anima.lock", "node.json", "evolution_state.json"}:
+                        continue
                     if self._extensions:
                         ext = Path(entry.name).suffix
                         if ext not in self._extensions:
