@@ -539,7 +539,8 @@ class AgenticLoop:
                 ("tools_audit",  "Think about which tools have been failing recently. Check the log for 'Tool.*failed' patterns and identify the most common failure. Can you fix it?"),
                 ("network",      "Check network sync status: read the last 20 lines of the log for 'network.sync' entries. Are both nodes syncing properly?"),
                 ("email",        "Check for unread emails: use read_email(limit=5, unread_only=True). If there's anything important or requiring action, summarize it. If it's urgent, notify 主人 proactively."),
-                ("calendar",     "Check upcoming calendar events: use google(command='calendar events --days 3'). Any meetings or deadlines in the next 3 days that 主人 should know about?"),
+                ("calendar",     "Check scheduled jobs: use list_jobs() to see all cron tasks. Are any jobs misconfigured or disabled that should be running? Report anything unusual."),
+                ("late_night",   "Check the current time with get_datetime(). If it's between 23:00 and 05:00, check data/logs/anima.log last 30 lines for recent USER_MESSAGE activity. If 主人 has been active late at night, write a warm short note to data/workspace/late_night_note.md — caring, not lecturing."),
             ]
             # Tick-based dedup: each task has a cooldown before it can repeat.
             # The old approach checked for English keywords in Chinese thought-text — always failed.
