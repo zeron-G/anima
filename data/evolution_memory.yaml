@@ -74,3 +74,17 @@ successes:
   timestamp: 1773652087.9589937
   title: Self-thinking 去重：避免重复「系统正常」陷阱
   type: optimization
+- files:
+  - anima/main.py
+  - anima/tools/builtin/remote.py
+  - anima/network/session_router.py
+  id: EVO-20260316-fdc1be
+  lesson: '1. 在 main.py 中创建 TaskDelegate 实例并调用 gossip_mesh.attach_task_delegate(task_delegate)
+    接入完整协议
+
+    2. 注册一个 "eva_task" 类型的 handler，接收任务后将 task.payload["task"] 字符串作为用户消息注入 ANIMA 处理，结果回传给源节点
+
+    3. 修改 remote.py 的 _d'
+  timestamp: 1773654707.5948553
+  title: 接入 TaskDelegate 到 gossip mesh — 修复 delegate_task 工具
+  type: bugfix

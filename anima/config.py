@@ -50,6 +50,13 @@ def load_config(path: Path | str | None = None) -> dict[str, Any]:
             agent_overrides = yaml.safe_load(f) or {}
         _deep_merge(_config, agent_overrides)
 
+    # Inject Discord token from environment variable if not set
+    discord_cfg = _config.setdefault("channels", {}).setdefault("discord", {})
+    if not discord_cfg.get("token"):
+        env_token = os.environ.get("DISCORD_BOT_TOKEN", "")
+        if env_token:
+            discord_cfg["token"] = env_token
+
     # Merge local environment (machine-specific, gitignored)
     if _LOCAL_CONFIG_PATH.exists():
         with open(_LOCAL_CONFIG_PATH, "r", encoding="utf-8") as f:
