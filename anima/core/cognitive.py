@@ -84,6 +84,9 @@ class AgenticLoop:
         # SELF_THINKING dedup: track last tick each task keyword was chosen
         # Prevents repeating the same task within a cooldown window
         self._self_thinking_last_tick: dict[str, int] = {}
+        # Track last proactive task result to inject into next tick's user message
+        # Prevents "system normal" loop by giving LLM explicit context of last action
+        self._last_proactive_result: str = ""  # "keyword: summary of what was found"
 
     def set_gossip_mesh(self, gossip_mesh) -> None:
         """Set gossip mesh for broadcasting delegation results."""
@@ -238,8 +241,8 @@ class AgenticLoop:
         recent_self_thoughts: list[str] | None = None
         if event_type_name == "SELF_THINKING":
             recent_self_thoughts = [
-                m["content"][:150]
-                for m in self._conversation[-30:]
+                m["content"][:200]
+                for m in self._conversation[-50:]
                 if m.get("role") == "assistant"
                 and m.get("is_self_thought")
                 and m.get("content", "").strip()
@@ -315,6 +318,11 @@ class AgenticLoop:
                             content=f"[self-thought] {content[:300]}",
                             type="observation", importance=0.4,
                         )
+                        # Update last proactive result for next tick's dedup context
+                        if event.type == EventType.SELF_THINKING and not (event.payload or {}).get("evolution"):
+                            chosen_kw = getattr(self, "_last_chosen_kw", "")
+                            summary = content[:200].replace("\n", " ")
+                            self._last_proactive_result = f"[上次任务 {chosen_kw}]: {summary}" if chosen_kw else f"[上次]: {summary}"
                     else:
                         self._emit_status({"stage": "responding", "detail": content[:80]})
                         await self._output(content)
@@ -561,8 +569,12 @@ class AgenticLoop:
             chosen_kw, chosen_task = _random.choice(available)
             # Record this tick so we don't repeat too soon
             self._self_thinking_last_tick[chosen_kw] = tick
+            # Store chosen keyword so post-tick handler can label the result
+            self._last_chosen_kw = chosen_kw
+            # Build message — inject last result so LLM knows what it just did
+            last_result_line = f"\nPREVIOUS RESULT: {self._last_proactive_result}" if self._last_proactive_result else ""
             return (
-                f"[INTERNAL: SELF_THINKING tick #{tick}]\n"
+                f"[INTERNAL: SELF_THINKING tick #{tick}]{last_result_line}\n"
                 f"PROACTIVE TASK ({chosen_kw}): {chosen_task}\n"
                 "Use your tools to actually DO this task. Be concise. "
                 "If you find something actionable, take action now — don't just note it."

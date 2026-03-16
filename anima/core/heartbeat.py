@@ -305,6 +305,7 @@ class HeartbeatEngine:
         during proactive thinking, not just produce text.
         """
         log.info("LLM heartbeat triggered — pushing SELF_THINKING event")
+        await self._archive_notes_if_needed()
 
         # Build a summary of what happened since last think
         recent_sigs = [f"{s:.2f}" for s in self._recent_significance_scores[-5:]]
@@ -325,6 +326,44 @@ class HeartbeatEngine:
 
         # Clear recent significance after pushing
         self._recent_significance_scores.clear()
+
+    async def _archive_notes_if_needed(self) -> None:
+        """Archive excess File_Changes_Detected notes into a summary file.
+
+        When File_Changes_Detected notes exceed 50, compress them into a
+        single archive file and delete the originals to keep notes/ clean.
+        """
+        import os
+        from anima.config import data_dir
+
+        notes_path = data_dir() / "notes"
+        if not notes_path.exists():
+            return
+
+        fcd_files = sorted(notes_path.glob("*_File_Changes_Detected.md"))
+        if len(fcd_files) <= 50:
+            return
+
+        # Archive all but the 10 most recent
+        to_archive = fcd_files[:-10]
+        log.info("Archiving %d File_Changes_Detected notes", len(to_archive))
+
+        archive_name = f"archive_file_changes_{int(time.time())}.md"
+        archive_path = notes_path / archive_name
+        lines = [f"# File Changes Archive ({len(to_archive)} entries)\n\n"]
+        for f in to_archive:
+            try:
+                content = f.read_text(encoding="utf-8", errors="replace")
+                lines.append(f"## {f.name}\n{content[:200]}\n\n")
+                f.unlink()
+            except Exception as e:
+                log.warning("Could not archive %s: %s", f.name, e)
+
+        try:
+            archive_path.write_text("".join(lines), encoding="utf-8")
+            log.info("Created archive: %s", archive_name)
+        except Exception as e:
+            log.warning("Could not write archive file: %s", e)
 
     # ---- Major Heartbeat (1h) ----
 

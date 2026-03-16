@@ -148,7 +148,7 @@ class PromptBuilder:
                 sections.append(f"## My Current Mood\n{_emotion_to_natural(emotion_state)}")
             # Inject recent self-thoughts so she knows what she just thought about
             if recent_self_thoughts:
-                thoughts_text = "\n".join(f"- {t[:120]}" for t in recent_self_thoughts[-4:])
+                thoughts_text = "\n".join(f"- {t[:200]}" for t in recent_self_thoughts[-4:])
                 sections.append(f"## Your Recent Self-Thoughts (avoid repeating these)\n{thoughts_text}")
 
         # FILE_CHANGE, SYSTEM_ALERT: just core (soul + rules + runtime)

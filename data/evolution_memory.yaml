@@ -57,3 +57,10 @@ successes:
   timestamp: 1773650687.6728268
   title: 节点间任务委派协议
   type: feature
+- files: []
+  id: EVO-20260316-9c97e1
+  lesson: 在进化管线的失败处理逻辑中，将失败原因写入 data/logs/evolution_failures.jsonl，每条记录包含 title、error、timestamp、stage。同时在
+    evolution_status 工具输出中增加 last_failure 字段。
+  timestamp: 1773651500.7979975
+  title: SELF_THINKING 日志检查：自动扫描进化失败原因
+  type: feature
