@@ -247,13 +247,14 @@ class EvolutionEngine:
         )
 
         log.info("Spawning implementation agent for %s", proposal.id)
+        timeout = 600 if proposal.complexity in ("medium", "large") else 300
         session = await self._agent_manager.spawn_internal(
             prompt=impl_prompt,
-            timeout=300,  # 5 min max
+            timeout=timeout,
         )
 
         # Wait for the agent to finish
-        result = await self._agent_manager.wait_for(session.id, timeout=300)
+        result = await self._agent_manager.wait_for(session.id, timeout=timeout)
 
         if result.status in ("completed", "done"):
             log.info("Implementation agent completed: %s", proposal.id)
