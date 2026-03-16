@@ -21,7 +21,7 @@ log = get_logger("voice.tts")
 
 VOICE_DIR = data_dir() / "voice"
 REF_VOICE = data_dir() / "voice" / "eva_reference_voice.wav"
-DEFAULT_MODEL_ID = "Qwen/Qwen3-TTS-12Hz-0.6B-Base"  # Base model for voice clone
+DEFAULT_MODEL_ID = "Qwen/Qwen3-TTS-12Hz-1.7B-Base"  # Base model for voice clone
 
 _model: Any = None
 _model_lock = threading.Lock()
