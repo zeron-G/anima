@@ -14,7 +14,6 @@ def launch_desktop(*, headless: bool = False, experimental: bool = False) -> Non
     from anima.desktop.singleton import acquire_lock, release_lock
 
     if not acquire_lock(experimental=experimental):
-        # Try to show error via GUI if possible
         try:
             import webview
             webview.create_window("ANIMA", html="<h2>ANIMA is already running.</h2>", width=400, height=200)
@@ -33,10 +32,10 @@ def launch_desktop(*, headless: bool = False, experimental: bool = False) -> Non
         main_entry()
         return
 
-    # Start backend in background thread
+    # Start backend in background thread (with restart loop)
     backend_ready = threading.Event()
     backend_thread = threading.Thread(
-        target=_run_backend,
+        target=_run_backend_loop,
         args=(backend_ready,),
         daemon=True,
         name="anima-backend",
@@ -67,37 +66,67 @@ def launch_desktop(*, headless: bool = False, experimental: bool = False) -> Non
 
     webview.start(gui="edgechromium", debug=False)
 
-    # Window closed — kill everything immediately
+    # Window closed — kill everything
     release_lock()
     os._exit(0)
 
 
-def _run_backend(ready_event: threading.Event) -> None:
+def _run_backend_loop(ready_event: threading.Event) -> None:
+    """Run the backend with restart loop (same as main_entry but in a thread).
+
+    When evolution triggers hot-reload, run() returns True.
+    We sleep briefly, then re-run — the window stays open.
+    """
     if sys.platform == "win32":
         asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
+    import time
+    from anima.utils.logging import get_logger
+    log = get_logger("desktop")
 
-    try:
-        loop.run_until_complete(_backend_main(ready_event))
-    except (KeyboardInterrupt, SystemExit):
-        pass
-    finally:
-        loop.close()
+    restart_count = 0
+    first_start = True
+
+    while True:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+
+        try:
+            restart = loop.run_until_complete(_backend_main(ready_event if first_start else None))
+            first_start = False
+        except (KeyboardInterrupt, SystemExit):
+            break
+        except Exception as e:
+            log.error("Backend crashed: %s", e)
+            restart = False
+        finally:
+            loop.close()
+
+        if not restart:
+            break
+
+        # Evolution restart — brief pause then restart backend
+        restart_count += 1
+        log.info("Evolution restart #%d — reloading backend in 2s...", restart_count)
+        time.sleep(2)
 
 
-async def _backend_main(ready_event: threading.Event) -> None:
+async def _backend_main(ready_event: threading.Event | None) -> bool:
+    """Run the ANIMA backend once. Returns True if restart requested."""
     from anima.dashboard import server as srv_mod
-    _original_start = srv_mod.DashboardServer.start
 
-    async def _patched_start(self):
-        await _original_start(self)
-        ready_event.set()
+    if ready_event:
+        _original_start = srv_mod.DashboardServer.start
 
-    srv_mod.DashboardServer.start = _patched_start
+        async def _patched_start(self):
+            await _original_start(self)
+            ready_event.set()
+
+        srv_mod.DashboardServer.start = _patched_start
+
     try:
         from anima.main import run
-        await run()
+        return await run()
     finally:
-        srv_mod.DashboardServer.start = _original_start
+        if ready_event:
+            srv_mod.DashboardServer.start = _original_start
