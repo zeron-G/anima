@@ -52,28 +52,35 @@ class LLMRouter:
             return None
 
         if tier <= 2:
+            import asyncio as _aio
             try:
-                resp = await completion(
+                resp = await _aio.wait_for(completion(
                     model=self._tier2_model,
                     messages=messages,
                     max_tokens=self._tier2_max_tokens,
                     temperature=temperature,
-                )
+                ), timeout=60)
                 self._record_usage(resp, tier=2)
                 return resp["content"]
+            except _aio.TimeoutError:
+                log.warning("Tier2 timed out after 60s, falling back to Tier1")
             except Exception as e:
                 log.warning("Tier2 failed: %s, falling back to Tier1", e)
 
         # Tier1 fallback
+        import asyncio as _aio
         try:
-            resp = await completion(
+            resp = await _aio.wait_for(completion(
                 model=self._tier1_model,
                 messages=messages,
                 max_tokens=self._tier1_max_tokens,
                 temperature=temperature,
-            )
+            ), timeout=90)
             self._record_usage(resp, tier=1)
             return resp["content"]
+        except _aio.TimeoutError:
+            log.error("Tier1 timed out after 90s")
+            return None
         except Exception as e:
             log.error("Tier1 also failed: %s", e)
             return None
@@ -89,30 +96,37 @@ class LLMRouter:
         if not self.check_budget():
             return None
 
+        import asyncio as _aio
+
         if tier <= 2:
             try:
-                resp = await completion(
+                resp = await _aio.wait_for(completion(
                     model=self._tier2_model,
                     messages=messages,
                     max_tokens=self._tier2_max_tokens,
                     temperature=temperature,
                     tools=tools,
-                )
+                ), timeout=60)
                 self._record_usage(resp, tier=2)
                 return resp
+            except _aio.TimeoutError:
+                log.warning("Tier2 (tools) timed out after 60s, falling back to Tier1")
             except Exception as e:
                 log.warning("Tier2 (tools) failed: %s", e)
 
         try:
-            resp = await completion(
+            resp = await _aio.wait_for(completion(
                 model=self._tier1_model,
                 messages=messages,
                 max_tokens=self._tier1_max_tokens,
                 temperature=temperature,
                 tools=tools,
-            )
+            ), timeout=90)
             self._record_usage(resp, tier=1)
             return resp
+        except _aio.TimeoutError:
+            log.error("Tier1 (tools) timed out after 90s")
+            return None
         except Exception as e:
             log.error("Tier1 (tools) also failed: %s", e)
             return None
