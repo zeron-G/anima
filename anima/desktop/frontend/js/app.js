@@ -197,6 +197,7 @@ function render(d) {
 function renderPage(d) {
   if (currentPage === 'overview') renderOverview(d);
   else if (currentPage === 'network') renderNetwork(d);
+  else if (currentPage === 'evolution') renderEvolution(d);
   else if (currentPage === 'settings') renderSettings(d);
 }
 
@@ -340,15 +341,94 @@ function renderNetwork(d) {
   s('net-id', net.node_id || '--');
   s('net-status', net.enabled ? 'Online' : 'Disabled');
   s('net-alive', net.alive_count || 0);
-  const peersEl = document.getElementById('net-peers');
+  const detailEl = document.getElementById('net-peers-detail');
   const peers = net.peers || {};
   const ids = Object.keys(peers);
   if (ids.length) {
-    peersEl.innerHTML = ids.map(id => {
+    detailEl.innerHTML = ids.map(id => {
       const p = peers[id];
-      return `<div class="peer-row"><span class="peer-id">${id.substring(0,12)}</span><span>${p.agent_name||'?'}</span><span>${p.ip||'?'}:${p.port||'?'}</span><span class="peer-status ${p.status==='ALIVE'?'alive':''}">${p.status||'?'}</span></div>`;
+      const alive = p.status === 'ALIVE' || p.status === 'alive';
+      const cpu = p.current_load ? (p.current_load * 100).toFixed(0) + '%' : '--';
+      const emo = p.emotion || {};
+      const emoName = getEmo(emo);
+      return `<div class="card" style="margin-bottom:8px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+          <span style="font-weight:600">${p.hostname || id.substring(0,12)}</span>
+          <span style="color:${alive ? 'var(--green)' : 'var(--red)'};font-size:11px">${alive ? 'ALIVE' : p.status || 'DEAD'}</span>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;font-size:11px;color:var(--w40)">
+          <div>Agent: <span style="color:var(--w60)">${p.agent_name || '?'}</span></div>
+          <div>IP: <span style="color:var(--w60)">${p.ip || '?'}:${p.port || '?'}</span></div>
+          <div>Load: <span style="color:var(--w60)">${cpu}</span></div>
+          <div>Uptime: <span style="color:var(--w60)">${p.uptime_s ? fmtUp(p.uptime_s) : '--'}</span></div>
+          <div>Emotion: <span style="color:var(--w60)">${emoName}</span></div>
+          <div>Tier: <span style="color:var(--w60)">${p.compute_tier || '?'}</span></div>
+        </div>
+      </div>`;
     }).join('');
-  } else { peersEl.innerHTML = '<span class="card-label">No peers connected</span>'; }
+  } else {
+    detailEl.innerHTML = '<div class="card"><span class="card-label">No peers connected</span></div>';
+  }
+}
+
+// Remote restart
+window._remoteRestart = function() {
+  const msg = 'Eva, use remote_exec to restart ANIMA on the laptop node. Command: taskkill /F /IM python.exe & timeout 2 & schtasks /Run /TN "ANIMA_START"';
+  fetch('/api/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: msg }) });
+};
+
+// ═══ EVOLUTION ═══
+function renderEvolution(d) {
+  const evo = d.evolution || {};
+  const mem = evo.memory || {};
+  const git = d.git || {};
+
+  s('evo-successes', (mem.successes || []).length);
+  s('evo-failures', (mem.failures || []).length);
+  s('evo-cooldown', evo.cooldown_remaining > 0 ? evo.cooldown_remaining + 's' : 'Ready');
+  s('evo-current', evo.current ? evo.current.title : 'Idle');
+  s('evo-queue', evo.queue_size || 0);
+  s('git-branch', git.branch || '--');
+  s('evo-goals-count', (mem.goals || []).length);
+
+  // Git log
+  const gitLog = document.getElementById('git-log');
+  if (git.recent_commits && git.recent_commits.length) {
+    gitLog.textContent = git.recent_commits.join('\n');
+  }
+
+  // Evolution history
+  const histEl = document.getElementById('evo-history');
+  const successes = mem.successes || [];
+  if (successes.length) {
+    histEl.innerHTML = successes.slice().reverse().map(s => {
+      const dt = s.timestamp ? new Date(s.timestamp * 1000).toLocaleString('en', {month:'short',day:'numeric',hour:'2-digit',minute:'2-digit',hour12:false}) : '';
+      return `<div style="padding:6px 0;border-bottom:1px solid var(--border);font-size:12px">
+        <div style="display:flex;justify-content:space-between">
+          <span style="color:var(--white)">${esc(s.title || '?')}</span>
+          <span style="color:var(--w20)">${dt}</span>
+        </div>
+        <div style="color:var(--w40);font-size:11px;margin-top:2px">${s.type || '?'} | ${(s.files||[]).join(', ') || 'no files'}</div>
+      </div>`;
+    }).join('');
+  }
+
+  // Goals
+  const goalsEl = document.getElementById('evo-goals');
+  const goals = mem.goals || [];
+  if (goals.length) {
+    goalsEl.innerHTML = goals.map(g => {
+      const pct = Math.round((g.progress || 0) * 100);
+      const color = g.status === 'completed' ? 'var(--green)' : g.status === 'in_progress' ? 'var(--white)' : 'var(--w40)';
+      return `<div style="padding:6px 0;border-bottom:1px solid var(--border);font-size:12px">
+        <div style="display:flex;justify-content:space-between">
+          <span style="color:${color}">${esc(g.title || '?')}</span>
+          <span style="color:var(--w20)">${pct}%</span>
+        </div>
+        <div class="card-bar" style="margin-top:4px"><div class="card-bar-fill" style="width:${pct}%"></div></div>
+      </div>`;
+    }).join('');
+  }
 }
 
 // ═══ SETTINGS ═══

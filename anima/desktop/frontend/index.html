@@ -34,6 +34,9 @@
       <button class="nav-btn" data-page="network" title="Network">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="3"/><circle cx="4" cy="6" r="2"/><circle cx="20" cy="6" r="2"/><circle cx="4" cy="18" r="2"/><circle cx="20" cy="18" r="2"/><path d="M9.5 10.5L5.5 7.5M14.5 10.5L18.5 7.5M9.5 13.5L5.5 16.5M14.5 13.5L18.5 16.5"/></svg>
       </button>
+      <button class="nav-btn" data-page="evolution" title="Evolution">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 3v18M3 12l9-9 9 9"/><circle cx="12" cy="21" r="2"/></svg>
+      </button>
       <button class="nav-btn" data-page="settings" title="Settings">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="3"/><path d="M12 1v4M12 19v4M4.22 4.22l2.83 2.83M16.95 16.95l2.83 2.83M1 12h4M19 12h4M4.22 19.78l2.83-2.83M16.95 7.05l2.83-2.83"/></svg>
       </button>
@@ -182,7 +185,38 @@
           <div class="card"><div class="card-label">Alive Peers</div><div class="card-value" id="net-alive">0</div></div>
         </div>
         <h3 class="section-title">Peers</h3>
-        <div class="card wide" id="net-peers"><span class="card-label">No peers connected</span></div>
+        <div id="net-peers-detail"></div>
+        <h3 class="section-title">Controls</h3>
+        <div class="card-grid cols-2">
+          <button class="ctrl-btn" id="btn-remote-restart" onclick="window._remoteRestart && window._remoteRestart()">Restart Remote Node</button>
+          <button class="ctrl-btn" onclick="fetch('/api/control',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'sync_code'})})">Sync Code to Peers</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- PAGE: Evolution -->
+    <div class="page" id="page-evolution">
+      <div class="page-scroll">
+        <h2 class="page-title">Evolution</h2>
+        <div class="card-grid cols-3">
+          <div class="card"><div class="card-label">Successes</div><div class="card-value" id="evo-successes">0</div></div>
+          <div class="card"><div class="card-label">Failures</div><div class="card-value" id="evo-failures">0</div></div>
+          <div class="card"><div class="card-label">Cooldown</div><div class="card-value" id="evo-cooldown">--</div></div>
+        </div>
+        <div class="card-grid cols-2">
+          <div class="card"><div class="card-label">Current</div><div class="card-value" id="evo-current" style="font-size:14px">Idle</div></div>
+          <div class="card"><div class="card-label">Queue</div><div class="card-value" id="evo-queue">0</div></div>
+        </div>
+        <h3 class="section-title">Git</h3>
+        <div class="card-grid cols-2">
+          <div class="card"><div class="card-label">Branch</div><div class="card-value mono" id="git-branch">--</div></div>
+          <div class="card"><div class="card-label">Goals</div><div class="card-value" id="evo-goals-count">0</div></div>
+        </div>
+        <div class="card wide mono" id="git-log" style="font-size:11px;line-height:1.8">Loading...</div>
+        <h3 class="section-title">Recent Evolutions</h3>
+        <div class="card wide" id="evo-history"><span class="card-label">No evolutions yet</span></div>
+        <h3 class="section-title">Goals</h3>
+        <div class="card wide" id="evo-goals"><span class="card-label">No goals</span></div>
       </div>
     </div>
 

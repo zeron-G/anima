@@ -31,6 +31,7 @@ class DashboardHub:
         self.scheduler = None
         self.skill_loader = None
         self.gossip_mesh = None
+        self.evolution_engine = None
         self.config: dict = {}
         self._start_time = time.time()
         self._chat_history: list[dict] = []
@@ -111,6 +112,38 @@ class DashboardHub:
         if self.usage_tracker:
             snapshot["llm_usage_history"] = self.usage_tracker.get_history(500)
             snapshot["llm_usage_summary"] = self.usage_tracker.get_summary()
+
+        # Evolution engine status
+        if self.evolution_engine:
+            snapshot["evolution"] = self.evolution_engine.get_status()
+            snapshot["evolution"]["memory"] = {
+                "successes": self.evolution_engine.memory.successes[-10:],
+                "failures": self.evolution_engine.memory.failures[-5:],
+                "goals": self.evolution_engine.memory.goals,
+                "anti_patterns_count": len(self.evolution_engine.memory.anti_patterns),
+            }
+        else:
+            snapshot["evolution"] = {"running": False}
+
+        # Git info
+        try:
+            import subprocess
+            from anima.config import project_root
+            git_log = subprocess.run(
+                ["git", "log", "--oneline", "-5"],
+                cwd=str(project_root()), capture_output=True, text=True, timeout=5,
+            )
+            branch = subprocess.run(
+                ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+                cwd=str(project_root()), capture_output=True, text=True, timeout=5,
+            )
+            snapshot["git"] = {
+                "branch": branch.stdout.strip(),
+                "recent_commits": git_log.stdout.strip().split("\n")[:5],
+            }
+        except Exception:
+            snapshot["git"] = {"branch": "?", "recent_commits": []}
+
         return snapshot
 
     def add_chat_message(self, role: str, content: str) -> None:

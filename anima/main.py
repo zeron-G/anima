@@ -518,6 +518,7 @@ async def run() -> bool:
     dashboard_hub.scheduler = scheduler
     dashboard_hub.skill_loader = skill_loader
     dashboard_hub.gossip_mesh = gossip_mesh
+    dashboard_hub.evolution_engine = evolution_engine
     dashboard_hub.config = config
 
     dashboard_port = get("dashboard.port", 8420)
