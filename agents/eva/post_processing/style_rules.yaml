@@ -20,10 +20,11 @@ rules:
     min_density: 0.003          # 下限: 每333字1个
     strip_if_over: true
 
-  # 长度控制 — 日常对话不要太长（技术回复不限）
+  # 长度控制 — 仅限纯日常闲聊，技术/代码/表格回复不限
   - type: "length_guard"
-    max_chars: 800
+    max_chars: 2000
     truncation_style: "natural"
+    skip_if_contains: ["```", "| ", "##", "---"]
 
   # 口癖保障 — 每3条回复至少出现一个
   - type: "catchphrase_ensure"

@@ -250,8 +250,17 @@ class SoulContainer:
         the allowed range.  Only truncates if a boundary is found in the
         latter half; otherwise hard-cuts at *max_chars* to avoid
         losing too much content.
+
+        If the text contains any string from ``skip_if_contains``
+        (e.g. code blocks, tables, headings), truncation is skipped
+        entirely — technical content should never be cut.
         """
-        max_chars: int = rule.get("max_chars", 500)
+        # Skip truncation for technical/structured content
+        skip_markers = rule.get("skip_if_contains", [])
+        if skip_markers and any(marker in text for marker in skip_markers):
+            return text
+
+        max_chars: int = rule.get("max_chars", 2000)
         if len(text) <= max_chars:
             return text
 
