@@ -1,0 +1,45 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.11"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Lint with ruff
+        run: |
+          pip install ruff
+          ruff check anima/ --select E,F,W --ignore E501,W291,W292,W293 --exit-zero
+
+      - name: Syntax check all Python files
+        run: |
+          find anima/ -name "*.py" -exec python -m py_compile {} \;
+
+      - name: Run tests
+        run: |
+          python -m pytest tests/ \
+            --ignore=tests/stress_test.py \
+            --ignore=tests/test_oauth_live.py \
+            --ignore=tests/test_full_system.py \
+            --ignore=tests/test_integration_network.py \
+            -q --tb=short

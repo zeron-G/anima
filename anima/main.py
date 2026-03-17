@@ -19,7 +19,7 @@ if sys.platform == "win32":
             try:
                 _s.reconfigure(encoding="utf-8", errors="replace")
             except Exception:
-                pass
+                pass  # Logger not initialized yet; reconfigure is best-effort
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
 from anima.config import load_config, get, agent_dir
@@ -310,8 +310,8 @@ async def run() -> bool:
                     priority=EventPriority.HIGH,
                     source="network",
                 )))
-            except Exception:
-                pass
+            except Exception as e:
+                log.warning("Gossip network event forwarding failed: %s", e)
 
         # Session router
         from anima.network.session_router import SessionRouter
@@ -397,8 +397,8 @@ async def run() -> bool:
                         priority=EventPriority.NORMAL,
                         source=f"discussion:{from_node}",
                     )))
-                except Exception:
-                    pass
+                except Exception as e:
+                    log.warning("Node discussion event injection failed: %s", e)
                 return
             if etype == "node_discussion_reply":
                 # Reply to our discussion — log it

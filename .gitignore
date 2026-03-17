@@ -91,3 +91,15 @@ tests/_*.py
 
 # Dev tools output
 tools/vrm_report.txt
+
+# Temporary/debug scripts (root level)
+_*.py
+test_out*
+D*tmp*
+
+# Live2D binary models (too large for git)
+anima/dashboard/static/model/PurpleBird/
+
+# Batch/shortcut files
+ANIMA.bat
+create_shortcut.bat

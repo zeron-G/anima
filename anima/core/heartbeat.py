@@ -263,8 +263,8 @@ class HeartbeatEngine:
         if self._tick_callback:
             try:
                 self._tick_callback(tick_record)
-            except Exception:
-                pass
+            except Exception as e:
+                log.debug("Tick callback failed: %s", e)
 
     async def _sample_system(self) -> dict:
         """System resource sampling."""

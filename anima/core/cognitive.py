@@ -167,8 +167,8 @@ class AgenticLoop:
             meta = {}
             try:
                 meta = json.loads(mem.get("metadata_json", "{}"))
-            except Exception:
-                pass
+            except Exception as e:
+                log.debug("Parsing memory metadata JSON failed: %s", e)
             role = meta.get("role", "assistant")
             content = mem.get("content", "")
             self._conversation.append({"role": role, "content": content})
@@ -422,8 +422,8 @@ class AgenticLoop:
                         if self._prompt_compiler and hasattr(self._prompt_compiler, 'post_process'):
                             try:
                                 output_content = self._prompt_compiler.post_process(content)
-                            except Exception:
-                                pass  # fallback to raw content
+                            except Exception as e:
+                                log.debug("Soul Container post-processing failed: %s", e)
                         await self._output(output_content)
                         self._save_chat("assistant", output_content)
 
@@ -439,8 +439,8 @@ class AgenticLoop:
                 if self._summarizer:
                     try:
                         await self._summarizer.add_message("assistant", content or "", is_self_thought=is_self)
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        log.debug("ConversationSummarizer tracking failed: %s", e)
 
                 break
 
@@ -831,8 +831,8 @@ class AgenticLoop:
         if self._status_callback:
             try:
                 self._status_callback(status)
-            except Exception:
-                pass
+            except Exception as e:
+                log.debug("Status callback emission failed: %s", e)
 
 
 # Backward-compatible alias
