@@ -202,6 +202,43 @@ class GossipMesh:
         with self._lock:
             return 1 + sum(1 for s in self._peers.values() if s.status == "alive")
 
+    def get_diagnostics(self) -> dict:
+        """Return structured health snapshot for the dashboard.
+
+        Returns:
+            {
+                "self": {node_id, hostname, status, ip, port},
+                "peers": [
+                    {node_id, hostname, status, phi, last_seen, ip, port},
+                    ...
+                ],
+            }
+        """
+        with self._lock:
+            peers = []
+            for nid, state in self._peers.items():
+                phi = self._detector.phi(nid)
+                last_seen = self._detector._last_seen.get(nid, 0.0)
+                peers.append({
+                    "node_id": nid,
+                    "hostname": getattr(state, "hostname", ""),
+                    "status": state.status,
+                    "phi": round(phi, 2),
+                    "last_seen": last_seen,
+                    "ip": getattr(state, "ip", ""),
+                    "port": getattr(state, "port", 0),
+                })
+            return {
+                "self": {
+                    "node_id": self._identity.node_id,
+                    "hostname": getattr(self._local_state, "hostname", ""),
+                    "status": "alive",
+                    "ip": getattr(self._local_state, "ip", ""),
+                    "port": self._port,
+                },
+                "peers": peers,
+            }
+
     # ── Thread ──
 
     def _gossip_thread(self) -> None:

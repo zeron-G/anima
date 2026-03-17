@@ -96,11 +96,11 @@ def _write_sync(node: str, path: str, content: str) -> dict:
 
 
 async def _remote_exec(node: str, command: str, timeout: int = 30) -> dict:
-    return await asyncio.get_event_loop().run_in_executor(None, _exec_sync, node, command, timeout)
+    return await asyncio.get_running_loop().run_in_executor(None, _exec_sync, node, command, timeout)
 
 
 async def _remote_write(node: str, path: str, content: str) -> dict:
-    return await asyncio.get_event_loop().run_in_executor(None, _write_sync, node, path, content)
+    return await asyncio.get_running_loop().run_in_executor(None, _write_sync, node, path, content)
 
 
 async def _delegate_task(node: str, task: str, timeout: int = 120) -> dict:

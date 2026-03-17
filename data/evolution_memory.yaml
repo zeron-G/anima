@@ -164,3 +164,15 @@ successes:
   timestamp: 1773710150.8181176
   title: Gossip 启动假阳性 DEAD 判定修复 — 加入 grace period
   type: bugfix
+- files:
+  - anima/network/gossip.py
+  - anima/main.py
+  id: EVO-20260316-966942
+  lesson: '1. 修复睡眠计算：在 tick 开始时记录 `tick_start = time.time()`，tick 结束后 `sleep_time
+    = max(0, GOSSIP_INTERVAL - (time.time() - tick_start))`，确保间隔准确。
+
+
+    2. 在 `main.py` 的 gossip 回调中，当节点 alive/dead/suspect 状态变化时，通过 `on_'
+  timestamp: 1773712334.6350102
+  title: Gossip Mesh — 睡眠计算 Bug 修复 + 节点状态变化通知推送
+  type: bugfix

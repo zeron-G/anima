@@ -22,6 +22,7 @@ class EventType(IntEnum):
     FOLLOW_UP = auto()      # Agent wants to continue working on something
     SCHEDULED_TASK = auto()  # Cron scheduler fired a job
     TASK_DELEGATE = auto()  # Task delegated from another node
+    IDLE_TASK = auto()      # Background task dispatched by idle scheduler
 
 
 class EventPriority(IntEnum):

@@ -37,6 +37,18 @@ def _utf8_run(*args, **kwargs):
     return _orig_run(*args, **kwargs)
 _subprocess.run = _utf8_run
 
+# Patch subprocess.Popen to suppress console window flashing on Windows.
+# Without CREATE_NO_WINDOW, every subprocess call (git, claude, gh, shell, etc.)
+# briefly flashes a console window — extremely disruptive during normal use.
+# Patching Popen covers BOTH direct Popen() and subprocess.run() (which uses Popen).
+if sys.platform == "win32":
+    _orig_Popen_init = _subprocess.Popen.__init__
+    def _no_window_popen_init(self, *args, **kwargs):
+        if "creationflags" not in kwargs:
+            kwargs["creationflags"] = _subprocess.CREATE_NO_WINDOW
+        return _orig_Popen_init(self, *args, **kwargs)
+    _subprocess.Popen.__init__ = _no_window_popen_init
+
 if sys.platform == "win32":
     # Reconfigure stdout/stderr to UTF-8 with error replacement
     for stream in [sys.stdout, sys.stderr]:

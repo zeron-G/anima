@@ -158,11 +158,37 @@ async def run() -> bool:
 
     heartbeat.set_scheduler(scheduler)
 
+    # ── Idle Scheduler ──
+    from anima.perception.user_activity import UserActivityDetector
+    from anima.core.idle_scheduler import IdleDetector, IdleScheduler
+
+    idle_cfg = get("idle_scheduler", {})
+    user_activity = UserActivityDetector(
+        use_system_api=idle_cfg.get("user_activity", {}).get("use_system_api", True),
+    )
+    idle_detector = IdleDetector(
+        user_activity=user_activity,
+        event_queue=event_queue,
+        weights=idle_cfg.get("weights"),
+    )
+    idle_scheduler = IdleScheduler(
+        idle_detector=idle_detector,
+        event_queue=event_queue,
+        config=idle_cfg,
+    )
+    heartbeat.set_idle_scheduler(idle_scheduler)
+
+    # Wire env tools and idle tools
+    from anima.tools.builtin.env_tools import set_memory_store as set_env_store, set_idle_scheduler as set_idle_ref
+    set_env_store(memory_store)
+    set_idle_ref(idle_scheduler)
+
     # ── Evolution engine v2 ──
     from anima.evolution.engine import EvolutionEngine
     evolution_engine = EvolutionEngine()
     heartbeat.set_evolution_engine(evolution_engine)
     set_evo_tools_engine(evolution_engine)
+    idle_scheduler.set_evolution_engine(evolution_engine)
 
     # Active channels for response routing (populated if network enabled)
     _active_channels: dict[str, Any] = {}
@@ -474,6 +500,8 @@ async def run() -> bool:
         config=config,
     )
     cognitive.set_heartbeat(heartbeat)
+    cognitive.set_user_activity(user_activity)
+    cognitive.set_idle_scheduler(idle_scheduler)
     if gossip_mesh:
         cognitive.set_gossip_mesh(gossip_mesh)
 
@@ -587,6 +615,26 @@ async def run() -> bool:
         asyncio.create_task(cognitive.run(), name="cognitive"),
         asyncio.create_task(terminal.start(), name="terminal"),
     ]
+
+    # ── Environment scanner: Layer 1 on startup ──
+    env_scan_cfg = idle_cfg.get("env_scan", {})
+    if env_scan_cfg.get("enabled", True) and env_scan_cfg.get("layer1_on_startup", True):
+        from anima.perception.env_scanner import EnvScanner
+        env_scanner = EnvScanner(
+            db=memory_store,
+            extra_skip_dirs=env_scan_cfg.get("extra_skip_dirs", []),
+            extra_high_value_dirs=env_scan_cfg.get("extra_high_value_dirs", []),
+            batch_size=env_scan_cfg.get("batch_size", 500),
+        )
+
+        async def _env_scan_startup():
+            try:
+                await env_scanner.scan_layer1()
+                log.info("Environment Layer 1 scan completed on startup")
+            except Exception as e:
+                log.warning("Env Layer 1 scan failed: %s", e)
+
+        asyncio.create_task(_env_scan_startup(), name="env_scan_layer1")
 
     from anima.network.discovery import get_local_ip as _lip
     log.info("ANIMA is alive. Dashboard: http://%s:%d", _lip(), dashboard_port)

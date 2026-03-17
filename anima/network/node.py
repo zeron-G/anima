@@ -39,6 +39,8 @@ class NodeState:
     tools: list = field(default_factory=list)
     max_concurrent: int = 5
     current_load: float = 0.0
+    idle_score: float = 0.0        # 0.0-1.0 from IdleScheduler
+    idle_level: str = "busy"       # busy | light | moderate | deep
     agent_name: str = ""
     code_version: str = "0.1.0"
     uptime_s: int = 0

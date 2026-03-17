@@ -67,6 +67,33 @@ tools:
 skills:
   extra_dirs: []
 
+# ── Idle Scheduler ──
+idle_scheduler:
+  enabled: true
+  max_concurrent_tasks: 2
+  weights:
+    user_activity: 0.5
+    system_load: 0.3
+    queue_depth: 0.2
+  thresholds:
+    busy: 0.0
+    light: 0.3
+    moderate: 0.6
+    deep: 0.8
+  budget:
+    busy: 0.0
+    light: 0.5
+    moderate: 1.0
+    deep: 2.0
+  user_activity:
+    use_system_api: true
+  env_scan:
+    enabled: true
+    batch_size: 500
+    layer1_on_startup: true
+    extra_high_value_dirs: []
+    extra_skip_dirs: []
+
 # ── Network ──
 # Peers, secrets, remote_nodes are in local/env.yaml
 network:

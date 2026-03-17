@@ -78,6 +78,7 @@ class HeartbeatEngine:
         self._agent_warned_ids: set[str] = set()  # Sessions warned at 60s
         self._is_restart = False  # Set via mark_as_restart()
         self._restart_reason = ""
+        self._idle_scheduler = None  # Set via set_idle_scheduler()
 
         # File watcher
         watch_paths = get("perception.watch_paths", ["."])
@@ -110,6 +111,10 @@ class HeartbeatEngine:
     def set_agent_manager(self, manager) -> None:
         """Set the agent manager for active-agent tracking."""
         self._agent_manager = manager
+
+    def set_idle_scheduler(self, idle_scheduler) -> None:
+        """Set the idle scheduler for off-peak task dispatch."""
+        self._idle_scheduler = idle_scheduler
 
     async def start(self) -> None:
         """Start all heartbeat loops."""
@@ -167,6 +172,10 @@ class HeartbeatEngine:
         await self._decay_emotion()
         await self._confirm_alive()
         await self._check_agent_timeouts()
+
+        # Update idle scheduler (must be before snapshot cache for correct ordering)
+        if self._idle_scheduler:
+            await self._idle_scheduler.tick(snapshot)
 
         # Update snapshot cache (bridge to cognitive cycle)
         self._snapshot_cache.update(snapshot, changes)
@@ -230,6 +239,9 @@ class HeartbeatEngine:
             gs = self._gossip_mesh._local_state
             gs.current_load = snapshot.get("cpu_percent", 0) / 100.0
             gs.emotion = self._emotion.to_dict()
+            if self._idle_scheduler:
+                gs.idle_score = self._idle_scheduler.score
+                gs.idle_level = self._idle_scheduler.level
 
         # Emit tick record for dashboard visualization
         tick_record = {
@@ -242,6 +254,8 @@ class HeartbeatEngine:
             "has_alerts": diff.has_alerts,
             "file_changes": len(changes),
             "significant_fields": diff.significant_fields if diff.significance_score > 0 else [],
+            "idle_score": self._idle_scheduler.score if self._idle_scheduler else 0,
+            "idle_level": self._idle_scheduler.level if self._idle_scheduler else "unknown",
         }
         self._tick_history.append(tick_record)
         if len(self._tick_history) > 30:
@@ -312,6 +326,19 @@ class HeartbeatEngine:
         self._consecutive_skips = self._max_consecutive_skips
         while self._running:
             try:
+                # Dynamic interval based on idle scheduler
+                if self._idle_scheduler:
+                    effective_interval = self._idle_scheduler.get_llm_heartbeat_interval(
+                        self._llm_interval
+                    )
+                    if effective_interval > 90000:  # effectively skip (BUSY)
+                        log.debug("LLM heartbeat skipped — system busy (idle=%.2f)",
+                                  self._idle_scheduler.score)
+                        await asyncio.sleep(self._llm_interval)
+                        continue
+                else:
+                    effective_interval = self._llm_interval
+
                 if self._should_llm_think():
                     await self._on_llm_tick()
                     self._consecutive_skips = 0
@@ -319,11 +346,14 @@ class HeartbeatEngine:
                     self._consecutive_skips += 1
                     log.debug("LLM heartbeat skipped (consecutive=%d)",
                               self._consecutive_skips)
+
+                await asyncio.sleep(effective_interval)
+
             except asyncio.CancelledError:
                 return
             except Exception as e:
                 log.error("LLM heartbeat error: %s", e)
-            await asyncio.sleep(self._llm_interval)
+                await asyncio.sleep(self._llm_interval)
 
     def _should_llm_think(self) -> bool:
         """Always think on LLM heartbeat — cost is acceptable for proactive behavior."""
@@ -427,43 +457,74 @@ class HeartbeatEngine:
 
         Uses the new evolution engine (anima/evolution/engine.py):
           Proposal → Consensus → Implement → Test → Review → Deploy
+
+        With idle scheduler: evolution only triggers in MODERATE+ idle.
         """
         await asyncio.sleep(self._major_interval)
         while self._running:
             try:
+                # Dynamic interval based on idle scheduler
+                if self._idle_scheduler:
+                    effective_interval = self._idle_scheduler.get_major_heartbeat_interval(
+                        self._major_interval
+                    )
+                    if effective_interval > 90000:
+                        log.debug("Evolution skipped — insufficient idle (level=%s, score=%.2f)",
+                                  self._idle_scheduler.level, self._idle_scheduler.score)
+                        await asyncio.sleep(self._major_interval)
+                        continue
+                else:
+                    effective_interval = self._major_interval
+
                 if not self._evolution_engine:
-                    await asyncio.sleep(self._major_interval)
+                    await asyncio.sleep(effective_interval)
+                    continue
+
+                # Check idle scheduler permission
+                if self._idle_scheduler and not self._idle_scheduler.should_trigger_evolution():
+                    log.debug("Evolution not triggered — idle scheduler says no (level=%s)",
+                              self._idle_scheduler.level)
+                    await asyncio.sleep(effective_interval)
                     continue
 
                 status = self._evolution_engine.get_status()
                 if status["running"]:
                     log.info("Evolution still running, skipping")
-                    await asyncio.sleep(self._major_interval)
+                    await asyncio.sleep(effective_interval)
                     continue
 
                 if status["cooldown_remaining"] > 0:
                     log.info("Evolution in cooldown (%ds)", status["cooldown_remaining"])
-                    await asyncio.sleep(self._major_interval)
+                    await asyncio.sleep(effective_interval)
                     continue
 
                 # Generate a proposal via LLM self-thinking
-                log.info("Major heartbeat — pushing evolution thinking event")
+                idle_info = ""
+                if self._idle_scheduler:
+                    idle_info = (
+                        f"\nIDLE STATUS: score={self._idle_scheduler.score:.2f}, "
+                        f"level={self._idle_scheduler.level}\n"
+                    )
+                log.info("Major heartbeat — pushing evolution thinking event "
+                         "(idle=%s)", self._idle_scheduler.level if self._idle_scheduler else "n/a")
                 await self._event_queue.put(Event(
                     type=EventType.SELF_THINKING,
                     payload={
                         "tick_count": self._tick_count,
                         "evolution": True,
-                        "evolution_prompt": self._build_evolution_prompt(),
+                        "evolution_prompt": self._build_evolution_prompt() + idle_info,
                     },
                     priority=EventPriority.LOW,
                     source="evolution",
                 ))
 
+                await asyncio.sleep(effective_interval)
+
             except asyncio.CancelledError:
                 return
             except Exception as e:
                 log.error("Major heartbeat/evolution error: %s", e)
-            await asyncio.sleep(self._major_interval)
+                await asyncio.sleep(self._major_interval)
 
     def _build_evolution_prompt(self) -> str:
         """Build the evolution proposal prompt with context from experience memory."""

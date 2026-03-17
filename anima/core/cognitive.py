@@ -87,6 +87,8 @@ class AgenticLoop:
         # Track last proactive task result to inject into next tick's user message
         # Prevents "system normal" loop by giving LLM explicit context of last action
         self._last_proactive_result: str = ""  # "keyword: summary of what was found"
+        self._user_activity = None  # Set via set_user_activity()
+        self._idle_scheduler = None  # Set via set_idle_scheduler()
 
     def set_gossip_mesh(self, gossip_mesh) -> None:
         """Set gossip mesh for broadcasting delegation results."""
@@ -95,6 +97,14 @@ class AgenticLoop:
     def set_heartbeat(self, heartbeat) -> None:
         """Set heartbeat ref for checkpoint tick count."""
         self._heartbeat = heartbeat
+
+    def set_user_activity(self, user_activity) -> None:
+        """Set user activity detector for recording user messages."""
+        self._user_activity = user_activity
+
+    def set_idle_scheduler(self, idle_scheduler) -> None:
+        """Set idle scheduler for marking tasks done."""
+        self._idle_scheduler = idle_scheduler
 
     @property
     def reload_manager(self) -> ReloadManager:
@@ -223,6 +233,10 @@ class AgenticLoop:
         # ── Step 2: LLM agentic loop for complex events ──
         user_message = self._event_to_message(event)
 
+        # Record user activity for idle detection
+        if event.type == EventType.USER_MESSAGE and self._user_activity:
+            self._user_activity.record_user_message()
+
         # Save user message to episodic memory
         if event.type == EventType.USER_MESSAGE and user_message:
             self._memory_store.save_memory(
@@ -234,7 +248,7 @@ class AgenticLoop:
         snapshot = self._snapshot_cache.get_latest()
         system_state = snapshot.get("system_state", {}) if snapshot else {}
         event_type_name = event.type.name
-        needs_tools = event_type_name in ("USER_MESSAGE", "STARTUP", "SELF_THINKING", "SCHEDULED_TASK", "TASK_DELEGATE")
+        needs_tools = event_type_name in ("USER_MESSAGE", "STARTUP", "SELF_THINKING", "SCHEDULED_TASK", "TASK_DELEGATE", "IDLE_TASK")
 
         # For SELF_THINKING: extract recent self-thought snippets to avoid repetition
         # Only pull entries tagged as self-thoughts (not user-facing replies)

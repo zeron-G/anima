@@ -84,6 +84,41 @@ CREATE TABLE IF NOT EXISTS llm_usage (
 );
 CREATE INDEX IF NOT EXISTS idx_llm_usage_ts ON llm_usage(timestamp);
 CREATE INDEX IF NOT EXISTS idx_llm_usage_model ON llm_usage(model);
+
+-- Environment catalog (populated by EnvScanner)
+CREATE TABLE IF NOT EXISTS env_catalog (
+    id TEXT PRIMARY KEY,
+    path TEXT NOT NULL UNIQUE,
+    type TEXT NOT NULL DEFAULT 'file',
+    size_bytes INTEGER DEFAULT 0,
+    modified_at REAL DEFAULT 0,
+    scanned_at REAL DEFAULT 0,
+    scan_layer INTEGER DEFAULT 1,
+    category TEXT DEFAULT 'other',
+    extension TEXT DEFAULT '',
+    summary TEXT DEFAULT '',
+    parent_dir TEXT DEFAULT '',
+    is_important INTEGER DEFAULT 0,
+    is_deleted INTEGER DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_env_path ON env_catalog(path);
+CREATE INDEX IF NOT EXISTS idx_env_parent ON env_catalog(parent_dir);
+CREATE INDEX IF NOT EXISTS idx_env_category ON env_catalog(category);
+CREATE INDEX IF NOT EXISTS idx_env_type ON env_catalog(type);
+CREATE INDEX IF NOT EXISTS idx_env_important ON env_catalog(is_important);
+CREATE INDEX IF NOT EXISTS idx_env_layer ON env_catalog(scan_layer);
+
+CREATE TABLE IF NOT EXISTS env_scan_progress (
+    id TEXT PRIMARY KEY,
+    status TEXT DEFAULT 'pending',
+    total_dirs INTEGER DEFAULT 0,
+    scanned_dirs INTEGER DEFAULT 0,
+    total_files INTEGER DEFAULT 0,
+    last_scanned_path TEXT DEFAULT '',
+    started_at REAL DEFAULT 0,
+    completed_at REAL DEFAULT 0,
+    updated_at REAL DEFAULT 0
+);
 """
 
 
@@ -357,6 +392,189 @@ class MemoryStore:
             "by_provider": by_provider,
             "by_day": by_day,
         }
+
+    # ---- Environment Catalog ----
+
+    def upsert_env_catalog_batch(self, entries: list[dict]) -> None:
+        """Insert or update a batch of env_catalog entries."""
+        if not entries:
+            return
+        for e in entries:
+            self._conn.execute(
+                "INSERT OR REPLACE INTO env_catalog "
+                "(id, path, type, size_bytes, modified_at, scanned_at, scan_layer, "
+                "category, extension, parent_dir, is_important) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (e["id"], e["path"], e["type"], e.get("size_bytes", 0),
+                 e.get("modified_at", 0), e.get("scanned_at", 0),
+                 e.get("scan_layer", 1), e.get("category", "other"),
+                 e.get("extension", ""), e.get("parent_dir", ""),
+                 e.get("is_important", 0)),
+            )
+        self._conn.commit()
+
+    def update_scan_progress(self, layer_id: str, status: str, **kwargs) -> None:
+        """Update scan progress for a layer."""
+        now = time.time()
+        row = self._conn.execute(
+            "SELECT id FROM env_scan_progress WHERE id = ?", (layer_id,)
+        ).fetchone()
+        if row:
+            sets = ["status = ?", "updated_at = ?"]
+            vals: list = [status, now]
+            for k, v in kwargs.items():
+                sets.append(f"{k} = ?")
+                vals.append(v)
+            if status == "completed":
+                sets.append("completed_at = ?")
+                vals.append(now)
+            vals.append(layer_id)
+            self._conn.execute(
+                f"UPDATE env_scan_progress SET {', '.join(sets)} WHERE id = ?",
+                vals,
+            )
+        else:
+            cols = ["id", "status", "started_at", "updated_at"]
+            vals_list: list = [layer_id, status, now, now]
+            for k, v in kwargs.items():
+                cols.append(k)
+                vals_list.append(v)
+            if status == "completed":
+                cols.append("completed_at")
+                vals_list.append(now)
+            placeholders = ", ".join("?" * len(cols))
+            self._conn.execute(
+                f"INSERT INTO env_scan_progress ({', '.join(cols)}) VALUES ({placeholders})",
+                vals_list,
+            )
+        self._conn.commit()
+
+    def get_scan_progress(self, layer_id: str) -> dict | None:
+        row = self._conn.execute(
+            "SELECT * FROM env_scan_progress WHERE id = ?", (layer_id,)
+        ).fetchone()
+        return dict(row) if row else None
+
+    def search_env_catalog(self, query: str = "", category: str = "",
+                           extension: str = "", file_type: str = "",
+                           limit: int = 20) -> list[dict]:
+        """Search the environment catalog."""
+        conditions = ["is_deleted = 0"]
+        params: list = []
+        if query:
+            conditions.append("(path LIKE ? OR summary LIKE ?)")
+            params.extend([f"%{query}%", f"%{query}%"])
+        if category:
+            conditions.append("category = ?")
+            params.append(category)
+        if extension:
+            conditions.append("extension = ?")
+            params.append(extension)
+        if file_type:
+            conditions.append("type = ?")
+            params.append(file_type)
+        where = " AND ".join(conditions)
+        rows = self._conn.execute(
+            f"SELECT path, type, size_bytes, category, extension, summary, "
+            f"is_important, scan_layer, modified_at "
+            f"FROM env_catalog WHERE {where} "
+            f"ORDER BY is_important DESC, modified_at DESC LIMIT ?",
+            [*params, limit],
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def get_env_stats(self) -> dict:
+        """Get environment scan statistics."""
+        total_files = self._conn.execute(
+            "SELECT COUNT(*) FROM env_catalog WHERE type='file' AND is_deleted=0"
+        ).fetchone()[0]
+        total_dirs = self._conn.execute(
+            "SELECT COUNT(*) FROM env_catalog WHERE type='directory' AND is_deleted=0"
+        ).fetchone()[0]
+        important = self._conn.execute(
+            "SELECT COUNT(*) FROM env_catalog WHERE is_important=1 AND is_deleted=0"
+        ).fetchone()[0]
+        summarized = self._conn.execute(
+            "SELECT COUNT(*) FROM env_catalog WHERE summary != '' AND is_deleted=0"
+        ).fetchone()[0]
+        by_category = {}
+        for row in self._conn.execute(
+            "SELECT category, COUNT(*) as cnt FROM env_catalog WHERE is_deleted=0 GROUP BY category"
+        ).fetchall():
+            by_category[row[0]] = row[1]
+
+        progress = {}
+        for lid in ("layer1", "layer2", "layer3"):
+            p = self.get_scan_progress(lid)
+            progress[lid] = p if p else {"status": "pending"}
+
+        return {
+            "total_files": total_files,
+            "total_dirs": total_dirs,
+            "important_files": important,
+            "summarized": summarized,
+            "by_category": by_category,
+            "scan_progress": progress,
+        }
+
+    def get_scanned_dirs(self, max_layer: int = 2) -> list[dict]:
+        """Get directories that have been scanned up to given layer."""
+        rows = self._conn.execute(
+            "SELECT path, scan_layer FROM env_catalog "
+            "WHERE type='directory' AND scan_layer <= ? AND is_deleted=0",
+            (max_layer,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def get_env_files_in_dir(self, dir_path: str) -> list[dict]:
+        """Get known files in a specific directory."""
+        rows = self._conn.execute(
+            "SELECT path, modified_at, size_bytes FROM env_catalog "
+            "WHERE parent_dir = ? AND is_deleted=0",
+            (dir_path.replace("\\", "/"),),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def get_unscanned_dirs(self) -> list[str]:
+        """Get layer1 directories not yet scanned by layer2/3."""
+        rows = self._conn.execute(
+            "SELECT path FROM env_catalog "
+            "WHERE type='directory' AND scan_layer=1 AND is_deleted=0 "
+            "AND path NOT IN ("
+            "  SELECT DISTINCT parent_dir FROM env_catalog WHERE scan_layer >= 2"
+            ")"
+        ).fetchall()
+        return [r[0] for r in rows]
+
+    def mark_env_deleted(self, path: str) -> None:
+        self._conn.execute(
+            "UPDATE env_catalog SET is_deleted=1 WHERE path=?",
+            (path.replace("\\", "/"),),
+        )
+        self._conn.commit()
+
+    def update_env_entry(self, path: str, updates: dict) -> None:
+        if not updates:
+            return
+        sets = []
+        vals = []
+        for k, v in updates.items():
+            sets.append(f"{k} = ?")
+            vals.append(v)
+        vals.append(path.replace("\\", "/"))
+        self._conn.execute(
+            f"UPDATE env_catalog SET {', '.join(sets)} WHERE path = ?", vals
+        )
+        self._conn.commit()
+
+    def get_unsummarized_important_files(self, limit: int = 10) -> list[dict]:
+        rows = self._conn.execute(
+            "SELECT path, category, extension FROM env_catalog "
+            "WHERE is_important=1 AND summary='' AND is_deleted=0 "
+            "ORDER BY modified_at DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+        return [dict(r) for r in rows]
 
     # ---- Lifecycle ----
 

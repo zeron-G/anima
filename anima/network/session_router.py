@@ -623,6 +623,53 @@ class TaskDelegate:
             "total_outbound": len(self._outbound),
         }
 
+    def get_diagnostics(self) -> dict:
+        """Return structured diagnostics for the dashboard.
+
+        Returns:
+            {
+                queued, running, max_concurrent,
+                outbound_pending, outbound_done,
+                inbound_active, inbound_done,
+                workers_alive,
+            }
+        """
+        outbound_terminal = {TaskStatus.DONE, TaskStatus.FAILED,
+                             TaskStatus.TIMEOUT, TaskStatus.CANCELLED}
+        outbound_pending = sum(
+            1 for t in self._outbound.values() if t.status not in outbound_terminal
+        )
+        outbound_done = sum(
+            1 for t in self._outbound.values() if t.status in outbound_terminal
+        )
+        inbound_active = sum(
+            1 for t in self._inbound.values()
+            if t.status in (TaskStatus.PENDING, TaskStatus.ACCEPTED, TaskStatus.RUNNING)
+        )
+        inbound_done = sum(
+            1 for t in self._inbound.values() if t.status in outbound_terminal
+        )
+        queued = sum(
+            1 for t in self._inbound.values()
+            if t.status in (TaskStatus.PENDING, TaskStatus.ACCEPTED)
+        )
+        running = sum(
+            1 for t in self._inbound.values() if t.status == TaskStatus.RUNNING
+        )
+        workers_alive = sum(
+            1 for w in self._workers if not w.done()
+        )
+        return {
+            "queued": queued,
+            "running": running,
+            "max_concurrent": self._max_concurrent,
+            "outbound_pending": outbound_pending,
+            "outbound_done": outbound_done,
+            "inbound_active": inbound_active,
+            "inbound_done": inbound_done,
+            "workers_alive": workers_alive,
+        }
+
 
 @dataclass
 class Session:

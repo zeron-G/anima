@@ -90,6 +90,17 @@ def event_to_message(event: Event, self_thinking_ticks: dict[str, int]) -> str:
             "Complete this task using your tools and respond with the result."
         )
 
+    if t == EventType.IDLE_TASK:
+        handler = p.get("handler", "unknown")
+        return (
+            f"[IDLE TASK: {p.get('task_name', 'unknown')}] (idle_score={p.get('idle_score', '?')}, level={p.get('idle_level', '?')})\n"
+            f"{p.get('description', '')}\n"
+            f"Handler: {handler}\n"
+            f"Max duration: {p.get('max_duration_s', 300)}s\n"
+            "Execute this background task efficiently — you're running in idle time. "
+            "Use your tools to actually DO the task. Be concise and effective."
+        )
+
     return f"[INTERNAL: {t.name}] {json.dumps(p, ensure_ascii=False)[:200]}"
 
 
