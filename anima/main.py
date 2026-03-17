@@ -22,7 +22,7 @@ if sys.platform == "win32":
                 pass
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
-from anima.config import load_config, get
+from anima.config import load_config, get, agent_dir
 from anima.utils.logging import setup_logging, get_logger
 
 log = get_logger("main")
@@ -150,7 +150,10 @@ async def run() -> bool:
         reserve_response=get("llm.tier1.max_tokens", 8192),
     )
     try:
-        prompt_compiler = PromptCompiler(token_budget=token_budget)
+        prompt_compiler = PromptCompiler(
+            max_context=get("llm.tier1.max_context", 200_000),
+            reserve_response=get("llm.tier1.max_tokens", 8192),
+        )
     except Exception as e:
         log.warning("PromptCompiler init failed, falling back to PromptBuilder: %s", e)
         prompt_compiler = None
