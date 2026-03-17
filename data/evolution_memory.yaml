@@ -176,3 +176,15 @@ successes:
   timestamp: 1773712334.6350102
   title: Gossip Mesh — 睡眠计算 Bug 修复 + 节点状态变化通知推送
   type: bugfix
+- files:
+  - anima/network/gossip.py
+  - anima/network/session_router.py
+  - anima/tools/builtin/remote.py
+  id: EVO-20260316-dc1627
+  lesson: '1. 在 GossipMesh 上添加 `get_diagnostics()` 方法，返回结构化 dict：所有 peer 的 {node_id,
+    hostname, status, phi, last_seen, ip, port}，加上本节点信息。
+
+    2. 在 TaskDelegate 上添加 `get_diagnostics()` 方法，返回 {queued, running, max_con'
+  timestamp: 1773720100.6692333
+  title: Gossip mesh 网络诊断 API — 暴露节点健康状态给仪表板
+  type: feature
