@@ -11,6 +11,8 @@ anti_patterns:
 - TTS 引擎是 Qwen3-TTS Base + voice clone — 不是 edge-tts 或 CosyVoice
 - spawn_agent 后必须有超时检查和用户反馈 — 不能静默卡死
 - 用户消息必须在合理时间内得到回复 — 即使是中间状态也要告知
+- 创建 cron job 前必须先检查是否已存在同名任务（list_jobs），否则会导致大量重复任务堆积。进化过程中每次测试/创建任务后要及时清理，不要留下废弃的
+  test-job。
 failures:
 - id: EVO-20260316-9eb08e
   lesson: sandbox TestRunner 需要处理相对路径的 anima/ 前缀
@@ -146,4 +148,19 @@ successes:
     清理也同步执行。同时记录清理结果到日志，方便监控。
   timestamp: 1773694631.433462
   title: TaskDelegate + SessionRouter 定期清理内存泄漏修复
+  type: bugfix
+- files:
+  - anima/network/gossip.py
+  id: EVO-20260316-f832af
+  lesson: '在 `GossipMesh.__init__` 中记录启动时间 `self._started_at = time.time()`。
+
+
+    在 `_check_failures` 的"从未见过"分支加入 grace period 检查（默认 30 秒）：
+
+
+    ```python
+
+    STARTUP_GRACE = 30.0  # seconds after start before marking never'
+  timestamp: 1773710150.8181176
+  title: Gossip 启动假阳性 DEAD 判定修复 — 加入 grace period
   type: bugfix

@@ -306,13 +306,28 @@ async def run() -> bool:
             # Regular event — forward to ANIMA if we own the session or it's unowned
             on_network_event(event_data)
 
+        def on_node_alive(node_id, state):
+            on_network_event({
+                "type": "node_status_change",
+                "node_id": node_id,
+                "status": "alive",
+                "hostname": getattr(state, "hostname", None),
+            })
+
         def on_node_dead(node_id, state):
             released = session_router.release_all_for_node(node_id)
             if released:
                 log.warning("Released %d sessions from dead node %s", len(released), node_id)
+            on_network_event({
+                "type": "node_status_change",
+                "node_id": node_id,
+                "status": "dead",
+                "hostname": getattr(state, "hostname", None),
+            })
 
         gossip_mesh.set_callbacks(
             on_event=on_network_event_with_sessions,
+            on_node_alive=on_node_alive,
             on_node_dead=on_node_dead,
         )
         heartbeat.set_gossip_mesh(gossip_mesh)

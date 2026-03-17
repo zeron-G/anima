@@ -224,6 +224,7 @@ class GossipMesh:
         connected_peers: set[str] = set(self._peer_addresses)
 
         while self._running:
+            tick_start = time.time()
             try:
                 # 1. Bump local state
                 self._local_state.bump_version()
@@ -316,9 +317,7 @@ class GossipMesh:
                 log.error("Gossip thread error: %s", e)
 
             # Sleep to the next absolute tick — prevents interval drift
-            next_tick = time.time() + self.GOSSIP_INTERVAL
-            elapsed = time.time() - (next_tick - self.GOSSIP_INTERVAL)
-            sleep_time = max(0, self.GOSSIP_INTERVAL - elapsed)
+            sleep_time = max(0, self.GOSSIP_INTERVAL - (time.time() - tick_start))
             time.sleep(sleep_time)
 
         pub.close()
