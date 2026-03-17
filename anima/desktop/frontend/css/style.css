@@ -132,6 +132,8 @@ html,body{height:100%;overflow:hidden;background:var(--black);color:var(--white)
 .ci-btn.recording{color:var(--red);border-color:var(--red)}
 .ci-send{color:var(--white);background:var(--w10);border-color:var(--w20)}
 .ci-send:hover{background:var(--w20)}
+.ci-send{color:var(--white);background:var(--w10);border-color:var(--w20)}
+.ci-send:hover{background:var(--w20)}
 
 /* ═══ CONTENT PAGES ═══ */
 .page-scroll{padding:24px 28px;overflow-y:auto;height:100%}

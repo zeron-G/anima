@@ -285,6 +285,8 @@ function renderChat(d) {
   lastActivityLen = activity.length;
 
   let html = '';
+
+  // Chat messages
   for (const m of history) {
     const role = m.role === 'user' ? 'user' : m.role === 'system' ? 'system' : 'agent';
     const content = role === 'agent' ? renderMd(m.content) : esc(m.content);
@@ -292,22 +294,24 @@ function renderChat(d) {
     html += `<div class="msg ${role}">${content}${actions}</div>`;
   }
 
-  // Recent activity (tool calls, thinking)
-  const recentAct = activity.slice(-8);
+  // Recent activity — only show last 3 non-idle items, compact
+  const recentAct = activity.slice(-6);
+  let actHtml = '';
+  let actCount = 0;
   for (const a of recentAct) {
     const stage = a.stage || '';
-    if (stage === 'heartbeat' || stage === 'idle') continue;
+    if (stage === 'heartbeat' || stage === 'idle' || stage === 'self_thought' || stage === 'delegation_result') continue;
+    if (actCount >= 3) break;
     const detail = a.detail || '';
     const tool = a.tool || '';
-
     if (stage === 'executing' || stage === 'tool_done') {
-      html += `<details class="msg-block tool-block"><summary><span style="color:#7ec8e3">⚙</span> <span>${esc(tool||stage)}</span><span class="block-status ${stage==='tool_done'?'done':'running'}">${stage==='tool_done'?'done':'running'}</span></summary><div class="block-content">${esc(detail)}</div></details>`;
+      actHtml += `<details class="msg-block tool-block"><summary><span style="color:#7ec8e3">⚙</span> ${esc(tool||'tool')}<span class="block-status ${stage==='tool_done'?'done':'running'}">${stage==='tool_done'?'done':'running'}</span></summary><div class="block-content">${esc(detail)}</div></details>`;
     } else if (stage === 'thinking') {
-      html += `<details class="msg-block thinking-block"><summary><span style="color:#c4a7e7">◐</span> Thinking...<span class="block-spinner"></span></summary><div class="block-content">${esc(detail)}</div></details>`;
-    } else if (stage !== 'self_thought' && stage !== 'delegation_result') {
-      html += `<div class="msg activity">· ${esc(stage)} ${esc(detail)}</div>`;
+      actHtml += `<details class="msg-block thinking-block"><summary><span style="color:#c4a7e7">◐</span> Thinking...<span class="block-spinner"></span></summary><div class="block-content">${esc(detail)}</div></details>`;
     }
+    actCount++;
   }
+  html += actHtml;
 
   el.innerHTML = html;
   el.scrollTop = el.scrollHeight;

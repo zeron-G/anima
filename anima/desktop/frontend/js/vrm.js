@@ -122,6 +122,7 @@ export class VRMAvatar {
           if (!vrm) { reject(new Error('No VRM data')); return; }
           VRMUtils.removeUnnecessaryVertices(gltf.scene);
           VRMUtils.rotateVRM0(vrm);
+          vrm.scene.rotation.y = Math.PI;  // Face the camera (VRM 0.x faces +Z by default)
           this.scene.add(vrm.scene);
           this.vrm = vrm;
           resolve();
@@ -185,7 +186,7 @@ export class VRMAvatar {
     if (this.vrm) {
       // Breathing
       this.vrm.scene.position.y = Math.sin(t * 1.5) * 0.003;
-      this.vrm.scene.rotation.y = Math.sin(t * 0.4) * 0.015;
+      this.vrm.scene.rotation.y = Math.PI + Math.sin(t * 0.4) * 0.015;
 
       // LookAt
       if (this.vrm.lookAt) {
