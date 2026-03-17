@@ -71,51 +71,53 @@
   <!-- Pages -->
   <div class="pages">
 
-    <!-- PAGE: Avatar + Chat -->
+    <!-- PAGE: Avatar + Chat (fused immersive layout) -->
     <div class="page active" id="page-avatar">
       <div class="avatar-layout">
-        <!-- Avatar viewport -->
-        <div class="avatar-vp" id="avatar-vp">
-          <!-- Both canvases always exist, layered via z-index -->
-          <canvas id="live2d-canvas" class="av-canvas"></canvas>
-          <canvas id="vrm-canvas" class="av-canvas av-front"></canvas>
+        <!-- Avatar viewport — full screen -->
+        <canvas id="live2d-canvas" class="av-canvas"></canvas>
+        <canvas id="vrm-canvas" class="av-canvas av-front"></canvas>
+        <div id="avatar-vp" class="avatar-vp"></div>
 
-          <!-- Floating bubble -->
-          <div class="bubble" id="bubble" style="display:none">
-            <div class="bubble-text" id="bubble-text"></div>
-          </div>
-
-          <!-- Mode switch -->
-          <div class="av-controls">
-            <button class="av-btn active" data-mode="vrm">3D</button>
-            <button class="av-btn" data-mode="live2d">2D</button>
-          </div>
-
-          <!-- Costume toggles (3D only, positioned separately) -->
-          <div class="outfit-panel" id="outfit-panel"></div>
-
-          <!-- Info pills -->
-          <div class="av-pills">
-            <span class="pill" id="pill-status"><span class="pill-dot" id="pill-dot"></span>Online</span>
-            <span class="pill" id="pill-emo">Neutral</span>
-            <span class="pill" id="pill-hb">#0</span>
-          </div>
+        <!-- Top-left: status pills -->
+        <div class="av-pills">
+          <span class="pill" id="pill-status"><span class="pill-dot" id="pill-dot"></span>Online</span>
+          <span class="pill" id="pill-emo">Neutral</span>
+          <span class="pill" id="pill-hb">#0</span>
         </div>
 
-        <!-- Chat -->
-        <div class="chat">
-          <div class="chat-head">
-            <span class="chat-title">Chat</span>
-            <span class="chat-agent" id="chat-agent">Eva</span>
-          </div>
-          <div class="chat-body">
+        <!-- Top-right: outfit toggles -->
+        <div class="outfit-panel" id="outfit-panel"></div>
+
+        <!-- Bottom-left: mode switch -->
+        <div class="av-controls">
+          <button class="av-btn active" data-mode="vrm">3D</button>
+          <button class="av-btn" data-mode="live2d">2D</button>
+        </div>
+
+        <!-- Floating bubble (appears near avatar) -->
+        <div class="bubble" id="bubble" style="display:none">
+          <div class="bubble-text" id="bubble-text"></div>
+        </div>
+
+        <!-- Chat overlay — transparent, floats over avatar -->
+        <div class="chat-overlay">
+          <!-- Messages scroll area (right side, semi-transparent) -->
+          <div class="chat-msgs-wrap">
             <div class="chat-msgs" id="chat-msgs"></div>
           </div>
+
+          <!-- Status indicator -->
           <div class="chat-status" id="chat-status">
             <span class="status-indicator" id="status-indicator"></span>
-            <span id="status-text">Thinking...</span>
+            <span id="status-text"></span>
           </div>
-          <div class="chat-input">
+
+          <!-- File preview strip -->
+          <div class="file-previews" id="file-previews"></div>
+
+          <!-- Input bar — centered at bottom -->
+          <div class="chat-input-bar">
             <input type="file" id="file-input" multiple hidden accept="image/*,.pdf,.txt,.py,.js,.json,.csv,.md">
             <button class="ci-btn" id="btn-attach" title="Attach file">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48"/></svg>
@@ -123,7 +125,7 @@
             <button class="ci-btn" id="btn-mic" title="Hold to speak">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="8" y="3" width="8" height="12" rx="4"/><path d="M5 12c0 4 3 7 7 7s7-3 7-7"/><line x1="12" y1="19" x2="12" y2="22"/></svg>
             </button>
-            <input type="text" id="chat-text" placeholder="Message..." autocomplete="off" spellcheck="false">
+            <input type="text" id="chat-text" placeholder="Message Eva..." autocomplete="off" spellcheck="false">
             <button class="ci-btn tts-active" id="btn-tts" title="Auto TTS">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><polygon points="4,8 8,8 14,4 14,20 8,16 4,16"/><path d="M17 8c1.5 1.5 2 3 2 4s-.5 2.5-2 4"/></svg>
             </button>
@@ -131,9 +133,9 @@
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 12h16M13 5l7 7-7 7"/></svg>
             </button>
           </div>
-          <div class="file-previews" id="file-previews"></div>
         </div>
-        <!-- Drop overlay covers avatar viewport, not chat -->
+
+        <!-- Drop overlay -->
         <div class="drop-overlay" id="drop-overlay"><div class="drop-overlay-text">Drop files here</div></div>
       </div>
     </div>
