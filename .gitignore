@@ -47,8 +47,21 @@ local/env.yaml
 
 # Agent private memory (personal, not shared)
 agents/*/feelings.md
+agents/*/memory/feelings.md
+agents/*/memory/*.bak
 agents/*/memory.md
 agents/*/diary.md
+
+# Lorebook entries with private infra details (IPs, SSH users)
+agents/*/lorebook/distributed.md
+agents/*/lorebook/pidog.md
+agents/*/lorebook/courses.md
+
+# Runtime state (regenerated)
+data/evolution.db
+data/evolution_memory.yaml
+data/evolution_state.json
+data/todo_reminder_state.json
 
 # IDE
 .vscode/
