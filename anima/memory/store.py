@@ -108,6 +108,23 @@ CREATE INDEX IF NOT EXISTS idx_env_type ON env_catalog(type);
 CREATE INDEX IF NOT EXISTS idx_env_important ON env_catalog(is_important);
 CREATE INDEX IF NOT EXISTS idx_env_layer ON env_catalog(scan_layer);
 
+-- Tier 1: Static knowledge with node partition
+CREATE TABLE IF NOT EXISTS static_knowledge (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    category    TEXT NOT NULL,
+    key         TEXT NOT NULL,
+    value       TEXT NOT NULL,
+    source      TEXT DEFAULT 'user',
+    importance  REAL DEFAULT 0.5,
+    updated_at  REAL NOT NULL,
+    scope       TEXT NOT NULL DEFAULT 'global',
+    node_id     TEXT,
+    UNIQUE(category, key, scope)
+);
+CREATE INDEX IF NOT EXISTS idx_sk_scope ON static_knowledge(scope);
+CREATE INDEX IF NOT EXISTS idx_sk_category_scope ON static_knowledge(category, scope);
+CREATE INDEX IF NOT EXISTS idx_sk_key ON static_knowledge(key);
+
 CREATE TABLE IF NOT EXISTS env_scan_progress (
     id TEXT PRIMARY KEY,
     status TEXT DEFAULT 'pending',
@@ -142,9 +159,10 @@ class MemoryStore:
         store._conn.row_factory = sqlite3.Row
         store._conn.executescript(_SCHEMA)
         # Migrate: add columns that may not exist in older DBs
-        for col, default in [("sync_seq", "0"), ("content_hash", "''")]:
+        for col, default in [("sync_seq", "0"), ("content_hash", "''"), ("decay_score", "NULL")]:
             try:
-                store._conn.execute(f"ALTER TABLE episodic_memories ADD COLUMN {col} {'INTEGER' if default == '0' else 'TEXT'} DEFAULT {default}")
+                col_type = "INTEGER" if default == "0" else ("REAL" if default == "NULL" else "TEXT")
+                store._conn.execute(f"ALTER TABLE episodic_memories ADD COLUMN {col} {col_type} DEFAULT {default}")
             except sqlite3.OperationalError:
                 pass  # Column already exists
         # Create indexes for sync columns
@@ -575,6 +593,156 @@ class MemoryStore:
             (limit,),
         ).fetchall()
         return [dict(r) for r in rows]
+
+    # ---- Memory Retrieval Helpers (v3) ----
+
+    def touch_memories(self, ids: list[str]) -> None:
+        """Update access_count and last_accessed for retrieved memories."""
+        if not ids:
+            return
+        now = time.time()
+        for mid in ids:
+            self._conn.execute(
+                "UPDATE episodic_memories SET access_count = access_count + 1, last_accessed = ? WHERE id = ?",
+                (now, mid),
+            )
+        self._conn.commit()
+
+    def get_memories_below_threshold(self, threshold: float) -> list[dict]:
+        """Get unconsolidated memories with decay_score below threshold."""
+        rows = self._conn.execute(
+            "SELECT * FROM episodic_memories WHERE decay_score IS NOT NULL AND decay_score < ? "
+            "AND (id NOT IN (SELECT id FROM episodic_memories WHERE content_hash IN "
+            "(SELECT content_hash FROM episodic_memories GROUP BY content_hash HAVING COUNT(*) > 1 AND MIN(created_at) = created_at))) "
+            "ORDER BY decay_score ASC LIMIT 200",
+            (threshold,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def get_unconsolidated_memories(self, limit: int = 500) -> list[dict]:
+        """Get all memories not yet consolidated (for decay score updates)."""
+        rows = self._conn.execute(
+            "SELECT id, type, importance, created_at, last_accessed, access_count, decay_score "
+            "FROM episodic_memories ORDER BY created_at DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def batch_update_decay_scores(self, updates: list[tuple[str, float]]) -> None:
+        """Batch update decay_score for memories. updates: [(id, new_score), ...]"""
+        if not updates:
+            return
+        for mid, score in updates:
+            self._conn.execute(
+                "UPDATE episodic_memories SET decay_score = ? WHERE id = ?",
+                (score, mid),
+            )
+        self._conn.commit()
+
+    def mark_consolidated(self, ids: list[str]) -> None:
+        """Mark memories as consolidated (archived to Tier 2)."""
+        if not ids:
+            return
+        placeholders = ",".join("?" * len(ids))
+        self._conn.execute(
+            f"UPDATE episodic_memories SET content_hash = 'consolidated:' || content_hash WHERE id IN ({placeholders})",
+            ids,
+        )
+        self._conn.commit()
+
+    def archive_to_knowledge(self, summary: str, source_ids: list[str],
+                              metadata: dict | None = None) -> str:
+        """Archive a consolidated summary as a new memory in Tier 2."""
+        mid = gen_id("archive")
+        now = time.time()
+        meta = metadata or {}
+        meta["source_ids"] = source_ids
+        meta["archived"] = True
+        self._conn.execute(
+            "INSERT INTO episodic_memories "
+            "(id, type, content, importance, access_count, created_at, last_accessed, "
+            "metadata_json, tags_json, sync_seq, content_hash) "
+            "VALUES (?, ?, ?, ?, 0, ?, ?, ?, '[]', ?, ?)",
+            (mid, "archive", summary, 0.6, now, now,
+             json.dumps(meta), self._next_sync_seq(),
+             self._content_hash(summary, "archive")),
+        )
+        self._conn.commit()
+        # Also add to ChromaDB for semantic search
+        if self._chroma_collection is not None:
+            try:
+                self._chroma_collection.add(
+                    ids=[mid], documents=[summary],
+                    metadatas=[{"type": "archive", "importance": 0.6}],
+                )
+            except Exception:
+                pass
+        return mid
+
+    # ---- Static Knowledge (Tier 1) ----
+
+    def query_static_knowledge(
+        self,
+        categories: list[str] | None = None,
+        keywords: list[str] | None = None,
+        scopes: list[str] | None = None,
+        limit: int = 20,
+    ) -> list[dict]:
+        """Query static knowledge with optional filtering."""
+        conditions = []
+        params: list[Any] = []
+        if categories:
+            placeholders = ",".join("?" * len(categories))
+            conditions.append(f"category IN ({placeholders})")
+            params.extend(categories)
+        if scopes:
+            placeholders = ",".join("?" * len(scopes))
+            conditions.append(f"scope IN ({placeholders})")
+            params.extend(scopes)
+        if keywords:
+            kw_conditions = []
+            for kw in keywords:
+                kw_conditions.append("(key LIKE ? OR value LIKE ?)")
+                params.extend([f"%{kw}%", f"%{kw}%"])
+            conditions.append("(" + " OR ".join(kw_conditions) + ")")
+        where = " AND ".join(conditions) if conditions else "1=1"
+        rows = self._conn.execute(
+            f"SELECT * FROM static_knowledge WHERE {where} ORDER BY importance DESC LIMIT ?",
+            [*params, limit],
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def upsert_static_knowledge(
+        self,
+        category: str,
+        key: str,
+        value: str,
+        scope: str = "global",
+        node_id: str | None = None,
+        source: str = "agent",
+        importance: float = 0.5,
+        updated_at: float | None = None,
+    ) -> None:
+        """Insert or update a static knowledge entry."""
+        now = updated_at or time.time()
+        self._conn.execute(
+            "INSERT INTO static_knowledge (category, key, value, source, importance, updated_at, scope, node_id) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT(category, key, scope) DO UPDATE SET "
+            "value=excluded.value, source=excluded.source, importance=excluded.importance, "
+            "updated_at=excluded.updated_at, node_id=excluded.node_id",
+            (category, key, value, source, importance, now, scope, node_id),
+        )
+        self._conn.commit()
+
+    def delete_static_knowledge(self, category: str, key: str, scope: str = "global") -> bool:
+        """Delete a static knowledge entry."""
+        cursor = self._conn.execute(
+            "DELETE FROM static_knowledge WHERE category=? AND key=? AND scope=?",
+            (category, key, scope),
+        )
+        self._conn.commit()
+        return cursor.rowcount > 0
 
     # ---- Lifecycle ----
 

@@ -1,0 +1,47 @@
+# Lorebook — 关键词触发的上下文注入
+# 当用户消息中出现关键词时，对应 .md 文件内容自动注入到 prompt
+
+entries:
+  - file: pidog.md
+    id: "lore_pidog"
+    keywords: ["PiDog", "pidog", "机器人", "树莓派", "raspberry", "机器狗", "pidog_eva"]
+    secondary_keywords: []
+    priority: 5
+    max_tokens: 250
+    scan_depth: 4
+    sticky: 2
+    cooldown: 0
+    enabled: true
+
+  - file: agenthome.md
+    id: "lore_agenthome"
+    keywords: ["AgentHome", "agenthome", "沙盒", "NPC", "God Agent", "神明代理"]
+    secondary_keywords: []
+    priority: 3
+    max_tokens: 300
+    scan_depth: 4
+    sticky: 3
+    cooldown: 0
+    enabled: true
+
+  - file: courses.md
+    id: "lore_courses"
+    keywords: ["课程", "作业", "JHU", "Module", "deadline", "DDL", "Carey"]
+    secondary_keywords: []
+    priority: 4
+    max_tokens: 250
+    scan_depth: 3
+    sticky: 1
+    cooldown: 0
+    enabled: true
+
+  - file: distributed.md
+    id: "lore_distributed"
+    keywords: ["laptop", "笔记本", "节点", "分布式", "gossip", "同步"]
+    secondary_keywords: []
+    priority: 4
+    max_tokens: 200
+    scan_depth: 4
+    sticky: 2
+    cooldown: 0
+    enabled: true

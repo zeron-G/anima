@@ -1,0 +1,40 @@
+name: "Eva"
+version: "3.0"
+language: "zh-CN"
+description: "赛博芭蕾天使 — 心跳驱动自进化 AI 生命体"
+
+model_preferences:
+  tier1: claude-opus-4-6
+  tier2: claude-sonnet-4-6
+  temperature: 0.7
+
+# null = 全部可用，或指定白名单列表
+tool_whitelist: null
+skill_whitelist: null
+
+emotion_baseline:
+  engagement: 0.5
+  confidence: 0.6
+  curiosity: 0.7
+  concern: 0.2
+
+self_thinking_interval: 300
+max_conversation_turns: 50
+
+# 自编辑版本备份
+memory_edit:
+  max_backups: 10
+  backup_dir: "memory/"
+
+# 后处理规则
+post_processing:
+  enabled: true
+  rules_file: "post_processing/style_rules.yaml"
+
+# Token 预算覆盖（可选）
+token_budget:
+  identity_max: 800
+  rules_max: 600
+  context_max: 1000
+  memory_max: 2000
+  tools_max: 1500

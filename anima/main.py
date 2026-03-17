@@ -65,6 +65,7 @@ async def run() -> bool:
     from anima.core.rule_engine import RuleEngine
     from anima.llm.router import LLMRouter
     from anima.llm.prompts import PromptBuilder
+    from anima.llm.prompt_compiler import PromptCompiler
     from anima.core.heartbeat import HeartbeatEngine
     from anima.core.cognitive import AgenticLoop
     from anima.ui.terminal import TerminalUI
@@ -141,6 +142,63 @@ async def run() -> bool:
         daily_budget=get("llm.budget.daily_limit_usd", 5.0),
     )
     prompt_builder = PromptBuilder()
+
+    # ── v3: PromptCompiler (6-layer compilation) ──
+    from anima.llm.token_budget import TokenBudget
+    token_budget = TokenBudget(
+        max_context=get("llm.tier1.max_context", 200_000),
+        reserve_response=get("llm.tier1.max_tokens", 8192),
+    )
+    try:
+        prompt_compiler = PromptCompiler(token_budget=token_budget)
+    except Exception as e:
+        log.warning("PromptCompiler init failed, falling back to PromptBuilder: %s", e)
+        prompt_compiler = None
+
+    # ── v3: Importance Scorer ──
+    from anima.memory.importance import ImportanceScorer
+    importance_scorer = ImportanceScorer()
+
+    # ── v3: Static Knowledge Store (Tier 1 with node partition) ──
+    from anima.memory.static_store import StaticKnowledgeStore
+    node_id_str = "local"
+    if get("network.enabled", False):
+        from anima.network.node import NodeIdentity
+        _ni = NodeIdentity()
+        node_id_str = _ni.node_id
+    static_store = StaticKnowledgeStore(memory_store, node_id=node_id_str)
+
+    # ── v3: Memory Decay Engine ──
+    from anima.memory.decay import MemoryDecay
+    memory_decay = MemoryDecay()
+
+    # ── v3: Memory Retriever (unified RRF fusion) ──
+    from anima.memory.retriever import MemoryRetriever
+    from anima.llm.lorebook import LorebookEngine
+    lorebook_engine = LorebookEngine(agent_dir() / "lorebook")
+    memory_retriever = MemoryRetriever(
+        memory_store=memory_store,
+        static_store=static_store,
+        lorebook=lorebook_engine,
+        decay=memory_decay,
+    )
+
+    # ── v3: Conversation Summarizer ──
+    from anima.memory.summarizer import ConversationSummarizer
+    conversation_summarizer = ConversationSummarizer(
+        llm_router=llm_router,
+        summary_interval=get("memory.summary_interval", 20),
+        keep_recent=get("memory.keep_recent", 10),
+    )
+
+    # ── v3: Register memory self-edit tools ──
+    try:
+        from anima.tools.builtin.memory_tools import get_memory_tools, set_memory_deps
+        set_memory_deps(memory_store, prompt_compiler)
+        for tool in get_memory_tools():
+            tool_registry.register(tool)
+    except Exception as e:
+        log.warning("Memory tools registration failed: %s", e)
 
     # Wire LLM to agent manager so internal agents can run agentic loops
     agent_manager.wire_llm(llm_router, tool_executor, tool_registry, prompt_builder)
@@ -502,6 +560,13 @@ async def run() -> bool:
     cognitive.set_heartbeat(heartbeat)
     cognitive.set_user_activity(user_activity)
     cognitive.set_idle_scheduler(idle_scheduler)
+
+    # ── v3: Wire new memory + prompt components into cognitive loop ──
+    cognitive.set_prompt_compiler(prompt_compiler)
+    cognitive.set_memory_retriever(memory_retriever)
+    cognitive.set_conversation_summarizer(conversation_summarizer)
+    cognitive.set_importance_scorer(importance_scorer)
+    cognitive.set_token_budget(token_budget)
     if gossip_mesh:
         cognitive.set_gossip_mesh(gossip_mesh)
 

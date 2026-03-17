@@ -89,6 +89,12 @@ class AgenticLoop:
         self._last_proactive_result: str = ""  # "keyword: summary of what was found"
         self._user_activity = None  # Set via set_user_activity()
         self._idle_scheduler = None  # Set via set_idle_scheduler()
+        # v3: New prompt + memory components (set via setters from main.py)
+        self._prompt_compiler = None  # PromptCompiler (6-layer)
+        self._memory_retriever = None  # MemoryRetriever (unified RRF)
+        self._summarizer = None  # ConversationSummarizer
+        self._importance_scorer = None  # ImportanceScorer
+        self._token_budget = None  # TokenBudget
 
     def set_gossip_mesh(self, gossip_mesh) -> None:
         """Set gossip mesh for broadcasting delegation results."""
@@ -105,6 +111,27 @@ class AgenticLoop:
     def set_idle_scheduler(self, idle_scheduler) -> None:
         """Set idle scheduler for marking tasks done."""
         self._idle_scheduler = idle_scheduler
+
+    # v3 setters
+    def set_prompt_compiler(self, compiler) -> None:
+        """Set v3 PromptCompiler (6-layer compilation)."""
+        self._prompt_compiler = compiler
+
+    def set_memory_retriever(self, retriever) -> None:
+        """Set v3 MemoryRetriever (unified RRF fusion)."""
+        self._memory_retriever = retriever
+
+    def set_conversation_summarizer(self, summarizer) -> None:
+        """Set v3 ConversationSummarizer."""
+        self._summarizer = summarizer
+
+    def set_importance_scorer(self, scorer) -> None:
+        """Set v3 ImportanceScorer."""
+        self._importance_scorer = scorer
+
+    def set_token_budget(self, budget) -> None:
+        """Set v3 TokenBudget."""
+        self._token_budget = budget
 
     @property
     def reload_manager(self) -> ReloadManager:
@@ -231,18 +258,25 @@ class AgenticLoop:
                 return
 
         # ── Step 2: LLM agentic loop for complex events ──
+        # v3: Retrieval only happens on the LLM path (not rule engine path)
         user_message = self._event_to_message(event)
 
         # Record user activity for idle detection
         if event.type == EventType.USER_MESSAGE and self._user_activity:
             self._user_activity.record_user_message()
 
-        # Save user message to episodic memory
+        # Save user message to episodic memory (v3: dynamic importance)
         if event.type == EventType.USER_MESSAGE and user_message:
+            imp = self._importance_scorer.score(user_message, "chat_user") if self._importance_scorer else 0.6
             self._memory_store.save_memory(
-                content=user_message, type="chat", importance=0.6,
+                content=user_message, type="chat", importance=imp,
                 metadata={"role": "user"},
             )
+
+        # v3: Add to ConversationSummarizer (if available)
+        if self._summarizer and event.type == EventType.USER_MESSAGE and user_message:
+            import asyncio
+            asyncio.ensure_future(self._summarizer.add_message("user", user_message))
 
         # Build prompt — lean, event-specific
         snapshot = self._snapshot_cache.get_latest()
@@ -250,8 +284,27 @@ class AgenticLoop:
         event_type_name = event.type.name
         needs_tools = event_type_name in ("USER_MESSAGE", "STARTUP", "SELF_THINKING", "SCHEDULED_TASK", "TASK_DELEGATE", "IDLE_TASK")
 
+        # v3: Memory retrieval via MemoryRetriever (unified RRF fusion)
+        memory_context = None
+        if self._memory_retriever and event_type_name in ("USER_MESSAGE", "SELF_THINKING", "STARTUP", "EVOLUTION", "SCHEDULED_TASK"):
+            try:
+                memory_context = await self._memory_retriever.retrieve(
+                    query=user_message[:500] if user_message else "",
+                    event_type=event_type_name,
+                    recent_messages=self._conversation[-4:],
+                    max_tokens=2000,
+                )
+            except Exception as e:
+                log.warning("MemoryRetriever failed, falling back: %s", e)
+
+        # v3: Compaction Flush check — compress conversation if approaching budget
+        if self._summarizer and self._token_budget:
+            other_tokens = 2000  # rough estimate for non-conversation layers
+            if self._summarizer.check_overflow(self._token_budget.get_conversation_budget(other_tokens)):
+                log.info("Compaction Flush triggered — compressing conversation")
+                await self._summarizer.compaction_flush()
+
         # For SELF_THINKING: extract recent self-thought snippets to avoid repetition
-        # Only pull entries tagged as self-thoughts (not user-facing replies)
         recent_self_thoughts: list[str] | None = None
         if event_type_name == "SELF_THINKING":
             recent_self_thoughts = [
@@ -260,16 +313,39 @@ class AgenticLoop:
                 if m.get("role") == "assistant"
                 and m.get("is_self_thought")
                 and m.get("content", "").strip()
-            ][-5:]  # last 5 self-thoughts
+            ][-5:]
 
-        system_prompt = self._prompt_builder.build_for_event(
-            event_type_name,
-            tools_description=self._build_tools_description() if needs_tools else "",
-            system_state=system_state,
-            emotion_state=self._emotion.to_dict() if event_type_name in ("USER_MESSAGE", "SELF_THINKING") else None,
-            working_memory_summary=self._get_memory_summary() if event_type_name == "USER_MESSAGE" else "",
-            recent_self_thoughts=recent_self_thoughts,
-        )
+        # v3: Use PromptCompiler if available, fallback to PromptBuilder
+        if self._prompt_compiler:
+            try:
+                system_prompt = self._prompt_compiler.compile(
+                    event_type_name,
+                    tools_description=self._build_tools_description() if needs_tools else "",
+                    system_state=system_state,
+                    emotion_state=self._emotion.to_dict() if event_type_name in ("USER_MESSAGE", "SELF_THINKING") else None,
+                    memory_context=memory_context,
+                    conversation_buffer=self._summarizer.get_context() if self._summarizer else None,
+                    recent_self_thoughts=recent_self_thoughts,
+                )
+            except Exception as e:
+                log.warning("PromptCompiler failed, using PromptBuilder fallback: %s", e)
+                system_prompt = self._prompt_builder.build_for_event(
+                    event_type_name,
+                    tools_description=self._build_tools_description() if needs_tools else "",
+                    system_state=system_state,
+                    emotion_state=self._emotion.to_dict() if event_type_name in ("USER_MESSAGE", "SELF_THINKING") else None,
+                    working_memory_summary=self._get_memory_summary() if event_type_name == "USER_MESSAGE" else "",
+                    recent_self_thoughts=recent_self_thoughts,
+                )
+        else:
+            system_prompt = self._prompt_builder.build_for_event(
+                event_type_name,
+                tools_description=self._build_tools_description() if needs_tools else "",
+                system_state=system_state,
+                emotion_state=self._emotion.to_dict() if event_type_name in ("USER_MESSAGE", "SELF_THINKING") else None,
+                working_memory_summary=self._get_memory_summary() if event_type_name == "USER_MESSAGE" else "",
+                recent_self_thoughts=recent_self_thoughts,
+            )
 
         # Strip internal metadata fields (e.g. is_self_thought) before sending to API
         _API_KEYS = {"role", "content"}
@@ -343,18 +419,31 @@ class AgenticLoop:
                             self._save_chat("assistant", content)
                     else:
                         self._emit_status({"stage": "responding", "detail": content[:80]})
-                        await self._output(content)
-                        self._save_chat("assistant", content)
+                        # v3: Soul Container post-processing for user-facing responses
+                        output_content = content
+                        if self._prompt_compiler and hasattr(self._prompt_compiler, 'post_process'):
+                            try:
+                                output_content = self._prompt_compiler.post_process(content)
+                            except Exception:
+                                pass  # fallback to raw content
+                        await self._output(output_content)
+                        self._save_chat("assistant", output_content)
 
                 # Store ALL events in conversation buffer (including self-thoughts)
-                # so agent remembers "what was I just doing?"
-                # Tag self-thoughts so recent_self_thoughts extractor can find them
                 self._conversation.append({"role": "user", "content": user_message})
                 conv_entry: dict = {"role": "assistant", "content": content or "(no response)"}
                 if is_self:
                     conv_entry["is_self_thought"] = True
                 self._conversation.append(conv_entry)
                 self._trim_conversation()
+
+                # v3: Track in ConversationSummarizer
+                if self._summarizer:
+                    try:
+                        await self._summarizer.add_message("assistant", content or "", is_self_thought=is_self)
+                    except Exception:
+                        pass
+
                 break
 
             # Tool calls — execute in parallel
@@ -646,9 +735,17 @@ class AgenticLoop:
     # ------------------------------------------------------------------ #
 
     def _save_chat(self, role: str, content: str) -> None:
-        self._memory_store.save_memory(content=content, type="chat", importance=0.6, metadata={"role": role})
+        # v3: Dynamic importance scoring instead of hardcoded 0.6
+        mem_type = "chat_user" if role == "user" else "chat_assistant"
+        if self._importance_scorer:
+            importance = self._importance_scorer.score(content, mem_type)
+        else:
+            importance = 0.6  # fallback
+        self._memory_store.save_memory(content=content, type="chat", importance=importance, metadata={"role": role})
 
     def _get_memory_summary(self) -> str:
+        # v3: Use MemoryRetriever for semantic retrieval when available
+        # The full retriever is used in _handle_event; this is a fallback for backward compat
         recent = self._memory_store.get_recent_memories(limit=15)
         if not recent:
             return "(no recent memories)"
