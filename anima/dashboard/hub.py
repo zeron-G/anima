@@ -5,6 +5,7 @@ Holds references to subsystems and provides snapshot methods for the dashboard.
 
 from __future__ import annotations
 
+import asyncio
 import time
 from typing import Any
 
@@ -39,6 +40,7 @@ class DashboardHub:
         self._start_time = time.time()
         self._chat_history: list[dict] = []
         self._activity_log: list[dict] = []
+        self._streams: dict[str, asyncio.Queue] = {}
         self._git_cache: dict = {"branch": "?", "recent_commits": []}
         self._git_cache_ts: float = 0
 
@@ -53,6 +55,30 @@ class DashboardHub:
         self._activity_log.append(entry)
         if len(self._activity_log) > self._MAX_ACTIVITY:
             self._activity_log = self._activity_log[-self._MAX_ACTIVITY:]
+
+        # Push to active SSE streams
+        for sid, q in list(self._streams.items()):
+            try:
+                if stage in ("thinking", "executing", "tool_done", "responding", "self_thought", "error"):
+                    q.put_nowait({"type": "activity", "data": {"stage": stage, "detail": detail, **kwargs}})
+                if stage == "idle":
+                    q.put_nowait(None)  # sentinel: done
+            except Exception:
+                pass
+
+    def register_stream(self, stream_id: str, queue: asyncio.Queue) -> None:
+        """Register an SSE stream queue for real-time event forwarding."""
+        self._streams[stream_id] = queue
+
+    def unregister_stream(self, stream_id: str) -> None:
+        """Remove a finished SSE stream."""
+        self._streams.pop(stream_id, None)
+
+    def push_stream_event(self, stream_id: str, event_type: str, data: dict) -> None:
+        """Push an event to a specific stream. Called by cognitive loop."""
+        q = self._streams.get(stream_id)
+        if q:
+            q.put_nowait({"type": event_type, "data": data})
 
     def update_config(self, key: str, value: Any) -> None:
         """Update a config value at runtime using dotted key path.
@@ -142,6 +168,14 @@ class DashboardHub:
             "timestamp": time.time(),
         }
         self._chat_history.append(entry)
+
+        # Push agent messages to active SSE streams
+        if role == "agent":
+            for sid, q in list(self._streams.items()):
+                try:
+                    q.put_nowait({"type": "message", "data": {"role": role, "content": content}})
+                except Exception:
+                    pass
 
         # Fire-and-forget TTS generation for agent messages
         if role == "agent":

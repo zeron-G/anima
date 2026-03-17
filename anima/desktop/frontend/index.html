@@ -6,6 +6,7 @@
 <title>ANIMA</title>
 <link rel="stylesheet" href="/desktop/static/css/style.css">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11/build/styles/github-dark.min.css">
 </head>
 <body>
 
@@ -110,11 +111,15 @@
           <div class="chat-body">
             <div class="chat-msgs" id="chat-msgs"></div>
           </div>
-          <div class="chat-typing" id="chat-typing">
-            <span class="tdot"></span><span class="tdot"></span><span class="tdot"></span>
-            <span>Thinking...</span>
+          <div class="chat-status" id="chat-status">
+            <span class="status-indicator" id="status-indicator"></span>
+            <span id="status-text">Thinking...</span>
           </div>
           <div class="chat-input">
+            <input type="file" id="file-input" multiple hidden accept="image/*,.pdf,.txt,.py,.js,.json,.csv,.md">
+            <button class="ci-btn" id="btn-attach" title="Attach file">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48"/></svg>
+            </button>
             <button class="ci-btn" id="btn-mic" title="Hold to speak">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="8" y="3" width="8" height="12" rx="4"/><path d="M5 12c0 4 3 7 7 7s7-3 7-7"/><line x1="12" y1="19" x2="12" y2="22"/></svg>
             </button>
@@ -126,6 +131,8 @@
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 12h16M13 5l7 7-7 7"/></svg>
             </button>
           </div>
+          <div class="file-previews" id="file-previews"></div>
+          <div class="drop-overlay" id="drop-overlay"><div class="drop-overlay-text">Drop files here</div></div>
         </div>
       </div>
     </div>
@@ -277,6 +284,8 @@
   }
 }
 </script>
+<script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11/build/highlight.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 <!-- Debug: catches all JS errors, pushes to backend log + visual overlay -->
 <div id="dbg" style="position:fixed;bottom:0;left:60px;right:0;max-height:100px;overflow-y:auto;background:rgba(0,0,0,.9);color:#0f0;font:10px/1.5 monospace;padding:4px 8px;z-index:9999;display:none"><span onclick="this.parentElement.style.display='none'" style="position:absolute;top:2px;right:8px;cursor:pointer;color:#666">✕</span></div>
 <script>

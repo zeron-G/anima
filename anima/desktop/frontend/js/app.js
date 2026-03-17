@@ -189,7 +189,17 @@ function render(d) {
   const act = d.activity || [];
   const lastAct = act.length ? act[act.length - 1] : null;
   const isProcessing = lastAct && ['thinking', 'executing', 'responding', 'deciding'].includes(lastAct.stage);
-  document.getElementById('chat-typing').className = 'chat-typing' + (isProcessing ? ' on' : '');
+  const statusEl = document.getElementById('chat-status');
+  const statusInd = document.getElementById('status-indicator');
+  const statusText = document.getElementById('status-text');
+  if (statusEl) {
+    statusEl.className = 'chat-status' + (isProcessing ? ' on' : '');
+    if (isProcessing && statusInd && statusText) {
+      const stage = lastAct.stage;
+      statusInd.className = 'status-indicator ' + (stage === 'thinking' || stage === 'deciding' ? 'thinking' : stage === 'executing' ? 'executing' : 'streaming');
+      statusText.textContent = stage.charAt(0).toUpperCase() + stage.slice(1) + '...';
+    }
+  }
   evaProcessing = isProcessing;
 
   renderPage(d);
@@ -208,81 +218,110 @@ function renderPage(d) {
   else if (currentPage === 'settings') renderSettings(d);
 }
 
-// ═══ CHAT — shows messages + real-time activity interleaved ═══
+// ═══ MARKDOWN RENDERER ═══
+const markedInstance = new marked.Marked();
+markedInstance.use({
+  renderer: {
+    code({text, lang}) {
+      const language = (typeof hljs !== 'undefined' && hljs.getLanguage(lang)) ? lang : 'plaintext';
+      const highlighted = (typeof hljs !== 'undefined') ? hljs.highlight(text, {language}).value : esc(text);
+      return `<div class="code-block"><div class="code-header"><span class="code-lang">${lang||'text'}</span><button class="code-copy" onclick="window._copyCode(this)">Copy</button></div><pre><code class="hljs language-${language}">${highlighted}</code></pre></div>`;
+    }
+  }
+});
+
+function renderMd(text) {
+  try { return markedInstance.parse(text); }
+  catch { return esc(text).replace(/\n/g, '<br>'); }
+}
+
+function renderMdStreaming(text) {
+  // Auto-close open constructs for safe parsing during stream
+  let safe = text;
+  if ((safe.match(/```/g)||[]).length % 2 !== 0) safe += '\n```';
+  if ((safe.match(/\*\*/g)||[]).length % 2 !== 0) safe += '**';
+  try { return markedInstance.parse(safe) + '<span class="streaming-cursor"></span>'; }
+  catch { return esc(text).replace(/\n/g,'<br>') + '<span class="streaming-cursor"></span>'; }
+}
+
+// Copy helpers
+window._copyCode = function(btn) {
+  const code = btn.closest('.code-block').querySelector('code').textContent;
+  navigator.clipboard.writeText(code).then(() => {
+    btn.textContent = 'Copied!';
+    setTimeout(() => btn.textContent = 'Copy', 2000);
+  }).catch(() => {
+    // fallback
+    const ta = document.createElement('textarea'); ta.value = code; ta.style.cssText='position:fixed;opacity:0';
+    document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove();
+    btn.textContent = 'Copied!'; setTimeout(() => btn.textContent = 'Copy', 2000);
+  });
+};
+
+function copyMessage(markdown) {
+  navigator.clipboard.writeText(markdown).catch(() => {
+    const ta = document.createElement('textarea'); ta.value = markdown; ta.style.cssText='position:fixed;opacity:0';
+    document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove();
+  });
+  showToast('Copied');
+}
+
+function showToast(text) {
+  const t = document.createElement('div'); t.className='copy-toast'; t.textContent=text;
+  document.body.appendChild(t); setTimeout(()=>t.remove(),2000);
+}
+
+// ═══ CHAT RENDERING ═══
+let _lastRenderedChat = 0;
+
 function renderChat(d) {
   const history = d.chat_history || [];
   const activity = d.activity || [];
-
-  // Check if anything changed
-  const chatChanged = history.length !== lastChatLen;
-  const actChanged = activity.length !== lastActivityLen;
-  if (!chatChanged && !actChanged) return;
-
-  const prevChatLen = lastChatLen;
-  lastChatLen = history.length;
-  lastActivityLen = activity.length;
+  if (history.length === _lastRenderedChat && activity.length === lastActivityLen) return;
 
   const el = document.getElementById('chat-msgs');
+  const isNew = history.length > _lastRenderedChat;
+  _lastRenderedChat = history.length;
+  lastActivityLen = activity.length;
 
-  // Build unified timeline: messages + recent activity
   let html = '';
-
-  // All chat messages
   for (const m of history) {
     const role = m.role === 'user' ? 'user' : m.role === 'system' ? 'system' : 'agent';
-    html += `<div class="msg ${role}">${role === 'agent' ? fmtMsg(m.content) : esc(m.content)}</div>`;
+    const content = role === 'agent' ? renderMd(m.content) : esc(m.content);
+    const actions = role === 'agent' ? `<div class="msg-actions"><button class="msg-action-btn" onclick="copyMessage(${JSON.stringify(JSON.stringify(m.content))})"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg> Copy</button></div>` : '';
+    html += `<div class="msg ${role}">${content}${actions}</div>`;
   }
 
-  // Recent activity entries (show last 10 as system messages below chat)
-  const recentAct = activity.slice(-10);
+  // Recent activity (tool calls, thinking)
+  const recentAct = activity.slice(-8);
   for (const a of recentAct) {
     const stage = a.stage || '';
+    if (stage === 'heartbeat' || stage === 'idle') continue;
     const detail = a.detail || '';
-    if (stage === 'heartbeat') continue; // Skip heartbeat noise
-    const icon = stageIcon(stage);
-    html += `<div class="msg activity">${icon} ${esc(stage)} ${esc(detail)}</div>`;
+    const tool = a.tool || '';
+
+    if (stage === 'executing' || stage === 'tool_done') {
+      html += `<details class="msg-block tool-block"><summary><span style="color:#7ec8e3">⚙</span> <span>${esc(tool||stage)}</span><span class="block-status ${stage==='tool_done'?'done':'running'}">${stage==='tool_done'?'done':'running'}</span></summary><div class="block-content">${esc(detail)}</div></details>`;
+    } else if (stage === 'thinking') {
+      html += `<details class="msg-block thinking-block"><summary><span style="color:#c4a7e7">◐</span> Thinking...<span class="block-spinner"></span></summary><div class="block-content">${esc(detail)}</div></details>`;
+    } else if (stage !== 'self_thought' && stage !== 'delegation_result') {
+      html += `<div class="msg activity">· ${esc(stage)} ${esc(detail)}</div>`;
+    }
   }
 
   el.innerHTML = html;
   el.scrollTop = el.scrollHeight;
 
-  // New agent message → bubble + TTS (only if not still processing)
-  if (chatChanged && history.length > prevChatLen) {
+  // Bubble + TTS for new messages
+  if (isNew && history.length > 0) {
     const last = history[history.length - 1];
     if (last && last.role !== 'user' && last.role !== 'system') {
       showBubble(last.content);
-      if (voiceManager?.autoTTS && !evaProcessing) {
-        const msgIdx = history.length - 1;
-        if (last.tts_url && !playedTTS.has(msgIdx)) {
-          playedTTS.add(msgIdx);
-          voiceManager.playUrl(last.tts_url);
-        }
-        // If no tts_url yet, it'll come on next WS push — handled below
+      if (voiceManager?.autoTTS && !evaProcessing && last.tts_url && !playedTTS.has(history.length-1)) {
+        playedTTS.add(history.length-1);
+        voiceManager.playUrl(last.tts_url);
       }
     }
-  }
-
-  // Check for newly available tts_url on recent agent messages
-  if (voiceManager?.autoTTS && !evaProcessing) {
-    for (let i = Math.max(0, history.length - 3); i < history.length; i++) {
-      const m = history[i];
-      if (m.role === 'agent' && m.tts_url && !playedTTS.has(i)) {
-        playedTTS.add(i);
-        voiceManager.playUrl(m.tts_url);
-        break;
-      }
-    }
-  }
-}
-
-function stageIcon(stage) {
-  switch (stage) {
-    case 'thinking': return '◐';
-    case 'deciding': return '◑';
-    case 'executing': return '▸';
-    case 'responding': return '◉';
-    case 'tool_call': return '⚙';
-    default: return '·';
   }
 }
 
@@ -295,18 +334,95 @@ function showBubble(text) {
   bubbleTimer = setTimeout(() => { b.style.display = 'none'; }, 10000);
 }
 
-// ═══ CHAT INPUT ═══
+// ═══ CHAT INPUT + STREAMING ═══
+let pendingFiles = [];
+
 function setupChat() {
   document.getElementById('btn-send').addEventListener('click', send);
   document.getElementById('chat-text').addEventListener('keydown', e => {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
   });
+  setupFileUpload();
 }
 
-function send() {
+function setupFileUpload() {
+  const chatEl = document.querySelector('.chat');
+  const dropOverlay = document.getElementById('drop-overlay');
+  const fileInput = document.getElementById('file-input');
+  if (!chatEl || !dropOverlay || !fileInput) return;
+
+  document.getElementById('btn-attach')?.addEventListener('click', () => fileInput.click());
+  fileInput.addEventListener('change', () => { addFiles(fileInput.files); fileInput.value=''; });
+
+  let dragCount = 0;
+  chatEl.addEventListener('dragenter', e => { e.preventDefault(); dragCount++; dropOverlay.classList.add('visible'); });
+  chatEl.addEventListener('dragover', e => e.preventDefault());
+  chatEl.addEventListener('dragleave', e => { e.preventDefault(); dragCount--; if(!dragCount) dropOverlay.classList.remove('visible'); });
+  chatEl.addEventListener('drop', e => { e.preventDefault(); dragCount=0; dropOverlay.classList.remove('visible'); if(e.dataTransfer.files.length) addFiles(e.dataTransfer.files); });
+}
+
+function addFiles(fileList) {
+  const previewsEl = document.getElementById('file-previews');
+  if (!previewsEl) return;
+  for (const file of fileList) {
+    if (file.size > 10*1024*1024) { alert(`${file.name} exceeds 10MB`); continue; }
+    pendingFiles.push(file);
+    const item = document.createElement('div');
+    item.className = 'file-preview-item';
+    if (file.type.startsWith('image/')) {
+      const img = document.createElement('img');
+      const reader = new FileReader();
+      reader.onload = e => img.src = e.target.result;
+      reader.readAsDataURL(file);
+      item.appendChild(img);
+    } else {
+      const ext = document.createElement('span');
+      ext.className = 'file-ext';
+      ext.textContent = file.name.split('.').pop().toUpperCase();
+      item.appendChild(ext);
+    }
+    const name = document.createElement('span');
+    name.className = 'file-name';
+    name.textContent = file.name;
+    item.appendChild(name);
+    const rm = document.createElement('button');
+    rm.className = 'file-remove';
+    rm.textContent = '\u00D7';
+    rm.onclick = () => { pendingFiles.splice(pendingFiles.indexOf(file),1); item.remove(); };
+    item.appendChild(rm);
+    previewsEl.appendChild(item);
+  }
+}
+
+async function send() {
   const el = document.getElementById('chat-text');
-  const t = el.value.trim(); if (!t) return; el.value = '';
-  fetch('/api/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: t }) }).catch(console.error);
+  const text = el.value.trim();
+  if (!text && !pendingFiles.length) return;
+  el.value = '';
+
+  if (pendingFiles.length > 0) {
+    const fd = new FormData();
+    fd.append('text', text);
+    for (const f of pendingFiles) fd.append('files', f);
+    pendingFiles = [];
+    document.getElementById('file-previews').innerHTML = '';
+    fetch('/api/chat/upload', {method:'POST', body:fd}).catch(console.error);
+  } else {
+    // Use streaming endpoint
+    fetch('/api/chat/stream', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({text})
+    }).catch(err => {
+      // Fallback to non-streaming
+      console.warn('Stream failed, using fallback:', err);
+      fetch('/api/chat', {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({text})
+      }).catch(console.error);
+    });
+  }
 }
 
 // ═══ OVERVIEW ═══
@@ -459,7 +575,6 @@ function renderSettings(d) {
 // ═══ UTILS ═══
 function getEmo(e) { if(!e)return'neutral';if(e.concern>.6)return'sad';if(e.curiosity>.7)return'curious';if(e.engagement>.7&&e.confidence>.6)return'excited';if(e.engagement>.6)return'happy';if(e.confidence>.7)return'confident';if(e.concern>.4)return'worried';return'neutral'; }
 function esc(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
-function fmtMsg(t) { const cb=[]; let s=t.replace(/```(\w*)\n?([\s\S]*?)```/g,(_,l,c)=>{cb.push(`<pre><code>${esc(c)}</code></pre>`);return`\x00C${cb.length-1}\x00`;}); const ic=[]; s=s.replace(/`([^`]+)`/g,(_,c)=>{ic.push(`<code style="background:var(--w05);padding:1px 4px;border-radius:4px">${esc(c)}</code>`);return`\x00I${ic.length-1}\x00`;}); s=esc(s); s=s.replace(/\*\*(.+?)\*\*/g,'<strong>$1</strong>'); s=s.replace(/\n/g,'<br>'); cb.forEach((b,i)=>s=s.replace(`\x00C${i}\x00`,b)); ic.forEach((b,i)=>s=s.replace(`\x00I${i}\x00`,b)); return s; }
 function fmtUp(s) { const h=Math.floor(s/3600),m=Math.floor(s%3600/60),sec=Math.floor(s%60); return h?`${h}:${String(m).padStart(2,'0')}:${String(sec).padStart(2,'0')}`:`${m}:${String(sec).padStart(2,'0')}`; }
 function fmtN(n) { return n>=1e6?(n/1e6).toFixed(1)+'M':n>=1e3?(n/1e3).toFixed(1)+'K':String(n); }
 function s(id, v) { const el = document.getElementById(id); if (el) el.textContent = v; }

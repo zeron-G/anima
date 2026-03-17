@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import time
 from pathlib import Path
 
@@ -32,6 +33,8 @@ class DashboardServer:
         self._app.router.add_get("/", self._handle_index)
         self._app.router.add_get("/ws", self._handle_ws)
         self._app.router.add_post("/api/chat", self._handle_chat)
+        self._app.router.add_post("/api/chat/stream", self._handle_chat_stream)
+        self._app.router.add_post("/api/chat/upload", self._handle_chat_upload)
         self._app.router.add_post("/api/control", self._handle_control)
         self._app.router.add_post("/api/config", self._handle_config)
         self._app.router.add_post("/api/upload", self._handle_upload)
@@ -119,6 +122,95 @@ class DashboardServer:
             ))
 
         return web.json_response({"ok": True})
+
+    async def _handle_chat_stream(self, request: web.Request) -> web.StreamResponse:
+        """SSE streaming chat — sends events as Eva processes the message."""
+        data = await request.json()
+        text = data.get("text", "").strip()
+        if not text:
+            return web.json_response({"error": "empty"}, status=400)
+
+        resp = web.StreamResponse()
+        resp.headers["Content-Type"] = "text/event-stream"
+        resp.headers["Cache-Control"] = "no-cache"
+        resp.headers["X-Accel-Buffering"] = "no"
+        await resp.prepare(request)
+
+        async def send_sse(event: str, data: dict):
+            payload = f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
+            await resp.write(payload.encode("utf-8"))
+
+        # Record in hub
+        self._hub.add_chat_message("user", text)
+        await send_sse("status", {"state": "received"})
+
+        # Create a queue to receive status updates from cognitive loop
+        stream_queue: asyncio.Queue = asyncio.Queue()
+        stream_id = f"stream_{id(resp)}"
+
+        # Register stream listener on hub
+        self._hub.register_stream(stream_id, stream_queue)
+
+        # Push to ANIMA's event queue
+        if self._hub.event_queue:
+            await self._hub.event_queue.put(Event(
+                type=EventType.USER_MESSAGE,
+                payload={"text": text, "stream_id": stream_id},
+                priority=EventPriority.CRITICAL,
+                source="dashboard",
+            ))
+
+        # Stream events until done
+        try:
+            while True:
+                try:
+                    event = await asyncio.wait_for(stream_queue.get(), timeout=120)
+                    if event is None:  # sentinel for done
+                        break
+                    await send_sse(event["type"], event["data"])
+                    if event["type"] == "done":
+                        break
+                except asyncio.TimeoutError:
+                    await send_sse("error", {"message": "timeout"})
+                    break
+        finally:
+            self._hub.unregister_stream(stream_id)
+
+        return resp
+
+    async def _handle_chat_upload(self, request: web.Request) -> web.Response:
+        """Handle file upload with chat message."""
+        reader = await request.multipart()
+        text = ""
+        saved = []
+
+        upload_dir = Path(project_root()) / "data" / "uploads"
+        upload_dir.mkdir(parents=True, exist_ok=True)
+
+        async for field in reader:
+            if field.name == "text":
+                text = (await field.read(decode=True)).decode("utf-8")
+            elif field.name == "files":
+                data = await field.read(decode=False)
+                path = upload_dir / field.filename
+                path.write_bytes(data)
+                saved.append(str(path))
+
+        # Add to hub with file references
+        file_note = "\n".join(f"[Attached: {f}]" for f in saved)
+        full_text = f"{text}\n{file_note}" if saved else text
+
+        self._hub.add_chat_message("user", full_text)
+
+        if self._hub.event_queue:
+            await self._hub.event_queue.put(Event(
+                type=EventType.USER_MESSAGE,
+                payload={"text": full_text, "files": saved},
+                priority=EventPriority.CRITICAL,
+                source="dashboard",
+            ))
+
+        return web.json_response({"ok": True, "files": len(saved)})
 
     async def _handle_control(self, request: web.Request) -> web.Response:
         data = await request.json()
