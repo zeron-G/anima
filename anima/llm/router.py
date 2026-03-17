@@ -51,39 +51,51 @@ class LLMRouter:
             log.warning("Daily budget exceeded, skipping LLM call")
             return None
 
-        if tier <= 2:
-            import asyncio as _aio
+        import asyncio as _aio
+        max_retries = 3
+        for attempt in range(max_retries + 1):
+            if attempt > 0:
+                wait = min(2 ** attempt * 5, 30)
+                log.info("API overloaded, backing off %ds (attempt %d/%d)", wait, attempt, max_retries)
+                await _aio.sleep(wait)
+
+            if tier <= 2:
+                try:
+                    resp = await _aio.wait_for(completion(
+                        model=self._tier2_model,
+                        messages=messages,
+                        max_tokens=self._tier2_max_tokens,
+                        temperature=temperature,
+                    ), timeout=60)
+                    self._record_usage(resp, tier=2)
+                    return resp["content"]
+                except _aio.TimeoutError:
+                    log.warning("Tier2 timed out after 60s")
+                except Exception as e:
+                    if "529" in str(e) or "overloaded" in str(e).lower():
+                        continue
+                    log.warning("Tier2 failed: %s, falling back to Tier1", e)
+
             try:
                 resp = await _aio.wait_for(completion(
-                    model=self._tier2_model,
+                    model=self._tier1_model,
                     messages=messages,
-                    max_tokens=self._tier2_max_tokens,
+                    max_tokens=self._tier1_max_tokens,
                     temperature=temperature,
-                ), timeout=60)
-                self._record_usage(resp, tier=2)
+                ), timeout=90)
+                self._record_usage(resp, tier=1)
                 return resp["content"]
             except _aio.TimeoutError:
-                log.warning("Tier2 timed out after 60s, falling back to Tier1")
+                log.error("Tier1 timed out after 90s")
+                return None
             except Exception as e:
-                log.warning("Tier2 failed: %s, falling back to Tier1", e)
+                if "529" in str(e) or "overloaded" in str(e).lower():
+                    continue
+                log.error("Tier1 also failed: %s", e)
+                return None
 
-        # Tier1 fallback
-        import asyncio as _aio
-        try:
-            resp = await _aio.wait_for(completion(
-                model=self._tier1_model,
-                messages=messages,
-                max_tokens=self._tier1_max_tokens,
-                temperature=temperature,
-            ), timeout=90)
-            self._record_usage(resp, tier=1)
-            return resp["content"]
-        except _aio.TimeoutError:
-            log.error("Tier1 timed out after 90s")
-            return None
-        except Exception as e:
-            log.error("Tier1 also failed: %s", e)
-            return None
+        log.error("All LLM retries exhausted")
+        return None
 
     async def call_with_tools(
         self,
@@ -92,44 +104,65 @@ class LLMRouter:
         tier: int = 2,
         temperature: float = 0.7,
     ) -> dict | None:
-        """Call LLM with tool definitions. Returns full response dict or None."""
+        """Call LLM with tool definitions. Retries on 529 with exponential backoff."""
         if not self.check_budget():
             return None
 
         import asyncio as _aio
 
-        if tier <= 2:
+        # Retry with backoff on overloaded (529)
+        max_retries = 3
+        for attempt in range(max_retries + 1):
+            if attempt > 0:
+                wait = min(2 ** attempt * 5, 30)  # 10s, 20s, 30s
+                log.info("API overloaded, backing off %ds (attempt %d/%d)", wait, attempt, max_retries)
+                await _aio.sleep(wait)
+
+            # Try Tier2 first
+            if tier <= 2:
+                try:
+                    resp = await _aio.wait_for(completion(
+                        model=self._tier2_model,
+                        messages=messages,
+                        max_tokens=self._tier2_max_tokens,
+                        temperature=temperature,
+                        tools=tools,
+                    ), timeout=60)
+                    self._record_usage(resp, tier=2)
+                    return resp
+                except _aio.TimeoutError:
+                    log.warning("Tier2 (tools) timed out after 60s")
+                except Exception as e:
+                    err_str = str(e)
+                    if "529" in err_str or "overloaded" in err_str.lower():
+                        log.warning("Tier2 (tools) overloaded (529), will retry")
+                        continue  # retry with backoff
+                    log.warning("Tier2 (tools) failed: %s", e)
+
+            # Tier1 fallback
             try:
                 resp = await _aio.wait_for(completion(
-                    model=self._tier2_model,
+                    model=self._tier1_model,
                     messages=messages,
-                    max_tokens=self._tier2_max_tokens,
+                    max_tokens=self._tier1_max_tokens,
                     temperature=temperature,
                     tools=tools,
-                ), timeout=60)
-                self._record_usage(resp, tier=2)
+                ), timeout=90)
+                self._record_usage(resp, tier=1)
                 return resp
             except _aio.TimeoutError:
-                log.warning("Tier2 (tools) timed out after 60s, falling back to Tier1")
+                log.error("Tier1 (tools) timed out after 90s")
+                return None
             except Exception as e:
-                log.warning("Tier2 (tools) failed: %s", e)
+                err_str = str(e)
+                if "529" in err_str or "overloaded" in err_str.lower():
+                    log.warning("Tier1 (tools) overloaded (529), will retry")
+                    continue  # retry with backoff
+                log.error("Tier1 (tools) also failed: %s", e)
+                return None
 
-        try:
-            resp = await _aio.wait_for(completion(
-                model=self._tier1_model,
-                messages=messages,
-                max_tokens=self._tier1_max_tokens,
-                temperature=temperature,
-                tools=tools,
-            ), timeout=90)
-            self._record_usage(resp, tier=1)
-            return resp
-        except _aio.TimeoutError:
-            log.error("Tier1 (tools) timed out after 90s")
-            return None
-        except Exception as e:
-            log.error("Tier1 (tools) also failed: %s", e)
-            return None
+        log.error("All LLM retries exhausted after %d attempts", max_retries + 1)
+        return None
 
     # Per-1M-token pricing
     _PRICING = {
