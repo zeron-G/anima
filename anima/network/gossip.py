@@ -65,6 +65,7 @@ class GossipMesh:
     GOSSIP_INTERVAL = 5.0
     SUSPECT_PHI = 8.0
     DEAD_PHI = 16.0
+    STARTUP_GRACE = 30.0  # seconds after start before marking never-seen nodes as dead
 
     def __init__(
         self,
@@ -101,6 +102,8 @@ class GossipMesh:
 
         # Pending outbound task messages (task_delegate / task_result)
         self._outbound_task_msgs: list[dict] = []
+
+        self._started_at: float = time.time()
 
         # Event loop reference captured at start() time so the gossip thread
         # can safely post callbacks via call_soon_threadsafe.
@@ -494,11 +497,14 @@ class GossipMesh:
             # (e.g. stale entries from previous runs that never sent a heartbeat)
             my_id = self._identity.node_id
             known_peer_ids = set(self._peers.keys())
+            grace_passed = (time.time() - self._started_at) > self.STARTUP_GRACE
             for reg_node in self._identity.registered_nodes:
                 rid = reg_node.get("id", "")
                 if rid == my_id:
                     continue
                 if reg_node.get("status") == "alive" and rid not in known_peer_ids:
-                    # Never seen in gossip this session — mark dead
-                    self._identity.update_node_status(rid, "dead")
-                    log.warning("Node DEAD (never seen in gossip): %s", rid)
+                    if grace_passed:
+                        # Never seen in gossip this session — mark dead
+                        self._identity.update_node_status(rid, "dead")
+                        log.warning("Node DEAD (never seen in gossip): %s", rid)
+                    # else: still within startup grace period — wait for first heartbeat
