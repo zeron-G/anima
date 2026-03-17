@@ -325,9 +325,10 @@ class AgentManager:
                      "--allowedTools", "Read,Edit,Bash,Grep,Glob,Write",
                      "--model", "sonnet"],
                     capture_output=True, text=True,
+                    encoding="utf-8", errors="replace",
                     timeout=timeout,
                     cwd=working_dir or None,
-                    env={**os.environ, "CLAUDE_CODE_ENTRYPOINT": "evolution"},
+                    env={**os.environ, "CLAUDE_CODE_ENTRYPOINT": "evolution", "PYTHONIOENCODING": "utf-8"},
                 )
                 session.result = (result.stdout or "").strip()
                 if result.returncode != 0:

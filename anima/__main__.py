@@ -26,6 +26,17 @@ import sys
 os.environ["PYTHONIOENCODING"] = "utf-8"
 os.environ["PYTHONUTF8"] = "1"  # Python UTF-8 mode (PEP 540)
 
+# Patch subprocess to always use UTF-8 when text=True
+# Prevents GBK decode crashes in _readerthread on Windows
+import subprocess as _subprocess
+_orig_run = _subprocess.run
+def _utf8_run(*args, **kwargs):
+    if kwargs.get("text") and "encoding" not in kwargs:
+        kwargs["encoding"] = "utf-8"
+        kwargs.setdefault("errors", "replace")
+    return _orig_run(*args, **kwargs)
+_subprocess.run = _utf8_run
+
 if sys.platform == "win32":
     # Reconfigure stdout/stderr to UTF-8 with error replacement
     for stream in [sys.stdout, sys.stderr]:

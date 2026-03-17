@@ -97,8 +97,12 @@ def _run_backend_loop(ready_event: threading.Event) -> None:
         except (KeyboardInterrupt, SystemExit):
             break
         except Exception as e:
-            log.error("Backend crashed: %s — restarting in 3s", e)
-            restart = True  # Auto-restart on crash, don't give up
+            log.error("Backend crashed: %s", e)
+            restart_count += 1
+            if restart_count > 5:
+                log.error("Too many crashes (%d) — stopping", restart_count)
+                break
+            restart = True
         finally:
             loop.close()
 

@@ -86,7 +86,8 @@ class Worktree:
         try:
             result = subprocess.run(
                 ["git", "diff", "HEAD"],
-                cwd=str(self.path), capture_output=True, text=True, check=True,
+                cwd=str(self.path), capture_output=True, text=True,
+                encoding="utf-8", errors="replace", check=True,
             )
             return result.stdout
         except Exception:
@@ -120,6 +121,7 @@ class TestRunner:
         try:
             result = subprocess.run(
                 cmd, cwd=self._cwd, capture_output=True, text=True,
+                encoding="utf-8", errors="replace",
                 timeout=timeout, env={**os.environ, "PYTHONIOENCODING": "utf-8"},
             )
             output = (result.stdout + "\n" + result.stderr).strip()
