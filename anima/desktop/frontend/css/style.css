@@ -102,11 +102,11 @@ html,body{height:100%;overflow:hidden;background:var(--black);color:var(--white)
 .chat-msgs-area{flex:1;overflow:hidden;min-height:0}
 .chat-msgs{height:100%;overflow-y:auto;padding:10px 16px;display:flex;flex-direction:column;gap:8px}
 
-.msg{max-width:85%;padding:10px 14px;font-size:13px;line-height:1.6;word-wrap:break-word;animation:msgIn .25s ease both}
+.msg{max-width:85%;padding:10px 14px;font-size:13px;line-height:1.6;word-wrap:break-word;word-break:break-word;animation:msgIn .25s ease both;min-height:20px}
 @keyframes msgIn{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:translateY(0)}}
 
 .msg.user{align-self:flex-end;background:var(--white);color:var(--black);border-radius:16px 16px 4px 16px}
-.msg.agent{align-self:flex-start;background:var(--w05);border:1px solid var(--border);color:var(--w90);border-radius:16px 16px 16px 4px}
+.msg.agent{align-self:flex-start;background:var(--w05);border:1px solid var(--border);color:var(--w90);border-radius:16px 16px 16px 4px;white-space:normal;overflow-wrap:break-word}
 .msg.agent pre{background:rgba(0,0,0,.3);border:1px solid var(--border);border-radius:8px;padding:8px;margin:6px 0;overflow-x:auto;font-size:11px;font-family:'SF Mono','Cascadia Code',monospace}
 .msg.agent code{font-family:'SF Mono','Cascadia Code',monospace;font-size:11px}
 .msg.system{align-self:center;color:var(--w20);font-size:11px;background:none;border:none;padding:4px}
@@ -216,8 +216,8 @@ html,body{height:100%;overflow:hidden;background:var(--black);color:var(--white)
 .msg-action-btn:hover { color:var(--w80); background:var(--w05); border-color:var(--w20); }
 
 /* Collapsible tool/thinking blocks */
-.msg-block { margin:6px 0; border:1px solid var(--border); border-radius:8px; overflow:hidden; font-size:13px; }
-.msg-block summary { display:flex; align-items:center; gap:8px; padding:8px 12px; cursor:pointer; user-select:none; background:rgba(255,255,255,.03); list-style:none; }
+.msg-block { margin:6px 0; border:1px solid var(--border); border-radius:8px; overflow:hidden; font-size:13px; width:100%; }
+.msg-block summary { display:flex; align-items:center; gap:8px; padding:8px 12px; cursor:pointer; user-select:none; background:rgba(255,255,255,.03); list-style:none; min-height:36px; }
 .msg-block summary::before { content:'\25B6'; font-size:10px; color:var(--w30); transition:transform .2s; }
 .msg-block[open] summary::before { transform:rotate(90deg); }
 .msg-block .block-content { padding:8px 12px; border-top:1px solid var(--border); font-family:'SF Mono','Cascadia Code',monospace; font-size:12px; color:var(--w60); max-height:300px; overflow-y:auto; white-space:pre-wrap; }

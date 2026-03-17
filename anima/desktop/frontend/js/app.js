@@ -294,24 +294,18 @@ function renderChat(d) {
     html += `<div class="msg ${role}">${content}${actions}</div>`;
   }
 
-  // Recent activity — only show last 3 non-idle items, compact
-  const recentAct = activity.slice(-6);
-  let actHtml = '';
-  let actCount = 0;
+  // Recent activity — compact, only show meaningful items
+  const recentAct = activity.slice(-4);
   for (const a of recentAct) {
     const stage = a.stage || '';
-    if (stage === 'heartbeat' || stage === 'idle' || stage === 'self_thought' || stage === 'delegation_result') continue;
-    if (actCount >= 3) break;
     const detail = a.detail || '';
     const tool = a.tool || '';
-    if (stage === 'executing' || stage === 'tool_done') {
-      actHtml += `<details class="msg-block tool-block"><summary><span style="color:#7ec8e3">⚙</span> ${esc(tool||'tool')}<span class="block-status ${stage==='tool_done'?'done':'running'}">${stage==='tool_done'?'done':'running'}</span></summary><div class="block-content">${esc(detail)}</div></details>`;
-    } else if (stage === 'thinking') {
-      actHtml += `<details class="msg-block thinking-block"><summary><span style="color:#c4a7e7">◐</span> Thinking...<span class="block-spinner"></span></summary><div class="block-content">${esc(detail)}</div></details>`;
+    if (stage === 'executing' && tool) {
+      html += `<div class="msg activity"><span style="color:#7ec8e3">⚙</span> ${esc(tool)} <span style="color:var(--w20)">${esc(detail).substring(0,60)}</span></div>`;
+    } else if (stage === 'thinking' && detail) {
+      html += `<div class="msg activity"><span style="color:#c4a7e7">◐</span> ${esc(detail).substring(0,80)}</div>`;
     }
-    actCount++;
   }
-  html += actHtml;
 
   el.innerHTML = html;
   el.scrollTop = el.scrollHeight;
