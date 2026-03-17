@@ -277,41 +277,61 @@ let _lastRenderedChat = 0;
 function renderChat(d) {
   const history = d.chat_history || [];
   const activity = d.activity || [];
-  if (history.length === _lastRenderedChat && activity.length === lastActivityLen) return;
 
   const el = document.getElementById('chat-msgs');
-  const isNew = history.length > _lastRenderedChat;
-  _lastRenderedChat = history.length;
-  lastActivityLen = activity.length;
+  const chatChanged = history.length !== _lastRenderedChat;
+  const actChanged = activity.length !== lastActivityLen;
+  if (!chatChanged && !actChanged) return;
 
-  let html = '';
+  // ── Incremental message rendering (no full innerHTML rebuild) ──
+  if (chatChanged) {
+    // Remove old activity lines (they'll be re-added below)
+    el.querySelectorAll('.msg.activity').forEach(n => n.remove());
 
-  // Chat messages
-  for (const m of history) {
-    const role = m.role === 'user' ? 'user' : m.role === 'system' ? 'system' : 'agent';
-    const content = role === 'agent' ? renderMd(m.content) : esc(m.content);
-    const actions = role === 'agent' ? `<div class="msg-actions"><button class="msg-action-btn" onclick="copyMessage(${JSON.stringify(JSON.stringify(m.content))})"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg> Copy</button></div>` : '';
-    html += `<div class="msg ${role}">${content}${actions}</div>`;
+    // Only append NEW messages (don't touch existing ones)
+    const startIdx = _lastRenderedChat;
+    for (let i = startIdx; i < history.length; i++) {
+      const m = history[i];
+      const role = m.role === 'user' ? 'user' : m.role === 'system' ? 'system' : 'agent';
+      const div = document.createElement('div');
+      div.className = `msg ${role}`;
+      if (role === 'agent') {
+        div.innerHTML = renderMd(m.content) +
+          `<div class="msg-actions"><button class="msg-action-btn" onclick="copyMessage(${JSON.stringify(JSON.stringify(m.content))})"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg> Copy</button></div>`;
+      } else {
+        div.textContent = m.content;
+      }
+      el.appendChild(div);
+    }
+    _lastRenderedChat = history.length;
   }
 
-  // Recent activity — compact, only show meaningful items
-  const recentAct = activity.slice(-4);
-  for (const a of recentAct) {
-    const stage = a.stage || '';
-    const detail = a.detail || '';
-    const tool = a.tool || '';
-    if (stage === 'executing' && tool) {
-      html += `<div class="msg activity"><span style="color:#7ec8e3">⚙</span> ${esc(tool)} <span style="color:var(--w20)">${esc(detail).substring(0,60)}</span></div>`;
-    } else if (stage === 'thinking' && detail) {
-      html += `<div class="msg activity"><span style="color:#c4a7e7">◐</span> ${esc(detail).substring(0,80)}</div>`;
+  // ── Activity lines: replace only these (lightweight) ──
+  if (actChanged) {
+    el.querySelectorAll('.msg.activity').forEach(n => n.remove());
+    lastActivityLen = activity.length;
+    const recentAct = activity.slice(-3);
+    for (const a of recentAct) {
+      const stage = a.stage || '';
+      const detail = a.detail || '';
+      const tool = a.tool || '';
+      let text = '';
+      if (stage === 'executing' && tool) text = `⚙ ${tool} ${detail.substring(0,50)}`;
+      else if (stage === 'thinking' && detail) text = `◐ ${detail.substring(0,60)}`;
+      if (text) {
+        const div = document.createElement('div');
+        div.className = 'msg activity';
+        div.textContent = text;
+        el.appendChild(div);
+      }
     }
   }
 
-  el.innerHTML = html;
-  el.scrollTop = el.scrollHeight;
+  // Scroll to bottom only when new content added
+  if (chatChanged) el.scrollTop = el.scrollHeight;
 
   // Bubble + TTS for new messages
-  if (isNew && history.length > 0) {
+  if (chatChanged && history.length > 0) {
     const last = history[history.length - 1];
     if (last && last.role !== 'user' && last.role !== 'system') {
       showBubble(last.content);
