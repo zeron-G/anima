@@ -33,6 +33,8 @@ _BUILTIN_MODULES = [
     "anima.tools.builtin.email_tool",
     "anima.tools.builtin.google_tool",
     "anima.tools.builtin.env_tools",
+    "anima.tools.builtin.memory_tools",
+    "anima.tools.builtin.evolution_tools",
 ]
 
 

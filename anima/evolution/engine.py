@@ -311,8 +311,8 @@ class EvolutionEngine:
             self._on_failure(proposal, stage=f"test_{level.lower().replace(' ', '_')}", error=output[:300])
             return "abandoned"
 
-        # Retry — go back to implement
-        # TODO: feed test output back to implementation agent for fixing
+        # Retry — feed test failure output into the next implementation attempt
+        proposal.last_test_output = output[:500]
         return "retry"
 
     def _review_diff(self, diff: str, proposal: Proposal) -> tuple[bool, str]:
