@@ -138,3 +138,12 @@ successes:
   timestamp: 1773692590.7546654
   title: delegate_task 节点名称解析增强 — 支持 name/hostname/IP 多维匹配
   type: bugfix
+- files:
+  - anima/main.py
+  id: EVO-20260316-463c08
+  lesson: 在 main.py 的 _periodic_network_tasks() 协程中添加对 task_delegate.cleanup_expired()
+    和 session_router.cleanup_expired() 的定期调用。task_delegate 清理每 60 秒执行一次（与现有周期一致），session_router
+    清理也同步执行。同时记录清理结果到日志，方便监控。
+  timestamp: 1773694631.433462
+  title: TaskDelegate + SessionRouter 定期清理内存泄漏修复
+  type: bugfix
