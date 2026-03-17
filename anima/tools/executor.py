@@ -55,6 +55,13 @@ class ToolExecutor:
                 }
 
         if spec.handler is None:
+            # MCP tools have handler=None — route through MCPManager
+            if hasattr(spec, "_mcp_server"):
+                from anima.mcp.manager import get_mcp_manager
+                mgr = get_mcp_manager()
+                if mgr:
+                    return await mgr.call_tool(tool_name, args)
+                return {"success": False, "error": f"MCP manager not initialized for tool {tool_name}"}
             return {"success": False, "error": f"Tool {tool_name} has no handler"}
 
         try:

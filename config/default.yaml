@@ -128,3 +128,23 @@ shutdown:
 logging:
   level: "INFO"
   file: "data/logs/anima.log"
+
+# ── MCP (Model Context Protocol) Servers ──
+# External tool servers connected via MCP stdio transport.
+# Each server is spawned as a subprocess on startup.
+# Tools are auto-discovered and registered into ANIMA's tool system.
+#
+# Format:
+#   mcp_servers:
+#     <server_name>:
+#       command: "npx"               # executable to run
+#       args: ["-y", "@modelcontextprotocol/server-filesystem", "/data"]
+#       env:                          # optional env vars (null = safe defaults)
+#         GITHUB_TOKEN: "${GITHUB_TOKEN}"  # ${VAR} resolved from os.environ
+#       cwd: null                     # optional working directory
+#       enabled: true
+#
+# Tool names in ANIMA: mcp_<server_name>_<tool_name>
+# Install MCP SDK: pip install mcp
+#
+mcp_servers: {}   # No MCP servers by default — configure in local/env.yaml

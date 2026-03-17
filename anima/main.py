@@ -133,6 +133,20 @@ async def run() -> bool:
                 prompt=f"Run skill command: cd {cron_job['cwd']} && {cron_job['command']}",
             )
 
+    # ── MCP Server Integration ──
+    mcp_manager = None
+    if get("mcp_servers", {}):
+        try:
+            from anima.mcp.manager import MCPManager
+            mcp_manager = MCPManager(tool_registry)
+            mcp_tool_count = await mcp_manager.start_from_config()
+            if mcp_tool_count > 0:
+                log.info("MCP: %d tools registered from external servers", mcp_tool_count)
+        except ImportError:
+            log.warning("MCP SDK not installed — skipping MCP servers (pip install mcp)")
+        except Exception as e:
+            log.warning("MCP initialization failed: %s", e)
+
     rule_engine = RuleEngine()
     llm_router = LLMRouter(
         tier1_model=get("llm.tier1.model", "claude-opus-4-6"),
@@ -768,7 +782,11 @@ async def run() -> bool:
     except asyncio.CancelledError:
         pass
 
-    # 6. Flush memory
+    # 6. Stop MCP servers
+    if mcp_manager:
+        await mcp_manager.stop_all()
+
+    # 7. Flush memory
     await memory_store.close()
 
     if restart_requested:
