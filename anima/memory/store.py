@@ -251,7 +251,30 @@ class MemoryStore:
         self._conn.commit()
         return mid
 
-    async def save_memory(
+    def save_memory(
+        self,
+        content: str,
+        type: str,
+        importance: float = 0.5,
+        metadata: dict | None = None,
+        tags: list[str] | None = None,
+    ) -> str:
+        """Save an episodic memory (sync backward-compat). Returns the ID."""
+        mid = self._save_memory_sync(
+            content, type, importance, metadata or {}, tags or [],
+        )
+        # Optional: add to ChromaDB
+        if self._chroma_collection is not None:
+            try:
+                self._chroma_collection.add(
+                    ids=[mid], documents=[content],
+                    metadatas=[{"type": type, "importance": importance}],
+                )
+            except Exception as e:
+                log.debug("ChromaDB add failed: %s", e)
+        return mid
+
+    async def save_memory_async(
         self,
         content: str,
         type: str,
@@ -319,7 +342,16 @@ class MemoryStore:
         ).fetchall()
         return [dict(r) for r in rows]
 
-    async def search_memories(
+    def search_memories(
+        self,
+        query: str | None = None,
+        type: str | None = None,
+        limit: int = 10,
+    ) -> list[dict]:
+        """Search episodic memories (sync backward-compat)."""
+        return self._search_memories_sync(query, type, limit)
+
+    async def search_memories_async(
         self,
         query: str | None = None,
         type: str | None = None,
@@ -378,7 +410,18 @@ class MemoryStore:
         )
         self._conn.commit()
 
-    async def log_emotion(
+    def log_emotion(
+        self,
+        engagement: float,
+        confidence: float,
+        curiosity: float,
+        concern: float,
+        trigger: str = "",
+    ) -> None:
+        """Log an emotion snapshot (sync backward-compat)."""
+        self._log_emotion_sync(engagement, confidence, curiosity, concern, trigger)
+
+    async def log_emotion_async(
         self,
         engagement: float,
         confidence: float,
@@ -404,7 +447,11 @@ class MemoryStore:
         )
         self._conn.commit()
 
-    async def save_snapshot(self, state: dict) -> None:
+    def save_snapshot(self, state: dict) -> None:
+        """Save a state snapshot (sync backward-compat)."""
+        self._save_snapshot_sync(state)
+
+    async def save_snapshot_async(self, state: dict) -> None:
         """Save a state snapshot (non-blocking)."""
         await asyncio.to_thread(self._save_snapshot_sync, state)
 
@@ -470,7 +517,24 @@ class MemoryStore:
         )
         self._conn.commit()
 
-    async def log_llm_usage(
+    def log_llm_usage(
+        self,
+        model: str,
+        provider: str,
+        auth_mode: str,
+        tier: str,
+        prompt_tokens: int,
+        completion_tokens: int,
+        event_type: str = "",
+        success: bool = True,
+    ) -> None:
+        """Record an LLM API call (sync backward-compat)."""
+        self._log_llm_usage_sync(
+            model, provider, auth_mode, tier,
+            prompt_tokens, completion_tokens, event_type, success,
+        )
+
+    async def log_llm_usage_async(
         self,
         model: str,
         provider: str,
@@ -496,7 +560,11 @@ class MemoryStore:
         ).fetchall()
         return [dict(r) for r in rows]
 
-    async def get_usage_history(self, limit: int = 100) -> list[dict]:
+    def get_usage_history(self, limit: int = 100) -> list[dict]:
+        """Return recent LLM usage records (sync backward-compat)."""
+        return self._get_usage_history_sync(limit)
+
+    async def get_usage_history_async(self, limit: int = 100) -> list[dict]:
         """Return recent LLM usage records (non-blocking)."""
         return await asyncio.to_thread(self._get_usage_history_sync, limit)
 
@@ -536,7 +604,11 @@ class MemoryStore:
             "by_day": by_day,
         }
 
-    async def get_usage_summary(self) -> dict:
+    def get_usage_summary(self) -> dict:
+        """Return usage totals (sync backward-compat)."""
+        return self._get_usage_summary_sync()
+
+    async def get_usage_summary_async(self) -> dict:
         """Return usage totals grouped by model, provider, and day (non-blocking)."""
         return await asyncio.to_thread(self._get_usage_summary_sync)
 
@@ -831,7 +903,11 @@ class MemoryStore:
         ).fetchall()
         return [dict(r) for r in rows]
 
-    async def get_unsummarized_important_files(self, limit: int = 10) -> list[dict]:
+    def get_unsummarized_important_files(self, limit: int = 10) -> list[dict]:
+        """Get unsummarized important files (sync backward-compat)."""
+        return self._get_unsummarized_important_files_sync(limit)
+
+    async def get_unsummarized_important_files_async(self, limit: int = 10) -> list[dict]:
         """Get unsummarized important files (non-blocking)."""
         return await asyncio.to_thread(
             self._get_unsummarized_important_files_sync, limit,
@@ -873,7 +949,11 @@ class MemoryStore:
         ).fetchall()
         return [dict(r) for r in rows]
 
-    async def get_memories_below_threshold(self, threshold: float) -> list[dict]:
+    def get_memories_below_threshold(self, threshold: float) -> list[dict]:
+        """Get unconsolidated memories with decay_score below threshold (sync backward-compat)."""
+        return self._get_memories_below_threshold_sync(threshold)
+
+    async def get_memories_below_threshold_async(self, threshold: float) -> list[dict]:
         """Get unconsolidated memories with decay_score below threshold (non-blocking)."""
         return await asyncio.to_thread(
             self._get_memories_below_threshold_sync, threshold,
@@ -930,7 +1010,11 @@ class MemoryStore:
         )
         self._conn.commit()
 
-    async def mark_consolidated(self, ids: list[str]) -> None:
+    def mark_consolidated(self, ids: list[str]) -> None:
+        """Mark memories as consolidated (sync backward-compat)."""
+        self._mark_consolidated_sync(ids)
+
+    async def mark_consolidated_async(self, ids: list[str]) -> None:
         """Mark memories as consolidated (non-blocking)."""
         await asyncio.to_thread(self._mark_consolidated_sync, ids)
 
@@ -954,8 +1038,23 @@ class MemoryStore:
         self._conn.commit()
         return mid
 
-    async def archive_to_knowledge(self, summary: str, source_ids: list[str],
-                                   metadata: dict | None = None) -> str:
+    def archive_to_knowledge(self, summary: str, source_ids: list[str],
+                              metadata: dict | None = None) -> str:
+        """Archive a consolidated summary as a new memory (sync backward-compat)."""
+        mid = self._archive_to_knowledge_sync(summary, source_ids, metadata)
+        # Also add to ChromaDB for semantic search
+        if self._chroma_collection is not None:
+            try:
+                self._chroma_collection.add(
+                    ids=[mid], documents=[summary],
+                    metadatas=[{"type": "archive", "importance": 0.6}],
+                )
+            except Exception:
+                pass
+        return mid
+
+    async def archive_to_knowledge_async(self, summary: str, source_ids: list[str],
+                                         metadata: dict | None = None) -> str:
         """Archive a consolidated summary as a new memory (non-blocking)."""
         mid = await asyncio.to_thread(
             self._archive_to_knowledge_sync, summary, source_ids, metadata,
