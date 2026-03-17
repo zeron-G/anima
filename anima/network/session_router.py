@@ -676,15 +676,26 @@ class SessionRouter:
         )
         self._sessions[session_id] = session
 
-        # Broadcast lock
+        # Broadcast lock (safe for both async and sync contexts)
         if self._broadcast_fn:
-            asyncio.ensure_future(self._broadcast_fn({
+            event_data = {
                 "type": "session_lock",
                 "session_id": session_id,
                 "node_id": self._local_node_id,
                 "channel": channel,
                 "timestamp": time.time(),
-            }))
+            }
+            try:
+                loop = asyncio.get_running_loop()
+                loop.create_task(self._broadcast_fn(event_data))
+            except RuntimeError:
+                # No running loop — schedule via thread-safe call
+                import threading
+                def _broadcast():
+                    _loop = asyncio.new_event_loop()
+                    _loop.run_until_complete(self._broadcast_fn(event_data))
+                    _loop.close()
+                threading.Thread(target=_broadcast, daemon=True).start()
 
         log.info("Session locked: %s → %s", session_id, self._local_node_id)
         return True
@@ -695,11 +706,16 @@ class SessionRouter:
         if session and session.owner_node == self._local_node_id:
             session.owner_node = ""
             if self._broadcast_fn:
-                asyncio.ensure_future(self._broadcast_fn({
+                event_data = {
                     "type": "session_release",
                     "session_id": session_id,
                     "node_id": self._local_node_id,
-                }))
+                }
+                try:
+                    loop = asyncio.get_running_loop()
+                    loop.create_task(self._broadcast_fn(event_data))
+                except RuntimeError:
+                    pass  # Release doesn't need broadcast if no loop
             log.info("Session released: %s", session_id)
 
     def handle_remote_lock(self, session_id: str, remote_node_id: str, channel: str = "", timestamp: float = 0) -> None:

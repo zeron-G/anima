@@ -195,6 +195,21 @@ class EvolutionEngine:
                     proposal.id, proposal.type.value, proposal.title,
                     proposal.files, proposal.solution[:200],
                 )
+                # Broadcast to other nodes so they auto-sync
+                if self._gossip_mesh:
+                    try:
+                        commit = _sp.run(["git", "rev-parse", "HEAD"], cwd=str(project_root()),
+                                        capture_output=True, text=True).stdout.strip()
+                        self._gossip_mesh.broadcast_event({
+                            "type": "evolution_deployed",
+                            "proposal_id": proposal.id,
+                            "title": proposal.title,
+                            "commit_hash": commit,
+                            "files": proposal.files,
+                        })
+                        log.info("Broadcast evolution_deployed to peers")
+                    except Exception as e:
+                        log.warning("Failed to broadcast deployment: %s", e)
             except Exception as e:
                 log.warning("Push failed: %s", e)
 

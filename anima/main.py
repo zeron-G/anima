@@ -235,6 +235,74 @@ async def run() -> bool:
                     event_data.get("node_id", ""),
                 )
                 return
+            # Evolution voting protocol
+            if etype == "evolution_propose":
+                # Remote node proposed an evolution — auto-vote approve (single reviewer)
+                proposal_data = event_data.get("proposal", {})
+                from_node = event_data.get("from_node", "")
+                log.info("Received evolution proposal from %s: %s", from_node[:8], proposal_data.get("title", "?"))
+                # Vote approve (can add smarter review logic later)
+                if gossip_mesh:
+                    gossip_mesh.broadcast_event({
+                        "type": "evolution_vote",
+                        "proposal_id": proposal_data.get("id", ""),
+                        "node_id": node_identity.node_id,
+                        "vote": "approve",
+                        "reason": "auto-approved by peer",
+                    })
+                return
+            if etype == "evolution_vote":
+                evolution_engine.consensus.handle_vote(
+                    event_data.get("proposal_id", ""),
+                    event_data.get("node_id", ""),
+                    event_data.get("vote", "abstain"),
+                    event_data.get("reason", ""),
+                )
+                return
+            if etype == "evolution_deployed":
+                # Remote node deployed an evolution — auto-sync
+                commit_hash = event_data.get("commit_hash", "")
+                title = event_data.get("title", "")
+                log.info("Remote evolution deployed: %s (%s)", title, commit_hash[:8] if commit_hash else "?")
+                # Auto git pull + hot-reload
+                import subprocess as _sp
+                try:
+                    _sp.run(["git", "pull", "origin", "private"], cwd=str(project_root()), capture_output=True, timeout=30)
+                    log.info("Auto-synced code from remote evolution")
+                    # Check if .py files changed — trigger reload
+                    diff = _sp.run(["git", "diff", "HEAD~1", "--name-only"], cwd=str(project_root()), capture_output=True, text=True)
+                    if diff.stdout and any(f.endswith(".py") for f in diff.stdout.strip().split("\n")):
+                        cognitive.reload_manager._restart_requested = True
+                        cognitive.reload_manager._restart_reason = f"Synced evolution: {title}"
+                except Exception as e:
+                    log.warning("Code sync failed: %s", e)
+                return
+            # Node discussion protocol
+            if etype == "node_discussion":
+                from_node = event_data.get("from_node", "unknown")
+                question = event_data.get("question", "")
+                topic = event_data.get("topic", "general")
+                log.info("Discussion from %s [%s]: %s", from_node[:8], topic, question[:80])
+                # Inject as a user message so Eva processes it
+                import asyncio as _aio
+                try:
+                    loop = _aio.get_running_loop()
+                    loop.create_task(event_queue.put(Event(
+                        type=EventType.USER_MESSAGE,
+                        payload={
+                            "text": f"[Node discussion from {from_node}] Topic: {topic}\n\n{question}",
+                            "source": f"discussion:{from_node}",
+                        },
+                        priority=EventPriority.NORMAL,
+                        source=f"discussion:{from_node}",
+                    )))
+                except Exception:
+                    pass
+                return
+            if etype == "node_discussion_reply":
+                # Reply to our discussion — log it
+                log.info("Discussion reply from %s: %s", event_data.get("from_node", "?")[:8], event_data.get("reply", "")[:80])
+                return
             # Regular event — forward to ANIMA if we own the session or it's unowned
             on_network_event(event_data)
 
