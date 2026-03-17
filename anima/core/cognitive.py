@@ -346,6 +346,14 @@ class AgenticLoop:
             )
             if resp is None:
                 self._emit_status({"stage": "error", "detail": "LLM call failed"})
+                # If this was a user message, notify them instead of silently dropping
+                if event.type == EventType.USER_MESSAGE:
+                    if self._llm_router.circuit_open:
+                        fail_msg = "抱歉主人，API 暂时不可用（过载），我在等待恢复中... 你的消息我记住了，恢复后会处理～"
+                    else:
+                        fail_msg = "抱歉主人，这条消息处理失败了，请稍后再试一次～"
+                    await self._output(fail_msg)
+                    await self._save_chat("assistant", fail_msg)
                 break
 
             content = resp.get("content", "")
