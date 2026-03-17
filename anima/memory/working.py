@@ -1,4 +1,10 @@
-"""Working memory — importance-based eviction, not FIFO."""
+"""Working memory — importance-based eviction, not FIFO.
+
+NOTE (v3): This module is used by heartbeat (tick logging) and dashboard
+(display/clear) but is NOT part of the cognitive decision path.
+The cognitive loop uses MemoryRetriever (v3) for memory injection.
+WorkingMemory serves as a real-time monitoring buffer only.
+"""
 
 from __future__ import annotations
 
