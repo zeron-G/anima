@@ -27,6 +27,23 @@ if TYPE_CHECKING:
 log = get_logger("idle_scheduler")
 
 
+# ── Module-level memory decay wiring ──
+# Set from main.py so idle tasks can trigger memory consolidation
+# without idle_scheduler importing MemoryDecay directly.
+
+_memory_decay = None
+_llm_router = None
+_memory_store = None
+
+
+def set_memory_decay(decay, llm_router, store=None):
+    """Wire MemoryDecay + LLMRouter + MemoryStore for deep memory consolidation tasks."""
+    global _memory_decay, _llm_router, _memory_store
+    _memory_decay = decay
+    _llm_router = llm_router
+    _memory_store = store
+
+
 # ── Idle score helpers ──
 
 def compute_system_idle_score(snapshot: dict) -> float:
@@ -213,6 +230,14 @@ def _default_task_pool() -> list[IdleTask]:
             handler="network.health",
         ),
         # ── HEAVY (idle >= 0.8) — full evolution + deep scan ──
+        IdleTask(
+            id="memory_deep_consolidation",
+            name="深度记忆整合",
+            description="Run MemoryDecay.consolidate() — merge similar memories, prune stale entries, compress episodic chains",
+            weight=TaskWeight.HEAVY, min_idle_level="deep",
+            cooldown_s=3600, max_duration_s=600, priority=7,
+            handler="memory.deep_consolidation",
+        ),
         IdleTask(
             id="env_deep_scan_layer3",
             name="环境全盘扫描（第三层）",
@@ -429,6 +454,11 @@ class IdleScheduler:
             task.name, self.level, self.score, task.handler,
         )
 
+        # Direct execution for memory consolidation (no LLM event needed)
+        if task.handler == "memory.deep_consolidation":
+            asyncio.ensure_future(self._run_memory_consolidation(task.id))
+            return
+
         await self._event_queue.put(Event(
             type=EventType.IDLE_TASK,
             payload={
@@ -444,6 +474,28 @@ class IdleScheduler:
             priority=EventPriority.LOW,
             source="idle_scheduler",
         ))
+
+    async def _run_memory_consolidation(self, task_id: str) -> None:
+        """Execute deep memory consolidation via MemoryDecay.consolidate().
+
+        Uses the module-level _memory_decay, _llm_router, and _memory_store
+        set from main.py via set_memory_decay().
+        """
+        try:
+            if not _memory_decay or not _llm_router or not _memory_store:
+                log.debug("Memory consolidation skipped — MemoryDecay/LLMRouter/MemoryStore not wired")
+                return
+            budget_ok = _llm_router.check_budget(estimated_cost=0.005)
+            if not budget_ok:
+                log.debug("Memory consolidation skipped — LLM budget exceeded")
+                return
+            log.info("Running deep memory consolidation (MemoryDecay.consolidate)")
+            await _memory_decay.consolidate(_memory_store, _llm_router, budget_ok)
+            log.info("Deep memory consolidation completed")
+        except Exception as e:
+            log.warning("Deep memory consolidation failed: %s", e)
+        finally:
+            self.mark_task_done(task_id)
 
     def mark_task_done(self, task_id: str) -> None:
         """Called when an idle task finishes (from cognitive loop)."""

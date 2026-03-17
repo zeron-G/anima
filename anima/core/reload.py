@@ -104,8 +104,8 @@ class ReloadManager:
             log.error("Failed to load checkpoint: %s", e)
             try:
                 CHECKPOINT_PATH.unlink()
-            except Exception:
-                pass
+            except Exception as e2:
+                log.warning("Failed to delete corrupt checkpoint file: %s", e2)
             return None
 
     @staticmethod
@@ -114,5 +114,5 @@ class ReloadManager:
         try:
             if CHECKPOINT_PATH.exists():
                 CHECKPOINT_PATH.unlink()
-        except Exception:
-            pass
+        except Exception as e:
+            log.warning("Checkpoint file cleanup failed: %s", e)

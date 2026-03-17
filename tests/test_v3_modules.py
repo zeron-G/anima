@@ -327,7 +327,7 @@ class TestStoreNewMethods:
         return asyncio.get_event_loop().run_until_complete(MemoryStore.create(db_path))
 
     def test_touch_memories(self, store):
-        mid = store.save_memory("test content", "chat", importance=0.5)
+        mid = store._save_memory_sync("test content", "chat", 0.5, {}, [])
         store.touch_memories([mid])
         mem = store.get_recent_memories(limit=1)[0]
         assert mem["access_count"] == 1
@@ -343,7 +343,7 @@ class TestStoreNewMethods:
         assert len(results) == 0
 
     def test_batch_update_decay_scores(self, store):
-        mid = store.save_memory("test", "chat", importance=0.5)
+        mid = store._save_memory_sync("test", "chat", 0.5, {}, [])
         store.batch_update_decay_scores([(mid, 0.42)])
         mems = store.get_unconsolidated_memories(limit=1)
         assert len(mems) >= 1

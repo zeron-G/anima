@@ -103,3 +103,4 @@ anima/dashboard/static/model/PurpleBird/
 # Batch/shortcut files
 ANIMA.bat
 create_shortcut.bat
+uv.lock

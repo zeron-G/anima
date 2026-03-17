@@ -258,6 +258,10 @@ async def run() -> bool:
     set_env_store(memory_store)
     set_idle_ref(idle_scheduler)
 
+    # Wire memory decay into idle scheduler for deep consolidation tasks
+    from anima.core.idle_scheduler import set_memory_decay as set_idle_memory_decay
+    set_idle_memory_decay(memory_decay, llm_router, memory_store)
+
     # ── Evolution engine v2 ──
     from anima.evolution.engine import EvolutionEngine
     evolution_engine = EvolutionEngine()
@@ -662,8 +666,8 @@ async def run() -> bool:
                 try:
                     loop = asyncio.get_running_loop()
                     loop.create_task(dc.send(source, text))
-                except RuntimeError:
-                    pass  # No running loop
+                except RuntimeError as e:
+                    log.debug("Discord response routing skipped (no running loop): %s", e)
 
     cognitive.set_output_callback(on_agent_output)
 

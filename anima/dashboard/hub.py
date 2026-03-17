@@ -9,6 +9,9 @@ import time
 from typing import Any
 
 from anima.llm.providers import _get_token, _is_oauth_token, CLAUDE_CODE_VERSION
+from anima.utils.logging import get_logger
+
+log = get_logger("dashboard.hub")
 
 
 class DashboardHub:
@@ -158,13 +161,13 @@ class DashboardHub:
                     path = await synthesize(clean)
                     if path and path.exists():
                         entry["tts_url"] = f"/api/voice/{path.name}"
-                except Exception:
-                    pass
+                except Exception as e:
+                    log.debug("TTS synthesis failed: %s", e)
 
             loop = asyncio.get_event_loop()
             loop.create_task(_do())
-        except Exception:
-            pass
+        except Exception as e:
+            log.debug("TTS async dispatch failed: %s", e)
 
     def _get_git_info(self) -> dict:
         now = time.time()
@@ -178,8 +181,8 @@ class DashboardHub:
             branch = subprocess.run(["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=root, capture_output=True, text=True, timeout=3)
             self._git_cache = {"branch": branch.stdout.strip(), "recent_commits": git_log.stdout.strip().split("\n")[:5]}
             self._git_cache_ts = now
-        except Exception:
-            pass
+        except Exception as e:
+            log.debug("Git info refresh failed: %s", e)
         return self._git_cache
 
     def get_chat_history(self) -> list[dict]:

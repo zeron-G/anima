@@ -1,7 +1,13 @@
-"""SQLite backend + optional ChromaDB for memory storage."""
+"""SQLite backend + optional ChromaDB for memory storage.
+
+All public DB methods are async (use asyncio.to_thread to avoid blocking
+the event loop).  Methods that MUST also be callable from synchronous code
+retain a ``*_sync`` sibling.
+"""
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import sqlite3
@@ -151,43 +157,56 @@ class MemoryStore:
         self._conn: sqlite3.Connection | None = None
         self._chroma_collection = None
 
+    # ------------------------------------------------------------------ #
+    #  Factory                                                             #
+    # ------------------------------------------------------------------ #
+
     @classmethod
     async def create(cls, db_path: str) -> MemoryStore:
         """Factory method — creates and initializes the store."""
         store = cls(db_path)
-        store._conn = sqlite3.connect(store._db_path, check_same_thread=False)
-        store._conn.row_factory = sqlite3.Row
-        store._conn.executescript(_SCHEMA)
-        # Migrate: add columns that may not exist in older DBs
-        for col, default in [("sync_seq", "0"), ("content_hash", "''"), ("decay_score", "NULL")]:
+
+        def _init_db() -> None:
+            store._conn = sqlite3.connect(store._db_path, check_same_thread=False)
+            store._conn.row_factory = sqlite3.Row
+            store._conn.executescript(_SCHEMA)
+            # Migrate: add columns that may not exist in older DBs
+            for col, default in [("sync_seq", "0"), ("content_hash", "''"), ("decay_score", "NULL")]:
+                try:
+                    col_type = "INTEGER" if default == "0" else ("REAL" if default == "NULL" else "TEXT")
+                    store._conn.execute(f"ALTER TABLE episodic_memories ADD COLUMN {col} {col_type} DEFAULT {default}")
+                except sqlite3.OperationalError:
+                    pass  # Column already exists
+            # Create indexes for sync columns
             try:
-                col_type = "INTEGER" if default == "0" else ("REAL" if default == "NULL" else "TEXT")
-                store._conn.execute(f"ALTER TABLE episodic_memories ADD COLUMN {col} {col_type} DEFAULT {default}")
+                store._conn.execute("CREATE INDEX IF NOT EXISTS idx_sync_seq ON episodic_memories(sync_seq)")
+                store._conn.execute("CREATE INDEX IF NOT EXISTS idx_content_hash ON episodic_memories(content_hash)")
             except sqlite3.OperationalError:
-                pass  # Column already exists
-        # Create indexes for sync columns
-        try:
-            store._conn.execute("CREATE INDEX IF NOT EXISTS idx_sync_seq ON episodic_memories(sync_seq)")
-            store._conn.execute("CREATE INDEX IF NOT EXISTS idx_content_hash ON episodic_memories(content_hash)")
-        except sqlite3.OperationalError:
-            pass
-        store._conn.commit()
+                pass
+            store._conn.commit()
+
+        await asyncio.to_thread(_init_db)
         log.info("Memory store initialized: %s", store._db_path)
 
         # Optional ChromaDB
         if HAS_CHROMADB:
             try:
-                chroma_path = Path(store._db_path).parent / "chroma"
-                chroma_path.mkdir(exist_ok=True)
-                client = chromadb.PersistentClient(path=str(chroma_path))
-                store._chroma_collection = client.get_or_create_collection("episodic")
+                def _init_chroma() -> Any:
+                    chroma_path = Path(store._db_path).parent / "chroma"
+                    chroma_path.mkdir(exist_ok=True)
+                    client = chromadb.PersistentClient(path=str(chroma_path))
+                    return client.get_or_create_collection("episodic")
+
+                store._chroma_collection = await asyncio.to_thread(_init_chroma)
                 log.info("ChromaDB initialized for vector search")
             except Exception as e:
                 log.warning("ChromaDB init failed, falling back to SQLite: %s", e)
 
         return store
 
-    # ---- Episodic Memory ----
+    # ------------------------------------------------------------------ #
+    #  Internal helpers (pure computation — stay sync)                     #
+    # ------------------------------------------------------------------ #
 
     # Lamport clock for sync_seq
     _sync_seq_counter: int = 0
@@ -203,15 +222,19 @@ class MemoryStore:
         raw = f"{content}:{type_}"
         return hashlib.sha256(raw.encode()).hexdigest()[:16]
 
-    def save_memory(
+    # ------------------------------------------------------------------ #
+    #  Episodic Memory                                                     #
+    # ------------------------------------------------------------------ #
+
+    def _save_memory_sync(
         self,
         content: str,
         type: str,
-        importance: float = 0.5,
-        metadata: dict | None = None,
-        tags: list[str] | None = None,
+        importance: float,
+        metadata: dict,
+        tags: list[str],
     ) -> str:
-        """Save an episodic memory. Returns the ID."""
+        """Sync inner — runs in thread."""
         mid = gen_id("mem")
         now = time.time()
         seq = self._next_sync_seq()
@@ -222,15 +245,31 @@ class MemoryStore:
             "metadata_json, tags_json, sync_seq, content_hash) "
             "VALUES (?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?)",
             (mid, type, content, importance, now, now,
-             json.dumps(metadata or {}), json.dumps(tags or []),
+             json.dumps(metadata), json.dumps(tags),
              seq, chash),
         )
         self._conn.commit()
+        return mid
 
-        # Optional: add to ChromaDB
+    async def save_memory(
+        self,
+        content: str,
+        type: str,
+        importance: float = 0.5,
+        metadata: dict | None = None,
+        tags: list[str] | None = None,
+    ) -> str:
+        """Save an episodic memory (non-blocking). Returns the ID."""
+        mid = await asyncio.to_thread(
+            self._save_memory_sync, content, type, importance,
+            metadata or {}, tags or [],
+        )
+
+        # Optional: add to ChromaDB (also in thread)
         if self._chroma_collection is not None:
             try:
-                self._chroma_collection.add(
+                await asyncio.to_thread(
+                    self._chroma_collection.add,
                     ids=[mid], documents=[content],
                     metadatas=[{"type": type, "importance": importance}],
                 )
@@ -239,13 +278,13 @@ class MemoryStore:
 
         return mid
 
-    def search_memories(
+    def _search_memories_sync(
         self,
-        query: str | None = None,
-        type: str | None = None,
-        limit: int = 10,
+        query: str | None,
+        type: str | None,
+        limit: int,
     ) -> list[dict]:
-        """Search episodic memories. Uses ChromaDB if available, else SQLite LIKE."""
+        """Sync inner — runs in thread."""
         # Try vector search first
         if query and self._chroma_collection is not None:
             try:
@@ -280,8 +319,19 @@ class MemoryStore:
         ).fetchall()
         return [dict(r) for r in rows]
 
-    def get_recent_memories(self, limit: int = 10, type: str | None = None) -> list[dict]:
-        """Get most recent memories."""
+    async def search_memories(
+        self,
+        query: str | None = None,
+        type: str | None = None,
+        limit: int = 10,
+    ) -> list[dict]:
+        """Search episodic memories (non-blocking)."""
+        return await asyncio.to_thread(
+            self._search_memories_sync, query, type, limit,
+        )
+
+    def _get_recent_memories_sync(self, limit: int, type: str | None) -> list[dict]:
+        """Sync inner — runs in thread."""
         if type:
             rows = self._conn.execute(
                 "SELECT * FROM episodic_memories WHERE type = ? ORDER BY created_at DESC LIMIT ?",
@@ -294,9 +344,41 @@ class MemoryStore:
             ).fetchall()
         return [dict(r) for r in rows]
 
-    # ---- Emotion Log ----
+    def get_recent_memories_sync(self, limit: int = 10, type: str | None = None) -> list[dict]:
+        """Sync version — for use from sync callers (e.g. load_conversation_from_db)."""
+        return self._get_recent_memories_sync(limit, type)
 
-    def log_emotion(
+    # Keep backward-compat name pointing to sync for callers that haven't migrated
+    def get_recent_memories(self, limit: int = 10, type: str | None = None) -> list[dict]:
+        """Sync backward-compat shim (prefer async get_recent_memories_async)."""
+        return self._get_recent_memories_sync(limit, type)
+
+    async def get_recent_memories_async(self, limit: int = 10, type: str | None = None) -> list[dict]:
+        """Get most recent memories (non-blocking)."""
+        return await asyncio.to_thread(
+            self._get_recent_memories_sync, limit, type,
+        )
+
+    # ------------------------------------------------------------------ #
+    #  Emotion Log                                                         #
+    # ------------------------------------------------------------------ #
+
+    def _log_emotion_sync(
+        self,
+        engagement: float,
+        confidence: float,
+        curiosity: float,
+        concern: float,
+        trigger: str,
+    ) -> None:
+        """Sync inner — runs in thread."""
+        self._conn.execute(
+            "INSERT INTO emotion_log (id, engagement, confidence, curiosity, concern, trigger, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (gen_id("emo"), engagement, confidence, curiosity, concern, trigger, time.time()),
+        )
+        self._conn.commit()
+
+    async def log_emotion(
         self,
         engagement: float,
         confidence: float,
@@ -304,31 +386,52 @@ class MemoryStore:
         concern: float,
         trigger: str = "",
     ) -> None:
-        self._conn.execute(
-            "INSERT INTO emotion_log (id, engagement, confidence, curiosity, concern, trigger, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (gen_id("emo"), engagement, confidence, curiosity, concern, trigger, time.time()),
+        """Log an emotion snapshot (non-blocking)."""
+        await asyncio.to_thread(
+            self._log_emotion_sync,
+            engagement, confidence, curiosity, concern, trigger,
         )
-        self._conn.commit()
 
-    # ---- State Snapshots ----
+    # ------------------------------------------------------------------ #
+    #  State Snapshots                                                     #
+    # ------------------------------------------------------------------ #
 
-    def save_snapshot(self, state: dict) -> None:
+    def _save_snapshot_sync(self, state: dict) -> None:
+        """Sync inner — runs in thread."""
         self._conn.execute(
             "INSERT INTO state_snapshots (id, state_json, timestamp) VALUES (?, ?, ?)",
             (gen_id("snap"), json.dumps(state), time.time()),
         )
         self._conn.commit()
 
-    # ---- Audit Log ----
+    async def save_snapshot(self, state: dict) -> None:
+        """Save a state snapshot (non-blocking)."""
+        await asyncio.to_thread(self._save_snapshot_sync, state)
 
-    def audit(self, action: str, details: str = "") -> None:
+    # ------------------------------------------------------------------ #
+    #  Audit Log                                                           #
+    # ------------------------------------------------------------------ #
+
+    def audit_sync(self, action: str, details: str = "") -> None:
+        """Sync version — for use from sync callers."""
         self._conn.execute(
             "INSERT INTO audit_log (id, action, details, timestamp) VALUES (?, ?, ?, ?)",
             (gen_id("audit"), action, details, time.time()),
         )
         self._conn.commit()
 
-    # ---- LLM Usage ----
+    # Keep backward-compat name pointing to sync for callers that haven't migrated
+    def audit(self, action: str, details: str = "") -> None:
+        """Sync backward-compat shim (prefer async audit_async)."""
+        self.audit_sync(action, details)
+
+    async def audit_async(self, action: str, details: str = "") -> None:
+        """Audit log entry (non-blocking)."""
+        await asyncio.to_thread(self.audit_sync, action, details)
+
+    # ------------------------------------------------------------------ #
+    #  LLM Usage                                                           #
+    # ------------------------------------------------------------------ #
 
     _COST_PER_1M = {
         "haiku": (0.25, 1.25),
@@ -346,7 +449,28 @@ class MemoryStore:
         # Default to sonnet pricing
         return (prompt_tokens * 3.0 + completion_tokens * 15.0) / 1_000_000
 
-    def log_llm_usage(
+    def _log_llm_usage_sync(
+        self,
+        model: str,
+        provider: str,
+        auth_mode: str,
+        tier: str,
+        prompt_tokens: int,
+        completion_tokens: int,
+        event_type: str,
+        success: bool,
+    ) -> None:
+        """Sync inner — runs in thread."""
+        total = prompt_tokens + completion_tokens
+        cost = self._estimate_cost(model, prompt_tokens, completion_tokens)
+        self._conn.execute(
+            "INSERT INTO llm_usage (id, timestamp, model, provider, auth_mode, tier, prompt_tokens, completion_tokens, total_tokens, estimated_cost_usd, event_type, success) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (gen_id("llm"), time.time(), model, provider, auth_mode, tier,
+             prompt_tokens, completion_tokens, total, cost, event_type, int(success)),
+        )
+        self._conn.commit()
+
+    async def log_llm_usage(
         self,
         model: str,
         provider: str,
@@ -357,26 +481,27 @@ class MemoryStore:
         event_type: str = "",
         success: bool = True,
     ) -> None:
-        """Record an LLM API call."""
-        total = prompt_tokens + completion_tokens
-        cost = self._estimate_cost(model, prompt_tokens, completion_tokens)
-        self._conn.execute(
-            "INSERT INTO llm_usage (id, timestamp, model, provider, auth_mode, tier, prompt_tokens, completion_tokens, total_tokens, estimated_cost_usd, event_type, success) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (gen_id("llm"), time.time(), model, provider, auth_mode, tier,
-             prompt_tokens, completion_tokens, total, cost, event_type, int(success)),
+        """Record an LLM API call (non-blocking)."""
+        await asyncio.to_thread(
+            self._log_llm_usage_sync,
+            model, provider, auth_mode, tier,
+            prompt_tokens, completion_tokens, event_type, success,
         )
-        self._conn.commit()
 
-    def get_usage_history(self, limit: int = 100) -> list[dict]:
-        """Return recent LLM usage records."""
+    def _get_usage_history_sync(self, limit: int) -> list[dict]:
+        """Sync inner — runs in thread."""
         rows = self._conn.execute(
             "SELECT * FROM llm_usage ORDER BY timestamp DESC LIMIT ?",
             (limit,),
         ).fetchall()
         return [dict(r) for r in rows]
 
-    def get_usage_summary(self) -> dict:
-        """Return usage totals grouped by model, provider, and day."""
+    async def get_usage_history(self, limit: int = 100) -> list[dict]:
+        """Return recent LLM usage records (non-blocking)."""
+        return await asyncio.to_thread(self._get_usage_history_sync, limit)
+
+    def _get_usage_summary_sync(self) -> dict:
+        """Sync inner — runs in thread."""
         # By model
         rows = self._conn.execute(
             "SELECT model, COUNT(*) as calls, SUM(prompt_tokens) as prompt, SUM(completion_tokens) as completion, SUM(total_tokens) as total, SUM(estimated_cost_usd) as cost FROM llm_usage GROUP BY model"
@@ -411,10 +536,16 @@ class MemoryStore:
             "by_day": by_day,
         }
 
-    # ---- Environment Catalog ----
+    async def get_usage_summary(self) -> dict:
+        """Return usage totals grouped by model, provider, and day (non-blocking)."""
+        return await asyncio.to_thread(self._get_usage_summary_sync)
 
-    def upsert_env_catalog_batch(self, entries: list[dict]) -> None:
-        """Insert or update a batch of env_catalog entries."""
+    # ------------------------------------------------------------------ #
+    #  Environment Catalog                                                 #
+    # ------------------------------------------------------------------ #
+
+    def _upsert_env_catalog_batch_sync(self, entries: list[dict]) -> None:
+        """Sync inner — runs in thread."""
         if not entries:
             return
         for e in entries:
@@ -431,8 +562,17 @@ class MemoryStore:
             )
         self._conn.commit()
 
-    def update_scan_progress(self, layer_id: str, status: str, **kwargs) -> None:
-        """Update scan progress for a layer."""
+    # Keep backward-compat sync name — EnvScanner calls this from sync code
+    def upsert_env_catalog_batch(self, entries: list[dict]) -> None:
+        """Sync backward-compat shim."""
+        self._upsert_env_catalog_batch_sync(entries)
+
+    async def upsert_env_catalog_batch_async(self, entries: list[dict]) -> None:
+        """Insert or update a batch of env_catalog entries (non-blocking)."""
+        await asyncio.to_thread(self._upsert_env_catalog_batch_sync, entries)
+
+    def _update_scan_progress_sync(self, layer_id: str, status: str, **kwargs: Any) -> None:
+        """Sync inner — runs in thread."""
         now = time.time()
         row = self._conn.execute(
             "SELECT id FROM env_scan_progress WHERE id = ?", (layer_id,)
@@ -467,16 +607,40 @@ class MemoryStore:
             )
         self._conn.commit()
 
-    def get_scan_progress(self, layer_id: str) -> dict | None:
+    # Keep backward-compat sync name — EnvScanner calls this from sync code
+    def update_scan_progress(self, layer_id: str, status: str, **kwargs: Any) -> None:
+        """Sync backward-compat shim."""
+        self._update_scan_progress_sync(layer_id, status, **kwargs)
+
+    async def update_scan_progress_async(self, layer_id: str, status: str, **kwargs: Any) -> None:
+        """Update scan progress for a layer (non-blocking)."""
+        await asyncio.to_thread(self._update_scan_progress_sync, layer_id, status, **kwargs)
+
+    def _get_scan_progress_sync(self, layer_id: str) -> dict | None:
+        """Sync inner — runs in thread."""
         row = self._conn.execute(
             "SELECT * FROM env_scan_progress WHERE id = ?", (layer_id,)
         ).fetchone()
         return dict(row) if row else None
 
-    def search_env_catalog(self, query: str = "", category: str = "",
-                           extension: str = "", file_type: str = "",
-                           limit: int = 20) -> list[dict]:
-        """Search the environment catalog."""
+    # Keep backward-compat sync name — called from get_env_stats_sync internally
+    def get_scan_progress(self, layer_id: str) -> dict | None:
+        """Sync backward-compat shim."""
+        return self._get_scan_progress_sync(layer_id)
+
+    async def get_scan_progress_async(self, layer_id: str) -> dict | None:
+        """Get scan progress (non-blocking)."""
+        return await asyncio.to_thread(self._get_scan_progress_sync, layer_id)
+
+    def _search_env_catalog_sync(
+        self,
+        query: str,
+        category: str,
+        extension: str,
+        file_type: str,
+        limit: int,
+    ) -> list[dict]:
+        """Sync inner — runs in thread."""
         conditions = ["is_deleted = 0"]
         params: list = []
         if query:
@@ -501,8 +665,24 @@ class MemoryStore:
         ).fetchall()
         return [dict(r) for r in rows]
 
-    def get_env_stats(self) -> dict:
-        """Get environment scan statistics."""
+    # Keep backward-compat sync name — env_tools calls this from sync code
+    def search_env_catalog(self, query: str = "", category: str = "",
+                           extension: str = "", file_type: str = "",
+                           limit: int = 20) -> list[dict]:
+        """Sync backward-compat shim."""
+        return self._search_env_catalog_sync(query, category, extension, file_type, limit)
+
+    async def search_env_catalog_async(self, query: str = "", category: str = "",
+                                       extension: str = "", file_type: str = "",
+                                       limit: int = 20) -> list[dict]:
+        """Search the environment catalog (non-blocking)."""
+        return await asyncio.to_thread(
+            self._search_env_catalog_sync,
+            query, category, extension, file_type, limit,
+        )
+
+    def _get_env_stats_sync(self) -> dict:
+        """Sync inner — runs in thread."""
         total_files = self._conn.execute(
             "SELECT COUNT(*) FROM env_catalog WHERE type='file' AND is_deleted=0"
         ).fetchone()[0]
@@ -523,7 +703,7 @@ class MemoryStore:
 
         progress = {}
         for lid in ("layer1", "layer2", "layer3"):
-            p = self.get_scan_progress(lid)
+            p = self._get_scan_progress_sync(lid)
             progress[lid] = p if p else {"status": "pending"}
 
         return {
@@ -535,8 +715,17 @@ class MemoryStore:
             "scan_progress": progress,
         }
 
-    def get_scanned_dirs(self, max_layer: int = 2) -> list[dict]:
-        """Get directories that have been scanned up to given layer."""
+    # Keep backward-compat sync name — env_tools calls this from sync code
+    def get_env_stats(self) -> dict:
+        """Sync backward-compat shim."""
+        return self._get_env_stats_sync()
+
+    async def get_env_stats_async(self) -> dict:
+        """Get environment scan statistics (non-blocking)."""
+        return await asyncio.to_thread(self._get_env_stats_sync)
+
+    def _get_scanned_dirs_sync(self, max_layer: int) -> list[dict]:
+        """Sync inner — runs in thread."""
         rows = self._conn.execute(
             "SELECT path, scan_layer FROM env_catalog "
             "WHERE type='directory' AND scan_layer <= ? AND is_deleted=0",
@@ -544,8 +733,17 @@ class MemoryStore:
         ).fetchall()
         return [dict(r) for r in rows]
 
-    def get_env_files_in_dir(self, dir_path: str) -> list[dict]:
-        """Get known files in a specific directory."""
+    # Keep backward-compat sync name — EnvScanner calls this from sync code
+    def get_scanned_dirs(self, max_layer: int = 2) -> list[dict]:
+        """Sync backward-compat shim."""
+        return self._get_scanned_dirs_sync(max_layer)
+
+    async def get_scanned_dirs_async(self, max_layer: int = 2) -> list[dict]:
+        """Get directories scanned up to given layer (non-blocking)."""
+        return await asyncio.to_thread(self._get_scanned_dirs_sync, max_layer)
+
+    def _get_env_files_in_dir_sync(self, dir_path: str) -> list[dict]:
+        """Sync inner — runs in thread."""
         rows = self._conn.execute(
             "SELECT path, modified_at, size_bytes FROM env_catalog "
             "WHERE parent_dir = ? AND is_deleted=0",
@@ -553,8 +751,17 @@ class MemoryStore:
         ).fetchall()
         return [dict(r) for r in rows]
 
-    def get_unscanned_dirs(self) -> list[str]:
-        """Get layer1 directories not yet scanned by layer2/3."""
+    # Keep backward-compat sync name — EnvScanner calls this from sync code
+    def get_env_files_in_dir(self, dir_path: str) -> list[dict]:
+        """Sync backward-compat shim."""
+        return self._get_env_files_in_dir_sync(dir_path)
+
+    async def get_env_files_in_dir_async(self, dir_path: str) -> list[dict]:
+        """Get known files in a specific directory (non-blocking)."""
+        return await asyncio.to_thread(self._get_env_files_in_dir_sync, dir_path)
+
+    def _get_unscanned_dirs_sync(self) -> list[str]:
+        """Sync inner — runs in thread."""
         rows = self._conn.execute(
             "SELECT path FROM env_catalog "
             "WHERE type='directory' AND scan_layer=1 AND is_deleted=0 "
@@ -564,14 +771,34 @@ class MemoryStore:
         ).fetchall()
         return [r[0] for r in rows]
 
-    def mark_env_deleted(self, path: str) -> None:
+    # Keep backward-compat sync name — EnvScanner calls this from sync code
+    def get_unscanned_dirs(self) -> list[str]:
+        """Sync backward-compat shim."""
+        return self._get_unscanned_dirs_sync()
+
+    async def get_unscanned_dirs_async(self) -> list[str]:
+        """Get layer1 directories not yet scanned by layer2/3 (non-blocking)."""
+        return await asyncio.to_thread(self._get_unscanned_dirs_sync)
+
+    def _mark_env_deleted_sync(self, path: str) -> None:
+        """Sync inner — runs in thread."""
         self._conn.execute(
             "UPDATE env_catalog SET is_deleted=1 WHERE path=?",
             (path.replace("\\", "/"),),
         )
         self._conn.commit()
 
-    def update_env_entry(self, path: str, updates: dict) -> None:
+    # Keep backward-compat sync name — EnvScanner calls this from sync code
+    def mark_env_deleted(self, path: str) -> None:
+        """Sync backward-compat shim."""
+        self._mark_env_deleted_sync(path)
+
+    async def mark_env_deleted_async(self, path: str) -> None:
+        """Mark an env entry as deleted (non-blocking)."""
+        await asyncio.to_thread(self._mark_env_deleted_sync, path)
+
+    def _update_env_entry_sync(self, path: str, updates: dict) -> None:
+        """Sync inner — runs in thread."""
         if not updates:
             return
         sets = []
@@ -585,7 +812,17 @@ class MemoryStore:
         )
         self._conn.commit()
 
-    def get_unsummarized_important_files(self, limit: int = 10) -> list[dict]:
+    # Keep backward-compat sync name — EnvScanner calls this from sync code
+    def update_env_entry(self, path: str, updates: dict) -> None:
+        """Sync backward-compat shim."""
+        self._update_env_entry_sync(path, updates)
+
+    async def update_env_entry_async(self, path: str, updates: dict) -> None:
+        """Update an env catalog entry (non-blocking)."""
+        await asyncio.to_thread(self._update_env_entry_sync, path, updates)
+
+    def _get_unsummarized_important_files_sync(self, limit: int) -> list[dict]:
+        """Sync inner — runs in thread."""
         rows = self._conn.execute(
             "SELECT path, category, extension FROM env_catalog "
             "WHERE is_important=1 AND summary='' AND is_deleted=0 "
@@ -594,10 +831,18 @@ class MemoryStore:
         ).fetchall()
         return [dict(r) for r in rows]
 
-    # ---- Memory Retrieval Helpers (v3) ----
+    async def get_unsummarized_important_files(self, limit: int = 10) -> list[dict]:
+        """Get unsummarized important files (non-blocking)."""
+        return await asyncio.to_thread(
+            self._get_unsummarized_important_files_sync, limit,
+        )
 
-    def touch_memories(self, ids: list[str]) -> None:
-        """Update access_count and last_accessed for retrieved memories."""
+    # ------------------------------------------------------------------ #
+    #  Memory Retrieval Helpers (v3)                                       #
+    # ------------------------------------------------------------------ #
+
+    def _touch_memories_sync(self, ids: list[str]) -> None:
+        """Sync inner — runs in thread."""
         if not ids:
             return
         now = time.time()
@@ -608,8 +853,17 @@ class MemoryStore:
             )
         self._conn.commit()
 
-    def get_memories_below_threshold(self, threshold: float) -> list[dict]:
-        """Get unconsolidated memories with decay_score below threshold."""
+    # Keep backward-compat sync name — retriever calls this from sync code
+    def touch_memories(self, ids: list[str]) -> None:
+        """Sync backward-compat shim."""
+        self._touch_memories_sync(ids)
+
+    async def touch_memories_async(self, ids: list[str]) -> None:
+        """Update access_count and last_accessed for retrieved memories (non-blocking)."""
+        await asyncio.to_thread(self._touch_memories_sync, ids)
+
+    def _get_memories_below_threshold_sync(self, threshold: float) -> list[dict]:
+        """Sync inner — runs in thread."""
         rows = self._conn.execute(
             "SELECT * FROM episodic_memories WHERE decay_score IS NOT NULL AND decay_score < ? "
             "AND (id NOT IN (SELECT id FROM episodic_memories WHERE content_hash IN "
@@ -619,8 +873,14 @@ class MemoryStore:
         ).fetchall()
         return [dict(r) for r in rows]
 
-    def get_unconsolidated_memories(self, limit: int = 500) -> list[dict]:
-        """Get all memories not yet consolidated (for decay score updates)."""
+    async def get_memories_below_threshold(self, threshold: float) -> list[dict]:
+        """Get unconsolidated memories with decay_score below threshold (non-blocking)."""
+        return await asyncio.to_thread(
+            self._get_memories_below_threshold_sync, threshold,
+        )
+
+    def _get_unconsolidated_memories_sync(self, limit: int) -> list[dict]:
+        """Sync inner — runs in thread."""
         rows = self._conn.execute(
             "SELECT id, type, importance, created_at, last_accessed, access_count, decay_score "
             "FROM episodic_memories ORDER BY created_at DESC LIMIT ?",
@@ -628,8 +888,19 @@ class MemoryStore:
         ).fetchall()
         return [dict(r) for r in rows]
 
-    def batch_update_decay_scores(self, updates: list[tuple[str, float]]) -> None:
-        """Batch update decay_score for memories. updates: [(id, new_score), ...]"""
+    # Keep backward-compat sync name — tests call this from sync code
+    def get_unconsolidated_memories(self, limit: int = 500) -> list[dict]:
+        """Sync backward-compat shim."""
+        return self._get_unconsolidated_memories_sync(limit)
+
+    async def get_unconsolidated_memories_async(self, limit: int = 500) -> list[dict]:
+        """Get all memories not yet consolidated (non-blocking)."""
+        return await asyncio.to_thread(
+            self._get_unconsolidated_memories_sync, limit,
+        )
+
+    def _batch_update_decay_scores_sync(self, updates: list[tuple[str, float]]) -> None:
+        """Sync inner — runs in thread."""
         if not updates:
             return
         for mid, score in updates:
@@ -639,8 +910,17 @@ class MemoryStore:
             )
         self._conn.commit()
 
-    def mark_consolidated(self, ids: list[str]) -> None:
-        """Mark memories as consolidated (archived to Tier 2)."""
+    # Keep backward-compat sync name — tests call this from sync code
+    def batch_update_decay_scores(self, updates: list[tuple[str, float]]) -> None:
+        """Sync backward-compat shim."""
+        self._batch_update_decay_scores_sync(updates)
+
+    async def batch_update_decay_scores_async(self, updates: list[tuple[str, float]]) -> None:
+        """Batch update decay_score for memories (non-blocking)."""
+        await asyncio.to_thread(self._batch_update_decay_scores_sync, updates)
+
+    def _mark_consolidated_sync(self, ids: list[str]) -> None:
+        """Sync inner — runs in thread."""
         if not ids:
             return
         placeholders = ",".join("?" * len(ids))
@@ -650,9 +930,13 @@ class MemoryStore:
         )
         self._conn.commit()
 
-    def archive_to_knowledge(self, summary: str, source_ids: list[str],
-                              metadata: dict | None = None) -> str:
-        """Archive a consolidated summary as a new memory in Tier 2."""
+    async def mark_consolidated(self, ids: list[str]) -> None:
+        """Mark memories as consolidated (non-blocking)."""
+        await asyncio.to_thread(self._mark_consolidated_sync, ids)
+
+    def _archive_to_knowledge_sync(self, summary: str, source_ids: list[str],
+                                   metadata: dict | None) -> str:
+        """Sync inner — runs in thread."""
         mid = gen_id("archive")
         now = time.time()
         meta = metadata or {}
@@ -668,10 +952,19 @@ class MemoryStore:
              self._content_hash(summary, "archive")),
         )
         self._conn.commit()
+        return mid
+
+    async def archive_to_knowledge(self, summary: str, source_ids: list[str],
+                                   metadata: dict | None = None) -> str:
+        """Archive a consolidated summary as a new memory (non-blocking)."""
+        mid = await asyncio.to_thread(
+            self._archive_to_knowledge_sync, summary, source_ids, metadata,
+        )
         # Also add to ChromaDB for semantic search
         if self._chroma_collection is not None:
             try:
-                self._chroma_collection.add(
+                await asyncio.to_thread(
+                    self._chroma_collection.add,
                     ids=[mid], documents=[summary],
                     metadatas=[{"type": "archive", "importance": 0.6}],
                 )
@@ -679,16 +972,18 @@ class MemoryStore:
                 pass
         return mid
 
-    # ---- Static Knowledge (Tier 1) ----
+    # ------------------------------------------------------------------ #
+    #  Static Knowledge (Tier 1)                                           #
+    # ------------------------------------------------------------------ #
 
-    def query_static_knowledge(
+    def _query_static_knowledge_sync(
         self,
-        categories: list[str] | None = None,
-        keywords: list[str] | None = None,
-        scopes: list[str] | None = None,
-        limit: int = 20,
+        categories: list[str] | None,
+        keywords: list[str] | None,
+        scopes: list[str] | None,
+        limit: int,
     ) -> list[dict]:
-        """Query static knowledge with optional filtering."""
+        """Sync inner — runs in thread."""
         conditions = []
         params: list[Any] = []
         if categories:
@@ -712,18 +1007,42 @@ class MemoryStore:
         ).fetchall()
         return [dict(r) for r in rows]
 
-    def upsert_static_knowledge(
+    # Keep backward-compat sync name — StaticKnowledgeStore calls this from sync code
+    def query_static_knowledge(
+        self,
+        categories: list[str] | None = None,
+        keywords: list[str] | None = None,
+        scopes: list[str] | None = None,
+        limit: int = 20,
+    ) -> list[dict]:
+        """Sync backward-compat shim."""
+        return self._query_static_knowledge_sync(categories, keywords, scopes, limit)
+
+    async def query_static_knowledge_async(
+        self,
+        categories: list[str] | None = None,
+        keywords: list[str] | None = None,
+        scopes: list[str] | None = None,
+        limit: int = 20,
+    ) -> list[dict]:
+        """Query static knowledge with optional filtering (non-blocking)."""
+        return await asyncio.to_thread(
+            self._query_static_knowledge_sync,
+            categories, keywords, scopes, limit,
+        )
+
+    def _upsert_static_knowledge_sync(
         self,
         category: str,
         key: str,
         value: str,
-        scope: str = "global",
-        node_id: str | None = None,
-        source: str = "agent",
-        importance: float = 0.5,
-        updated_at: float | None = None,
+        scope: str,
+        node_id: str | None,
+        source: str,
+        importance: float,
+        updated_at: float | None,
     ) -> None:
-        """Insert or update a static knowledge entry."""
+        """Sync inner — runs in thread."""
         now = updated_at or time.time()
         self._conn.execute(
             "INSERT INTO static_knowledge (category, key, value, source, importance, updated_at, scope, node_id) "
@@ -735,8 +1054,42 @@ class MemoryStore:
         )
         self._conn.commit()
 
-    def delete_static_knowledge(self, category: str, key: str, scope: str = "global") -> bool:
-        """Delete a static knowledge entry."""
+    # Keep backward-compat sync name — StaticKnowledgeStore calls this from sync code
+    def upsert_static_knowledge(
+        self,
+        category: str,
+        key: str,
+        value: str,
+        scope: str = "global",
+        node_id: str | None = None,
+        source: str = "agent",
+        importance: float = 0.5,
+        updated_at: float | None = None,
+    ) -> None:
+        """Sync backward-compat shim."""
+        self._upsert_static_knowledge_sync(
+            category, key, value, scope, node_id, source, importance, updated_at,
+        )
+
+    async def upsert_static_knowledge_async(
+        self,
+        category: str,
+        key: str,
+        value: str,
+        scope: str = "global",
+        node_id: str | None = None,
+        source: str = "agent",
+        importance: float = 0.5,
+        updated_at: float | None = None,
+    ) -> None:
+        """Insert or update a static knowledge entry (non-blocking)."""
+        await asyncio.to_thread(
+            self._upsert_static_knowledge_sync,
+            category, key, value, scope, node_id, source, importance, updated_at,
+        )
+
+    def _delete_static_knowledge_sync(self, category: str, key: str, scope: str) -> bool:
+        """Sync inner — runs in thread."""
         cursor = self._conn.execute(
             "DELETE FROM static_knowledge WHERE category=? AND key=? AND scope=?",
             (category, key, scope),
@@ -744,10 +1097,23 @@ class MemoryStore:
         self._conn.commit()
         return cursor.rowcount > 0
 
-    # ---- Lifecycle ----
+    # Keep backward-compat sync name — StaticKnowledgeStore calls this from sync code
+    def delete_static_knowledge(self, category: str, key: str, scope: str = "global") -> bool:
+        """Sync backward-compat shim."""
+        return self._delete_static_knowledge_sync(category, key, scope)
+
+    async def delete_static_knowledge_async(self, category: str, key: str, scope: str = "global") -> bool:
+        """Delete a static knowledge entry (non-blocking)."""
+        return await asyncio.to_thread(
+            self._delete_static_knowledge_sync, category, key, scope,
+        )
+
+    # ------------------------------------------------------------------ #
+    #  Lifecycle                                                           #
+    # ------------------------------------------------------------------ #
 
     async def close(self) -> None:
         if self._conn:
-            self._conn.close()
+            await asyncio.to_thread(self._conn.close)
             self._conn = None
             log.info("Memory store closed.")

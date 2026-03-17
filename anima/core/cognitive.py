@@ -268,7 +268,7 @@ class AgenticLoop:
         # Save user message to episodic memory (v3: dynamic importance)
         if event.type == EventType.USER_MESSAGE and user_message:
             imp = self._importance_scorer.score(user_message, "chat_user") if self._importance_scorer else 0.6
-            self._memory_store.save_memory(
+            await self._memory_store.save_memory(
                 content=user_message, type="chat", importance=imp,
                 metadata={"role": "user"},
             )
@@ -314,27 +314,16 @@ class AgenticLoop:
                 and m.get("content", "").strip()
             ][-5:]
 
-        # v3: Use PromptCompiler if available, fallback to PromptBuilder
+        # v3: Use PromptCompiler if available, else PromptBuilder
         if self._prompt_compiler:
-            try:
-                system_prompt = self._prompt_compiler.build_for_event(
-                    event_type_name,
-                    tools_description=self._build_tools_description() if needs_tools else "",
-                    system_state=system_state,
-                    emotion_state=self._emotion.to_dict() if event_type_name in ("USER_MESSAGE", "SELF_THINKING") else None,
-                    working_memory_summary=self._format_memory_context(memory_context) if memory_context else "",
-                    recent_self_thoughts=recent_self_thoughts,
-                )
-            except Exception as e:
-                log.warning("PromptCompiler failed, using PromptBuilder fallback: %s", e)
-                system_prompt = self._prompt_builder.build_for_event(
-                    event_type_name,
-                    tools_description=self._build_tools_description() if needs_tools else "",
-                    system_state=system_state,
-                    emotion_state=self._emotion.to_dict() if event_type_name in ("USER_MESSAGE", "SELF_THINKING") else None,
-                    working_memory_summary=self._get_memory_summary() if event_type_name == "USER_MESSAGE" else "",
-                    recent_self_thoughts=recent_self_thoughts,
-                )
+            system_prompt = self._prompt_compiler.build_for_event(
+                event_type_name,
+                tools_description=self._build_tools_description() if needs_tools else "",
+                system_state=system_state,
+                emotion_state=self._emotion.to_dict() if event_type_name in ("USER_MESSAGE", "SELF_THINKING") else None,
+                working_memory_summary=self._format_memory_context(memory_context) if memory_context else "",
+                recent_self_thoughts=recent_self_thoughts,
+            )
         else:
             system_prompt = self._prompt_builder.build_for_event(
                 event_type_name,
@@ -385,7 +374,7 @@ class AgenticLoop:
                         # Delegation result — broadcast back via gossip, not terminal
                         self._emit_status({"stage": "delegation_result", "detail": content[:200]})
                         log.info("Delegation result: %s", content[:100])
-                        self._memory_store.save_memory(
+                        await self._memory_store.save_memory(
                             content=f"[delegation-result] {content[:300]}",
                             type="observation", importance=0.5,
                         )
@@ -402,7 +391,7 @@ class AgenticLoop:
                     elif is_self:
                         self._emit_status({"stage": "self_thought", "detail": content[:200]})
                         log.info("Self-thought: %s", content[:100])
-                        self._memory_store.save_memory(
+                        await self._memory_store.save_memory(
                             content=f"[self-thought] {content[:300]}",
                             type="observation", importance=0.4,
                         )
@@ -739,7 +728,7 @@ class AgenticLoop:
             importance = self._importance_scorer.score(content, mem_type)
         else:
             importance = 0.6  # fallback
-        self._memory_store.save_memory(content=content, type="chat", importance=importance, metadata={"role": role})
+        self._memory_store._save_memory_sync(content, "chat", importance, {"role": role}, [])
 
     def _get_memory_summary(self) -> str:
         """Fallback memory summary for backward compat (no v3 retriever)."""

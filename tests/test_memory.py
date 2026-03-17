@@ -52,9 +52,9 @@ async def test_memory_store_save_and_search(tmp_path):
     from anima.memory.store import MemoryStore
     db_path = str(tmp_path / "test.db")
     store = await MemoryStore.create(db_path)
-    mid = store.save_memory("hello world", type="chat", importance=0.9)
+    mid = await store.save_memory("hello world", type="chat", importance=0.9)
     assert mid.startswith("mem_")
-    results = store.search_memories(query="hello", limit=5)
+    results = await store.search_memories(query="hello", limit=5)
     assert len(results) == 1
     assert results[0]["content"] == "hello world"
     await store.close()
@@ -65,8 +65,8 @@ async def test_memory_store_recent(tmp_path):
     from anima.memory.store import MemoryStore
     db_path = str(tmp_path / "test.db")
     store = await MemoryStore.create(db_path)
-    store.save_memory("first", type="chat", importance=0.5)
-    store.save_memory("second", type="chat", importance=0.7)
+    await store.save_memory("first", type="chat", importance=0.5)
+    await store.save_memory("second", type="chat", importance=0.7)
     recent = store.get_recent_memories(limit=1)
     assert len(recent) == 1
     assert recent[0]["content"] == "second"

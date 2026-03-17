@@ -25,14 +25,15 @@ log = get_logger("token_budget")
 # ------------------------------------------------------------------ #
 
 def count_tokens(text: str) -> int:
-    """Estimate token count for mixed Chinese/English text.
+    """Estimate token count for Chinese-English mixed text.
 
-    Uses ``len(text) // 3`` which is a rough but fast heuristic —
-    Chinese characters are ~1 token each and average English words are
-    ~1.3 tokens.  Dividing the *character* count by 3 gives a
-    reasonable middle ground for CJK-heavy text.
+    Chinese: ~1.5 tokens per character (UTF-8 encoded ~3 bytes/char)
+    English: ~4 characters per token
+    Best approximation without tiktoken: count UTF-8 bytes / 3
     """
-    return len(text) // 3 if text else 0
+    if not text:
+        return 0
+    return max(1, len(text.encode("utf-8")) // 3)
 
 
 def truncate_to_tokens(text: str, max_tokens: int) -> str:
