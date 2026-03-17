@@ -122,41 +122,58 @@ async def _delegate_task(node: str, task: str, timeout: int = 120) -> dict:
     if _gossip_mesh is not None:
         alive = _gossip_mesh.get_alive_peers()
 
-        # Build a host→node_id lookup from alive peers (IP matching)
+        # Build lookups from alive peers
         ip_to_peer: dict[str, str] = {}
+        hostname_to_peer: dict[str, str] = {}
         for peer_id, peer_state in alive.items():
             peer_ip = getattr(peer_state, "ip", None) or getattr(peer_state, "address", None)
             if peer_ip:
                 ip_to_peer[peer_ip] = peer_id
+            peer_host = getattr(peer_state, "hostname", "")
+            if peer_host:
+                hostname_to_peer[peer_host.lower()] = peer_id
 
         for peer_id, peer_state in alive.items():
             # 1. exact node_id
             if peer_id == node:
                 target_node_id = peer_id
                 break
-            # 3. hostname case-insensitive
-            if getattr(peer_state, "hostname", "").lower() == node.lower():
+            # 2. hostname case-insensitive (peer hostname or agent_name)
+            peer_host = getattr(peer_state, "hostname", "").lower()
+            peer_agent = getattr(peer_state, "agent_name", "").lower()
+            if peer_host == node.lower() or peer_agent == node.lower():
+                target_node_id = peer_id
+                break
+            # 3. node_id contains the node name
+            if node.lower() in peer_id.lower():
                 target_node_id = peer_id
                 break
 
         if target_node_id is None:
-            # 2 & 4. look up in remote_nodes config, then match by IP
+            # 4. Look up in remote_nodes config → match by IP or hostname
             from anima.config import get as cfg_get
             remote_nodes: list[dict] = cfg_get("network.remote_nodes", [])
             for rn in remote_nodes:
                 if rn.get("name", "").lower() == node.lower():
                     host_ip = rn.get("host", "")
+                    # Try IP match
                     matched = ip_to_peer.get(host_ip)
                     if matched:
                         target_node_id = matched
-                        log.info("Resolved '%s' via remote_nodes config → host %s → peer %s", node, host_ip, matched)
-                    else:
-                        log.warning(
-                            "remote_nodes config maps '%s' → host %s, but no alive peer has that IP. "
-                            "Alive peers: %s",
-                            node, host_ip, list(alive.keys()),
-                        )
+                        log.info("Resolved '%s' via config IP %s → %s", node, host_ip, matched)
+                        break
+                    # Try hostname match from config name
+                    for hname, pid in hostname_to_peer.items():
+                        if node.lower() in hname or hname in node.lower():
+                            target_node_id = pid
+                            log.info("Resolved '%s' via hostname fuzzy match → %s", node, pid)
+                            break
                     break
+
+        if target_node_id is None and len(alive) == 1:
+            # Only one peer alive — just use it
+            target_node_id = list(alive.keys())[0]
+            log.info("Only one peer alive, using %s for '%s'", target_node_id, node)
 
     if target_node_id is None:
         # No resolution succeeded — fail fast instead of silent timeout
