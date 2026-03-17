@@ -66,6 +66,7 @@ function setupNav() {
       currentPage = btn.dataset.page;
       document.querySelectorAll('.nav-btn').forEach(b => b.classList.toggle('active', b.dataset.page === currentPage));
       document.querySelectorAll('.page').forEach(p => p.classList.toggle('active', p.id === 'page-'+currentPage));
+      _lastPageRender = 0; // Force immediate render on page switch
       if (lastData) renderPage(lastData);
     });
   });
@@ -194,7 +195,13 @@ function render(d) {
   renderPage(d);
 }
 
+let _lastPageRender = 0;
 function renderPage(d) {
+  // Throttle non-avatar pages to every 5s (prevent flashing from 2s WS push)
+  const now = Date.now();
+  if (currentPage !== 'avatar' && now - _lastPageRender < 5000) return;
+  _lastPageRender = now;
+
   if (currentPage === 'overview') renderOverview(d);
   else if (currentPage === 'network') renderNetwork(d);
   else if (currentPage === 'evolution') renderEvolution(d);

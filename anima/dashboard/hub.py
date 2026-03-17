@@ -36,6 +36,8 @@ class DashboardHub:
         self._start_time = time.time()
         self._chat_history: list[dict] = []
         self._activity_log: list[dict] = []
+        self._git_cache: dict = {"branch": "?", "recent_commits": []}
+        self._git_cache_ts: float = 0
 
     def add_activity(self, stage: str, detail: str = "", **kwargs: Any) -> None:
         """Append an activity entry (max 50 kept)."""
@@ -125,24 +127,8 @@ class DashboardHub:
         else:
             snapshot["evolution"] = {"running": False}
 
-        # Git info
-        try:
-            import subprocess
-            from anima.config import project_root
-            git_log = subprocess.run(
-                ["git", "log", "--oneline", "-5"],
-                cwd=str(project_root()), capture_output=True, text=True, timeout=5,
-            )
-            branch = subprocess.run(
-                ["git", "rev-parse", "--abbrev-ref", "HEAD"],
-                cwd=str(project_root()), capture_output=True, text=True, timeout=5,
-            )
-            snapshot["git"] = {
-                "branch": branch.stdout.strip(),
-                "recent_commits": git_log.stdout.strip().split("\n")[:5],
-            }
-        except Exception:
-            snapshot["git"] = {"branch": "?", "recent_commits": []}
+        # Git info (cached, refreshed every 30s)
+        snapshot["git"] = self._get_git_info()
 
         return snapshot
 
@@ -179,6 +165,22 @@ class DashboardHub:
             loop.create_task(_do())
         except Exception:
             pass
+
+    def _get_git_info(self) -> dict:
+        now = time.time()
+        if now - self._git_cache_ts < 30:
+            return self._git_cache
+        try:
+            import subprocess
+            from anima.config import project_root
+            root = str(project_root())
+            git_log = subprocess.run(["git", "log", "--oneline", "-5"], cwd=root, capture_output=True, text=True, timeout=3)
+            branch = subprocess.run(["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=root, capture_output=True, text=True, timeout=3)
+            self._git_cache = {"branch": branch.stdout.strip(), "recent_commits": git_log.stdout.strip().split("\n")[:5]}
+            self._git_cache_ts = now
+        except Exception:
+            pass
+        return self._git_cache
 
     def get_chat_history(self) -> list[dict]:
         return self._chat_history[-50:]
