@@ -318,13 +318,12 @@ class AgenticLoop:
         # v3: Use PromptCompiler if available, fallback to PromptBuilder
         if self._prompt_compiler:
             try:
-                system_prompt = self._prompt_compiler.compile(
+                system_prompt = self._prompt_compiler.build_for_event(
                     event_type_name,
                     tools_description=self._build_tools_description() if needs_tools else "",
                     system_state=system_state,
                     emotion_state=self._emotion.to_dict() if event_type_name in ("USER_MESSAGE", "SELF_THINKING") else None,
-                    memory_context=memory_context,
-                    conversation_buffer=self._summarizer.get_context() if self._summarizer else None,
+                    working_memory_summary=self._format_memory_context(memory_context) if memory_context else "",
                     recent_self_thoughts=recent_self_thoughts,
                 )
             except Exception as e:
@@ -744,12 +743,24 @@ class AgenticLoop:
         self._memory_store.save_memory(content=content, type="chat", importance=importance, metadata={"role": role})
 
     def _get_memory_summary(self) -> str:
-        # v3: Use MemoryRetriever for semantic retrieval when available
-        # The full retriever is used in _handle_event; this is a fallback for backward compat
+        """Fallback memory summary for backward compat (no v3 retriever)."""
         recent = self._memory_store.get_recent_memories(limit=15)
         if not recent:
             return "(no recent memories)"
         return "\n".join(f"- [{m['type']}] {m['content'][:100]}" for m in recent)
+
+    def _format_memory_context(self, ctx) -> str:
+        """Format v3 MemoryContext into a string for prompt injection."""
+        parts = []
+        if ctx.core:
+            parts.append(ctx.core[:500])
+        if ctx.static:
+            for s in ctx.static[:5]:
+                parts.append(f"[{s.get('category', '?')}] {s.get('key', '')}: {str(s.get('value', ''))[:100]}")
+        if ctx.episodic:
+            for e in ctx.episodic[:10]:
+                parts.append(f"- {e.get('content', '')[:150]}")
+        return "\n".join(parts) if parts else ""
 
     def _trim_conversation(self) -> None:
         max_msgs = self._max_conversation_turns * 2
