@@ -7,14 +7,15 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>ANIMA Dashboard</title>
 <style>
+@import url('https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=DM+Sans:wght@300;400;500&display=swap');
 :root {
-  --bg: #0d1117; --surface: #161b22; --surface2: #21262d; --border: #30363d;
-  --text: #e6edf3; --text2: #8b949e; --accent: #58a6ff; --green: #3fb950;
-  --yellow: #d29922; --red: #f85149; --purple: #bc8cff; --pink: #f778ba;
+  --bg: #06060a; --surface: #0a0a10; --surface2: #14141e; --border: #1a1a2a;
+  --text: #e8e6e1; --text2: #6a6a7a; --accent: #60c8d0; --green: #34d399;
+  --yellow: #d29922; --red: #f85149; --purple: #a78bfa; --pink: #f778ba;
   --sidebar-w: 56px;
 }
 * { margin:0; padding:0; box-sizing:border-box; }
-body { background:var(--bg); color:var(--text); font-family:'Segoe UI',system-ui,sans-serif; font-size:14px; overflow:hidden; height:100vh; }
+body { background:var(--bg); color:var(--text); font-family:'DM Sans','Segoe UI',system-ui,sans-serif; font-size:14px; overflow:hidden; height:100vh; }
 
 /* ── Sidebar ── */
 .sidebar { position:fixed; left:0; top:0; width:var(--sidebar-w); height:100vh; background:var(--surface); border-right:1px solid var(--border); display:flex; flex-direction:column; z-index:100; }
@@ -24,6 +25,9 @@ body { background:var(--bg); color:var(--text); font-family:'Segoe UI',system-ui
 .nav-item .tooltip { position:absolute; left:60px; background:var(--surface2); color:var(--text); padding:4px 10px; border-radius:4px; font-size:12px; white-space:nowrap; pointer-events:none; opacity:0; transition:opacity .15s; border:1px solid var(--border); z-index:200; }
 .nav-item:hover .tooltip { opacity:1; }
 .nav-spacer { flex:1; }
+.nav-logo { width:56px; height:52px; display:flex; align-items:center; justify-content:center; padding:8px 0; border-bottom:1px solid var(--border); margin-bottom:4px; }
+.nav-logo svg { opacity:0.8; }
+.nav-logo:hover svg { opacity:1; }
 
 /* ── Header ── */
 .header { background:var(--surface); border-bottom:1px solid var(--border); padding:10px 20px; display:flex; justify-content:space-between; align-items:center; height:48px; margin-left:var(--sidebar-w); }
@@ -31,7 +35,7 @@ body { background:var(--bg); color:var(--text); font-family:'Segoe UI',system-ui
 .header h1 .name { color:var(--accent); }
 .header .meta { color:var(--text2); font-size:13px; display:flex; align-items:center; gap:12px; }
 .status-dot { display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:4px; }
-.status-dot.alive { background:var(--green); box-shadow:0 0 6px var(--green); animation:pulse-dot 2s ease-in-out infinite; }
+.status-dot.alive { background:var(--accent); box-shadow:0 0 6px var(--accent); animation:pulse-dot 2s ease-in-out infinite; }
 .status-dot.stopped { background:var(--red); }
 @keyframes pulse-dot { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:.5;transform:scale(1.3)} }
 .page-indicator { color:var(--accent); font-weight:600; font-size:13px; }
@@ -43,8 +47,8 @@ body { background:var(--bg); color:var(--text); font-family:'Segoe UI',system-ui
 @keyframes fadeIn { from{opacity:0} to{opacity:1} }
 
 /* ── Panels ── */
-.panel { background:var(--surface); border:1px solid var(--border); border-radius:8px; overflow:hidden; display:flex; flex-direction:column; }
-.panel-title { background:var(--surface2); padding:8px 14px; font-size:12px; font-weight:600; text-transform:uppercase; letter-spacing:.5px; color:var(--text2); border-bottom:1px solid var(--border); display:flex; justify-content:space-between; align-items:center; flex-shrink:0; }
+.panel { background:var(--surface); border:1px solid var(--border); border-radius:12px; overflow:hidden; display:flex; flex-direction:column; }
+.panel-title { background:var(--surface2); padding:8px 14px; font-size:11px; font-weight:500; text-transform:uppercase; letter-spacing:1.5px; color:var(--text2); border-bottom:1px solid var(--border); display:flex; justify-content:space-between; align-items:center; flex-shrink:0; }
 .panel-body { padding:12px 14px; overflow-y:auto; flex:1; min-height:0; }
 
 /* ── Overview page ── */
@@ -53,12 +57,15 @@ body { background:var(--bg); color:var(--text); font-family:'Segoe UI',system-ui
 
 /* Heartbeat pulse */
 .pulse-container { display:flex; align-items:center; gap:20px; margin-bottom:12px; }
-.pulse-circle { width:60px; height:60px; border-radius:50%; background:var(--green); position:relative; flex-shrink:0; }
-.pulse-circle.alive { animation:pulseGlow 2s ease-in-out infinite; box-shadow:0 0 20px var(--green), 0 0 40px rgba(63,185,80,.3); }
-.pulse-circle.stopped { background:var(--red); box-shadow:0 0 10px var(--red); animation:none; }
+.pulse-circle { width:60px; height:60px; border-radius:50%; position:relative; flex-shrink:0; display:flex; align-items:center; justify-content:center; }
+.pulse-circle.alive {
+  background: radial-gradient(circle, rgba(96,200,208,0.08) 0%, transparent 70%);
+  animation: pulseGlow 3s ease-in-out infinite;
+}
+.pulse-circle.stopped { background:rgba(248,81,73,0.15); animation:none; }
 @keyframes pulseGlow {
-  0%,100% { transform:scale(1); box-shadow:0 0 20px var(--green), 0 0 40px rgba(63,185,80,.3); }
-  50% { transform:scale(1.12); box-shadow:0 0 30px var(--green), 0 0 60px rgba(63,185,80,.5); }
+  0%,100% { transform:scale(1); box-shadow:0 0 15px rgba(96,200,208,.15); }
+  50% { transform:scale(1.08); box-shadow:0 0 25px rgba(96,200,208,.3); }
 }
 .pulse-info { font-size:13px; color:var(--text2); line-height:1.6; }
 .pulse-info .val { color:var(--text); font-weight:600; }
@@ -236,6 +243,7 @@ body { background:var(--bg); color:var(--text); font-family:'Segoe UI',system-ui
   .nav-item.active { border-left-color:transparent; border-top-color:var(--accent); }
   .nav-item .tooltip { display:none; }
   .nav-spacer { display:none; }
+  .nav-logo { display:none; }
   .header { margin-left:0; }
   .main { margin-left:0; height:calc(100vh - 48px - 48px - env(safe-area-inset-bottom, 0px)); overflow-y:auto; }
   :root { --sidebar-w:0px; }
@@ -284,6 +292,18 @@ body { background:var(--bg); color:var(--text); font-family:'Segoe UI',system-ui
 
 <!-- Sidebar -->
 <nav class="sidebar">
+  <div class="nav-logo" title="ANIMA">
+    <svg width="28" height="28" viewBox="0 0 180 180" fill="none">
+      <path d="M 90 20 C 130 40, 130 70, 90 90 C 50 110, 50 140, 90 160" stroke="url(#nl1)" stroke-width="8" fill="none" stroke-linecap="round"/>
+      <defs><linearGradient id="nl1" x1="50%" y1="0%" x2="50%" y2="100%"><stop offset="0%" stop-color="#a78bfa"/><stop offset="100%" stop-color="#34d399"/></linearGradient></defs>
+      <circle cx="68" cy="55" r="9" fill="#a78bfa" opacity="0.6"/>
+      <circle cx="112" cy="55" r="9" fill="#a78bfa" opacity="0.6"/>
+      <circle cx="68" cy="90" r="10" fill="#60c8d0" opacity="0.7"/>
+      <circle cx="112" cy="90" r="10" fill="#60c8d0" opacity="0.7"/>
+      <circle cx="68" cy="125" r="9" fill="#40c8a8" opacity="0.6"/>
+      <circle cx="112" cy="125" r="9" fill="#40c8a8" opacity="0.6"/>
+    </svg>
+  </div>
   <a class="nav-item active" data-page="overview" href="#/">
     &#x1F3E0;<span class="tooltip">Overview</span>
   </a>
@@ -304,7 +324,9 @@ body { background:var(--bg); color:var(--text); font-family:'Segoe UI',system-ui
 
 <!-- Header -->
 <div class="header">
-  <h1><span class="name" id="agent-name">ANIMA</span> <span>Dashboard</span></h1>
+  <h1 style="font-family:'Instrument Serif',serif; font-weight:400; letter-spacing:-0.5px;">
+    <span class="name" id="agent-name">ANIMA</span> <span style="color:var(--text2); font-size:14px; font-family:'DM Sans',sans-serif; font-weight:300;">Dashboard</span>
+  </h1>
   <div class="meta">
     <span><span class="status-dot alive" id="status-dot"></span><span id="status-text">connecting...</span></span>
     <span>&middot; Uptime: <span id="uptime">--</span></span>
@@ -324,7 +346,22 @@ body { background:var(--bg); color:var(--text); font-family:'Segoe UI',system-ui
           <div class="panel-title">Heartbeat</div>
           <div class="panel-body">
             <div class="pulse-container">
-              <div class="pulse-circle alive" id="pulse-circle"></div>
+              <div class="pulse-circle alive" id="pulse-circle">
+                <svg width="36" height="36" viewBox="0 0 180 180" fill="none">
+                  <path d="M 90 20 C 130 40, 130 70, 90 90 C 50 110, 50 140, 90 160" stroke="url(#ph1)" stroke-width="5" fill="none" stroke-linecap="round" opacity="0.8"/>
+                  <path d="M 90 20 C 50 40, 50 70, 90 90 C 130 110, 130 140, 90 160" stroke="url(#ph2)" stroke-width="5" fill="none" stroke-linecap="round" opacity="0.25"/>
+                  <defs>
+                    <linearGradient id="ph1" x1="50%" y1="0%" x2="50%" y2="100%"><stop offset="0%" stop-color="#a78bfa"/><stop offset="50%" stop-color="#60d0c0"/><stop offset="100%" stop-color="#34d399"/></linearGradient>
+                    <linearGradient id="ph2" x1="50%" y1="0%" x2="50%" y2="100%"><stop offset="0%" stop-color="#818cf8"/><stop offset="100%" stop-color="#22d3ee"/></linearGradient>
+                  </defs>
+                  <circle cx="68" cy="55" r="6" fill="#a78bfa" opacity="0.6"/>
+                  <circle cx="112" cy="55" r="6" fill="#a78bfa" opacity="0.6"/>
+                  <circle cx="68" cy="90" r="7" fill="#60c8d0" opacity="0.7"/>
+                  <circle cx="112" cy="90" r="7" fill="#60c8d0" opacity="0.7"/>
+                  <circle cx="68" cy="125" r="6" fill="#40c8a8" opacity="0.6"/>
+                  <circle cx="112" cy="125" r="6" fill="#40c8a8" opacity="0.6"/>
+                </svg>
+              </div>
               <div class="pulse-info">
                 <div>Ticks: <span class="val" id="hb-ticks">0</span></div>
                 <div>Interval: <span class="val" id="hb-interval">15s</span></div>
