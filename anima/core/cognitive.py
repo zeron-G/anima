@@ -268,7 +268,7 @@ class AgenticLoop:
         # Save user message to episodic memory (v3: dynamic importance)
         if event.type == EventType.USER_MESSAGE and user_message:
             imp = self._importance_scorer.score(user_message, "chat_user") if self._importance_scorer else 0.6
-            await self._memory_store.save_memory(
+            await self._memory_store.save_memory_async(
                 content=user_message, type="chat", importance=imp,
                 metadata={"role": "user"},
             )
@@ -374,7 +374,7 @@ class AgenticLoop:
                         # Delegation result — broadcast back via gossip, not terminal
                         self._emit_status({"stage": "delegation_result", "detail": content[:200]})
                         log.info("Delegation result: %s", content[:100])
-                        await self._memory_store.save_memory(
+                        await self._memory_store.save_memory_async(
                             content=f"[delegation-result] {content[:300]}",
                             type="observation", importance=0.5,
                         )
@@ -391,7 +391,7 @@ class AgenticLoop:
                     elif is_self:
                         self._emit_status({"stage": "self_thought", "detail": content[:200]})
                         log.info("Self-thought: %s", content[:100])
-                        await self._memory_store.save_memory(
+                        await self._memory_store.save_memory_async(
                             content=f"[self-thought] {content[:300]}",
                             type="observation", importance=0.4,
                         )

@@ -18,7 +18,7 @@ def test_working_memory_evicts_lowest_importance():
     wm.add(MemoryItem(content="low", type=MemoryType.OBSERVATION, importance=0.1))
     wm.add(MemoryItem(content="mid", type=MemoryType.DECISION, importance=0.5))
     wm.add(MemoryItem(content="high", type=MemoryType.CHAT, importance=0.9))
-    # Full — adding one more should evict "low"
+    # Full -- adding one more should evict "low"
     evicted = wm.add(MemoryItem(content="new", type=MemoryType.CHAT, importance=0.8))
     assert evicted is not None
     assert evicted.content == "low"
@@ -52,11 +52,27 @@ async def test_memory_store_save_and_search(tmp_path):
     from anima.memory.store import MemoryStore
     db_path = str(tmp_path / "test.db")
     store = await MemoryStore.create(db_path)
-    mid = await store.save_memory("hello world", type="chat", importance=0.9)
+    # save_memory is sync (backward-compat shim); use save_memory_async for non-blocking
+    mid = store.save_memory("hello world", type="chat", importance=0.9)
     assert mid.startswith("mem_")
-    results = await store.search_memories(query="hello", limit=5)
+    # search_memories is sync (backward-compat shim)
+    results = store.search_memories(query="hello", limit=5)
     assert len(results) == 1
     assert results[0]["content"] == "hello world"
+    await store.close()
+
+
+@pytest.mark.asyncio
+async def test_memory_store_save_and_search_async(tmp_path):
+    """Test the async variants."""
+    from anima.memory.store import MemoryStore
+    db_path = str(tmp_path / "test.db")
+    store = await MemoryStore.create(db_path)
+    mid = await store.save_memory_async("async hello", type="chat", importance=0.8)
+    assert mid.startswith("mem_")
+    results = await store.search_memories_async(query="async hello", limit=5)
+    assert len(results) == 1
+    assert results[0]["content"] == "async hello"
     await store.close()
 
 
@@ -65,8 +81,8 @@ async def test_memory_store_recent(tmp_path):
     from anima.memory.store import MemoryStore
     db_path = str(tmp_path / "test.db")
     store = await MemoryStore.create(db_path)
-    await store.save_memory("first", type="chat", importance=0.5)
-    await store.save_memory("second", type="chat", importance=0.7)
+    store.save_memory("first", type="chat", importance=0.5)
+    store.save_memory("second", type="chat", importance=0.7)
     recent = store.get_recent_memories(limit=1)
     assert len(recent) == 1
     assert recent[0]["content"] == "second"
