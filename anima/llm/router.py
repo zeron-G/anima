@@ -107,6 +107,8 @@ class LLMRouter:
 
         # Circuit breaker: if open, skip unless it's probe time
         if self._circuit_open and not self._should_probe():
+            log.debug("Circuit OPEN — skipping LLM call (next probe in %ds)",
+                       int(_CB_PROBE_INTERVAL_S - (time.time() - self._last_probe_at)))
             return None
         if self._circuit_open:
             self._last_probe_at = time.time()
