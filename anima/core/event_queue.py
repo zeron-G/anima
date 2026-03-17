@@ -63,8 +63,8 @@ class EventQueue:
             self._queue.put_nowait(
                 Event(type=EventType.SHUTDOWN, priority=10)  # type: ignore[arg-type]
             )
-        except asyncio.QueueFull:
-            pass
+        except asyncio.QueueFull as e:
+            log.debug("close: %s", e)
 
     async def drain(self) -> list[Event]:
         """Drain all pending events (for shutdown)."""

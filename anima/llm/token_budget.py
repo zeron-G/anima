@@ -268,8 +268,8 @@ class TokenBudget:
                         for m in parsed
                         if isinstance(m, dict)
                     ]
-            except (json.JSONDecodeError, TypeError):
-                pass
+            except (json.JSONDecodeError, TypeError) as e:
+                log.debug("_parse_conversation: %s", e)
 
         # Fallback: treat as a single user message
         if text:

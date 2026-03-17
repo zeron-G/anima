@@ -73,8 +73,8 @@ class DiffEngine:
                 try:
                     if float(cur_val) >= _ALERT_THRESHOLDS[field_name]:
                         has_alerts = True
-                except (TypeError, ValueError):
-                    pass
+                except (TypeError, ValueError) as e:
+                    log.debug("diff_engine: %s", e)
 
         # Significance score: fraction of rules that triggered
         total = len(self._rules)

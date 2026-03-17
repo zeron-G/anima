@@ -176,8 +176,8 @@ async def synthesize(
 
     try:
         out_path.unlink(missing_ok=True)
-    except Exception:
-        pass
+    except Exception as e:
+        log.warning("tts: %s", e)
     return None
 
 
@@ -193,5 +193,5 @@ def cleanup_cache(max_files: int = 100) -> None:
         for f in files[: len(files) - max_files]:
             try:
                 f.unlink()
-            except Exception:
-                pass
+            except Exception as e:
+                log.warning("cleanup_cache: %s", e)

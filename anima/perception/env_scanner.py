@@ -132,8 +132,8 @@ class EnvScanner:
                                         scan_layer, _current + 1)
                 else:
                     stats["files"] += 1
-        except (PermissionError, OSError):
-            pass
+        except (PermissionError, OSError) as e:
+            log.debug("_scan_flat: %s", e)
 
     # ── Layer 2: high-value areas ──
 
@@ -185,8 +185,8 @@ class EnvScanner:
                             p = entry.path
                             if p not in dirs:
                                 dirs.append(p)
-                except (PermissionError, OSError):
-                    pass
+                except (PermissionError, OSError) as e:
+                    log.debug("env_scanner: %s", e)
         return dirs
 
     # ── Layer 3: full disk (chunked) ──
@@ -258,8 +258,8 @@ class EnvScanner:
                                     "size_bytes": st.st_size if not entry.is_dir() else 0,
                                     "scanned_at": time.time(),
                                 })
-                        except OSError:
-                            pass
+                        except OSError as e:
+                            log.debug("env_scanner: %s", e)
                         del known_map[path]
                     else:
                         stats["new"] += 1

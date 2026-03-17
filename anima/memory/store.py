@@ -322,8 +322,8 @@ class MemoryStore:
                         ids,
                     ).fetchall()
                     return [dict(r) for r in rows]
-            except Exception:
-                pass
+            except Exception as e:
+                log.debug("store: %s", e)
 
         # Fallback: SQLite
         conditions = []
@@ -1049,8 +1049,8 @@ class MemoryStore:
                     ids=[mid], documents=[summary],
                     metadatas=[{"type": "archive", "importance": 0.6}],
                 )
-            except Exception:
-                pass
+            except Exception as e:
+                log.debug("archive_to_knowledge: %s", e)
         return mid
 
     async def archive_to_knowledge_async(self, summary: str, source_ids: list[str],
@@ -1067,8 +1067,8 @@ class MemoryStore:
                     ids=[mid], documents=[summary],
                     metadatas=[{"type": "archive", "importance": 0.6}],
                 )
-            except Exception:
-                pass
+            except Exception as e:
+                log.debug("archive_to_knowledge_async: %s", e)
         return mid
 
     # ------------------------------------------------------------------ #

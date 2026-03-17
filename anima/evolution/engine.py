@@ -330,8 +330,8 @@ class EvolutionEngine:
                 if proposal.title and proposal.title[:20] in last_commit:
                     # SubAgent already committed — that's fine
                     return True, "Already committed"
-            except Exception:
-                pass
+            except Exception as e:
+                log.debug("_review_diff: %s", e)
             # Check if there are any new commits since proposal started
             try:
                 log_result = _sp.run(
@@ -341,8 +341,8 @@ class EvolutionEngine:
                 recent = log_result.stdout.strip()
                 if "Evolution" in recent or "evolution" in recent:
                     return True, "Changes already committed by Claude Code"
-            except Exception:
-                pass
+            except Exception as e:
+                log.debug("engine: %s", e)
             # Claude Code may have made changes that just need staging
             _sp.run(["git", "add", "-A"], cwd=str(project_root()), capture_output=True)
             diff_check = _sp.run(["git", "diff", "--cached", "--stat"], cwd=str(project_root()), capture_output=True, text=True)

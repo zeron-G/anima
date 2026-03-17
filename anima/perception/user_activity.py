@@ -66,8 +66,8 @@ class UserActivityDetector:
             )
             if result.returncode == 0:
                 return int(result.stdout.strip()) / 1000.0
-        except Exception:
-            pass
+        except Exception as e:
+            log.debug("_linux_idle_seconds: %s", e)
         return 0.0
 
     def record_user_message(self) -> None:

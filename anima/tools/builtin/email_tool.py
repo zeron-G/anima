@@ -37,8 +37,8 @@ def _load_config():
     if p.exists():
         try:
             _EMAIL_CONFIG.update(json.loads(p.read_text(encoding="utf-8")))
-        except Exception:
-            pass
+        except Exception as e:
+            log.debug("_load_config: %s", e)
 
 
 def _send_sync(to: str, subject: str, body: str) -> dict:

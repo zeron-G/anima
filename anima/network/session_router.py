@@ -225,8 +225,8 @@ class TaskDelegate:
             else:
                 try:
                     fut.set_exception(exc)
-                except Exception:
-                    pass
+                except Exception as e:
+                    log.debug("session_router: %s", e)
 
         if self._broadcast_fn:
             await self._broadcast_fn({
@@ -528,8 +528,8 @@ class TaskDelegate:
         else:
             try:
                 fut.set_result(reply)
-            except Exception:
-                pass
+            except Exception as e:
+                log.debug("session_router: %s", e)
 
         log.debug(
             "Received status reply for correlation=%s task=%s status=%s",

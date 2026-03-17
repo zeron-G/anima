@@ -243,8 +243,8 @@ class DashboardServer:
                 if self._hub.emotion_state:
                     dominant = self._hub.emotion_state.dominant()
                     emotion = dominant if dominant != "engagement" else ""
-            except Exception:
-                pass
+            except Exception as e:
+                log.debug("_handle_tts: %s", e)
 
             # Run TTS in thread to avoid event loop conflicts with edge-tts
             import asyncio
@@ -299,8 +299,8 @@ class DashboardServer:
             # Cleanup temp file
             try:
                 Path(tmp_path).unlink()
-            except Exception:
-                pass
+            except Exception as e:
+                log.debug("server: %s", e)
 
             if text:
                 return web.json_response({"ok": True, "text": text})

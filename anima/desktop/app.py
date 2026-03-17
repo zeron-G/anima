@@ -8,6 +8,9 @@ import os
 import sys
 import threading
 
+from anima.utils.logging import get_logger
+log = get_logger("desktop.app")
+
 
 def launch_desktop(*, headless: bool = False, experimental: bool = False) -> None:
     from anima.config import get
@@ -18,8 +21,8 @@ def launch_desktop(*, headless: bool = False, experimental: bool = False) -> Non
             import webview
             webview.create_window("ANIMA", html="<h2>ANIMA is already running.</h2>", width=400, height=200)
             webview.start()
-        except Exception:
-            pass
+        except Exception as e:
+            log.debug("launch_desktop: %s", e)
         sys.exit(1)
 
     atexit.register(release_lock)

@@ -103,7 +103,7 @@ class FileWatcher:
                             mtime=stat.st_mtime,
                             size=stat.st_size,
                         )
-                    except OSError:
-                        pass
-        except PermissionError:
-            pass
+                    except OSError as e:
+                        log.debug("file_watcher: %s", e)
+        except PermissionError as e:
+            log.debug("file_watcher: %s", e)

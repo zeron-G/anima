@@ -13,6 +13,13 @@ import asyncio
 import os
 import sys
 
+try:
+    from anima.utils.logging import get_logger
+    log = get_logger("__main__")
+except Exception:
+    import logging
+    log = logging.getLogger("__main__")
+
 # ═══ GLOBAL ENCODING FIX ═══
 # Windows uses GBK/cp936 by default. Eva's personality contains emoji (🩰💗✨)
 # which crash GBK encoding. Fix ALL I/O channels at the earliest entry point.
@@ -94,8 +101,8 @@ def _run_with_watch():
         for f in src_dir.rglob("*.py"):
             try:
                 mtimes[str(f)] = f.stat().st_mtime
-            except OSError:
-                pass
+            except OSError as e:
+                log.debug("get_mtimes: %s", e)
         return mtimes
 
     print("[watch] Starting ANIMA with hot-reload...")
@@ -174,6 +181,7 @@ def _handle_spawn(args: list[str]):
 
     if target:
         from anima.spawn.deployer import deploy_to_remote
+
         result = asyncio.run(deploy_to_remote(
             target, python_cmd=python_cmd,
             network_secret=secret, include_env=include_env,

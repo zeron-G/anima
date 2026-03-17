@@ -7,6 +7,9 @@ import shlex
 
 from anima.models.tool_spec import RiskLevel
 
+from anima.utils.logging import get_logger
+log = get_logger("safety")
+
 # Patterns that are always blocked
 _BLOCKED_PATTERNS = [
     r"\brm\s+(-rf?|--recursive)\s+[/~]",  # rm -rf / or ~
@@ -122,7 +125,7 @@ def _assess_segment(segment: str) -> RiskLevel:
                 # git push/reset etc. are handled by MEDIUM patterns above
                 return RiskLevel.LOW
             return RiskLevel.SAFE
-    except ValueError:
-        pass
+    except ValueError as e:
+        log.debug("safety: %s", e)
 
     return RiskLevel.LOW

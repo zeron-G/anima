@@ -63,8 +63,8 @@ def release_lock() -> None:
     except (ValueError, OSError):
         try:
             LOCK_FILE.unlink(missing_ok=True)
-        except OSError:
-            pass
+        except OSError as e:
+            log.debug("release_lock: %s", e)
 
 
 def kill_existing() -> bool:
@@ -93,10 +93,10 @@ def kill_existing() -> bool:
                     os.kill(old_pid, 9)
                     time.sleep(0.5)
                 return True
-            except (ProcessLookupError, PermissionError):
-                pass
-    except (ValueError, OSError):
-        pass
+            except (ProcessLookupError, PermissionError) as e:
+                log.debug("singleton: %s", e)
+    except (ValueError, OSError) as e:
+        log.debug("singleton: %s", e)
 
     return False
 
@@ -112,8 +112,8 @@ def _is_process_alive(pid: int) -> bool:
                 kernel32.CloseHandle(handle)
                 return True
             return False
-        except Exception:
-            pass
+        except Exception as e:
+            log.debug("_is_process_alive: %s", e)
 
     try:
         os.kill(pid, 0)

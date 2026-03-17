@@ -136,8 +136,8 @@ class MemorySync:
             except Exception as e:
                 try:
                     rep.send(msgpack.packb({"error": str(e)}, use_bin_type=True))
-                except Exception:
-                    pass
+                except Exception as e:
+                    log.warning("sync: %s", e)
 
         rep.close()
         ctx.term()
@@ -201,8 +201,8 @@ class MemorySync:
         ]:
             try:
                 conn.execute(sql)
-            except Exception:
-                pass
+            except Exception as e:
+                log.warning("_ensure_sync_columns: %s", e)
         conn.commit()
 
     def _load_watermarks(self) -> None:
@@ -213,8 +213,8 @@ class MemorySync:
                 self._peer_watermarks = json.loads(path.read_text(encoding="utf-8"))
                 if self._peer_watermarks:
                     self._local_seq = max(self._peer_watermarks.values(), default=0)
-            except Exception:
-                pass
+            except Exception as e:
+                log.warning("_load_watermarks: %s", e)
 
     def _save_watermarks(self) -> None:
         from anima.config import data_dir

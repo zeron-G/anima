@@ -128,8 +128,8 @@ class NodeIdentity:
         if self._path.exists():
             try:
                 return json.loads(self._path.read_text(encoding="utf-8"))
-            except Exception:
-                pass
+            except Exception as e:
+                log.debug("_load: %s", e)
         # First run — generate identity
         hostname = socket.gethostname()
         node_id = f"anima-{hostname.lower()}-{gen_id('')[:8]}"

@@ -53,8 +53,8 @@ class EvolutionState:
                 self.current_loop = d.get("current_loop", {})
                 self.history = d.get("history", [])
                 self.last_loop_at = d.get("last_loop_at", 0)
-            except Exception:
-                pass
+            except Exception as e:
+                log.debug("_load: %s", e)
 
     def save(self):
         self._path.parent.mkdir(parents=True, exist_ok=True)

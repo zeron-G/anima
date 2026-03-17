@@ -84,8 +84,8 @@ async def deploy_to_remote(
         # Clean up local package
         try:
             package.unlink()
-        except Exception:
-            pass
+        except Exception as e:
+            log.warning("deployer: %s", e)
 
 
 async def deploy_local(
@@ -143,8 +143,8 @@ async def deploy_local(
     finally:
         try:
             package.unlink()
-        except Exception:
-            pass
+        except Exception as e:
+            log.warning("deployer: %s", e)
 
 
 def get_free_port() -> int:

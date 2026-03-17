@@ -90,8 +90,8 @@ class ToolExecutor:
                     missing = [r for r in required if r not in filtered_args]
                     if missing:
                         return {"success": False, "error": f"Missing required arguments: {missing}"}
-                except (ValueError, TypeError):
-                    pass
+                except (ValueError, TypeError) as e:
+                    log.debug("executor: %s", e)
 
             result = await spec.handler(**filtered_args)
             # For shell commands, check returncode

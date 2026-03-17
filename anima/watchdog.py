@@ -27,6 +27,9 @@ import time
 from collections import Counter
 from pathlib import Path
 
+from anima.utils.logging import get_logger
+log = get_logger("watchdog")
+
 # Project root (one level up from anima/)
 PROJECT_ROOT = Path(__file__).parent.parent
 LOG_FILE = PROJECT_ROOT / "data" / "logs" / "anima.log"
@@ -51,8 +54,8 @@ def _log(msg: str) -> None:
         WATCHDOG_LOG.parent.mkdir(parents=True, exist_ok=True)
         with open(WATCHDOG_LOG, "a", encoding="utf-8") as f:
             f.write(line + "\n")
-    except Exception:
-        pass
+    except Exception as e:
+        log.debug("_log: %s", e)
 
 
 def _read_recent_errors(lines: int = 200) -> list[str]:
@@ -122,8 +125,8 @@ def _update_heartbeat() -> None:
             "timestamp": time.time(),
             "pid": os.getpid(),
         }), encoding="utf-8")
-    except Exception:
-        pass
+    except Exception as e:
+        log.debug("_update_heartbeat: %s", e)
 
 
 def _check_heartbeat() -> bool:
@@ -462,8 +465,8 @@ def run_watchdog(dry_run: bool = False) -> None:
                         proc.kill()
                         try:
                             proc.wait(timeout=10)
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            log.debug("watchdog: %s", e)
                         run_watchdog._stale_count = 0
                         break  # Exit monitor loop → restart
                 else:
