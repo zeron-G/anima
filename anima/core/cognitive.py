@@ -275,7 +275,6 @@ class AgenticLoop:
 
         # v3: Add to ConversationSummarizer (if available)
         if self._summarizer and event.type == EventType.USER_MESSAGE and user_message:
-            import asyncio
             asyncio.ensure_future(self._summarizer.add_message("user", user_message))
 
         # Build prompt — lean, event-specific
