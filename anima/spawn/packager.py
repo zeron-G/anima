@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import io
 import json
-import os
 import tarfile
 import time
 from pathlib import Path
@@ -93,7 +92,6 @@ def create_spawn_package(
         output_path = str(out_dir / f"spawn-{ts}.tar.gz")
 
     # Generate a new node ID for the child
-    import socket
     child_id = f"anima-spawn-{gen_id('')[:8]}"
 
     # Build config with network enabled and parent as peer

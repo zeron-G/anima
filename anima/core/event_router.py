@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import json
 import random
-from typing import Any
 
 from anima.models.event import Event, EventType
 from anima.utils.logging import get_logger

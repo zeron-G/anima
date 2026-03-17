@@ -3,9 +3,8 @@
 from __future__ import annotations
 
 import os
-import time
 from pathlib import Path
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from anima.utils.logging import get_logger
 

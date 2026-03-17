@@ -1,7 +1,6 @@
 """Webhook channel — receive messages via HTTP POST."""
 
 from __future__ import annotations
-import asyncio
 from aiohttp import web
 
 from anima.channels.base import BaseChannel

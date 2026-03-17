@@ -16,21 +16,17 @@ import json
 import time
 from typing import Any, Callable
 
-from anima.config import get
 from anima.core.event_queue import EventQueue
 from anima.core.rule_engine import RuleEngine
 from anima.emotion.state import EmotionState
-from anima.llm.prompts import PromptBuilder
 from anima.llm.router import LLMRouter
 from anima.memory.store import MemoryStore
-from anima.models.decision import Decision, ActionType
+from anima.models.decision import ActionType
 from anima.models.event import Event, EventType
 from anima.perception.snapshot_cache import SnapshotCache
 from anima.tools.executor import ToolExecutor
 from anima.tools.registry import ToolRegistry
 from anima.core.reload import ReloadManager
-from anima.core.event_router import event_to_message, pick_tier, is_self_event
-from anima.core.conversation import ConversationManager
 from anima.utils.logging import get_logger
 
 log = get_logger("cognitive")
@@ -57,7 +53,6 @@ class AgenticLoop:
         memory_store: MemoryStore,
         emotion_state: EmotionState,
         llm_router: LLMRouter,
-        prompt_builder: PromptBuilder,
         tool_executor: ToolExecutor,
         tool_registry: ToolRegistry,
         config: dict,
@@ -67,7 +62,6 @@ class AgenticLoop:
         self._memory_store = memory_store
         self._emotion = emotion_state
         self._llm_router = llm_router
-        self._prompt_builder = prompt_builder
         self._tool_executor = tool_executor
         self._tool_registry = tool_registry
         self._rule_engine = RuleEngine()
@@ -249,12 +243,12 @@ class AgenticLoop:
 
                 if decision.action == ActionType.RESPOND:
                     await self._output(decision.content)
-                    self._save_chat("assistant", decision.content)
+                    await self._save_chat("assistant", decision.content)
                 elif decision.action == ActionType.TOOL_CALL:
                     await self._tool_executor.execute(decision.tool_name, decision.tool_args)
 
                 # Record in memory
-                self._memory_store.audit(action=f"rule:{event.type.name}", details=decision.reasoning[:200])
+                await self._memory_store.audit_async(action=f"rule:{event.type.name}", details=decision.reasoning[:200])
                 return
 
         # ── Step 2: LLM agentic loop for complex events ──
@@ -314,25 +308,15 @@ class AgenticLoop:
                 and m.get("content", "").strip()
             ][-5:]
 
-        # v3: Use PromptCompiler if available, else PromptBuilder
-        if self._prompt_compiler:
-            system_prompt = self._prompt_compiler.build_for_event(
-                event_type_name,
-                tools_description=self._build_tools_description() if needs_tools else "",
-                system_state=system_state,
-                emotion_state=self._emotion.to_dict() if event_type_name in ("USER_MESSAGE", "SELF_THINKING") else None,
-                working_memory_summary=self._format_memory_context(memory_context) if memory_context else "",
-                recent_self_thoughts=recent_self_thoughts,
-            )
-        else:
-            system_prompt = self._prompt_builder.build_for_event(
-                event_type_name,
-                tools_description=self._build_tools_description() if needs_tools else "",
-                system_state=system_state,
-                emotion_state=self._emotion.to_dict() if event_type_name in ("USER_MESSAGE", "SELF_THINKING") else None,
-                working_memory_summary=self._get_memory_summary() if event_type_name == "USER_MESSAGE" else "",
-                recent_self_thoughts=recent_self_thoughts,
-            )
+        # v3: PromptCompiler is the only prompt path
+        system_prompt = self._prompt_compiler.build_for_event(
+            event_type_name,
+            tools_description=self._build_tools_description() if needs_tools else "",
+            system_state=system_state,
+            emotion_state=self._emotion.to_dict() if event_type_name in ("USER_MESSAGE", "SELF_THINKING") else None,
+            working_memory_summary=self._format_memory_context(memory_context) if memory_context else "",
+            recent_self_thoughts=recent_self_thoughts,
+        )
 
         # Strip internal metadata fields (e.g. is_self_thought) before sending to API
         _API_KEYS = {"role", "content"}
@@ -403,7 +387,7 @@ class AgenticLoop:
                         # If flagged to notify user (e.g. agent status update), also output
                         if event.payload and event.payload.get("notify_user") and content.strip():
                             await self._output(content)
-                            self._save_chat("assistant", content)
+                            await self._save_chat("assistant", content)
                     else:
                         self._emit_status({"stage": "responding", "detail": content[:80]})
                         # v3: Soul Container post-processing for user-facing responses
@@ -414,7 +398,7 @@ class AgenticLoop:
                             except Exception as e:
                                 log.debug("Soul Container post-processing failed: %s", e)
                         await self._output(output_content)
-                        self._save_chat("assistant", output_content)
+                        await self._save_chat("assistant", output_content)
 
                 # Store ALL events in conversation buffer (including self-thoughts)
                 self._conversation.append({"role": "user", "content": user_message})
@@ -543,7 +527,7 @@ class AgenticLoop:
             except Exception as e:
                 log.error("Evolution state update failed: %s", e)
 
-        self._memory_store.audit(action=f"event:{event.type.name}", details=user_message[:200])
+        await self._memory_store.audit_async(action=f"event:{event.type.name}", details=user_message[:200])
 
     # ------------------------------------------------------------------ #
     #  Evolution hot-reload                                                #
@@ -721,14 +705,14 @@ class AgenticLoop:
     #  Memory                                                              #
     # ------------------------------------------------------------------ #
 
-    def _save_chat(self, role: str, content: str) -> None:
+    async def _save_chat(self, role: str, content: str) -> None:
         # v3: Dynamic importance scoring instead of hardcoded 0.6
         mem_type = "chat_user" if role == "user" else "chat_assistant"
-        if self._importance_scorer:
-            importance = self._importance_scorer.score(content, mem_type)
-        else:
-            importance = 0.6  # fallback
-        self._memory_store._save_memory_sync(content, "chat", importance, {"role": role}, [])
+        importance = self._importance_scorer.score(content, mem_type) if self._importance_scorer else 0.6
+        await self._memory_store.save_memory_async(
+            content=content, type="chat", importance=importance,
+            metadata={"role": role},
+        )
 
     def _get_memory_summary(self) -> str:
         """Fallback memory summary for backward compat (no v3 retriever)."""

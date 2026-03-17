@@ -1,14 +1,12 @@
 """Node identity and state management."""
 
 import json
-import platform
 import socket
 import time
 from dataclasses import dataclass, field, asdict
 from enum import Enum
-from pathlib import Path
 
-from anima.config import data_dir, get
+from anima.config import data_dir
 from anima.utils.ids import gen_id
 from anima.utils.logging import get_logger
 

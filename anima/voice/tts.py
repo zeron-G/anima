@@ -14,7 +14,7 @@ import threading
 from pathlib import Path
 from typing import Any
 
-from anima.config import data_dir, local_get, project_root
+from anima.config import data_dir, local_get
 from anima.utils.logging import get_logger
 
 log = get_logger("voice.tts")

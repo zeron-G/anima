@@ -136,7 +136,6 @@ async def _init_core(config: dict) -> dict:
 async def _init_llm(config: dict, tool_registry, tool_executor, memory_store) -> dict:
     """Initialize LLM, prompt system, and v3 memory components."""
     from anima.llm.router import LLMRouter
-    from anima.llm.prompts import PromptBuilder
     from anima.llm.prompt_compiler import PromptCompiler
     from anima.llm.token_budget import TokenBudget
     from anima.memory.importance import ImportanceScorer
@@ -153,21 +152,15 @@ async def _init_llm(config: dict, tool_registry, tool_executor, memory_store) ->
         tier2_max_tokens=get("llm.tier2.max_tokens", 4096),
         daily_budget=get("llm.budget.daily_limit_usd", 5.0),
     )
-    prompt_builder = PromptBuilder()
-
     # ── v3: PromptCompiler (6-layer compilation) ──
     token_budget = TokenBudget(
         max_context=get("llm.tier1.max_context", 200_000),
         reserve_response=get("llm.tier1.max_tokens", 8192),
     )
-    try:
-        prompt_compiler = PromptCompiler(
-            max_context=get("llm.tier1.max_context", 200_000),
-            reserve_response=get("llm.tier1.max_tokens", 8192),
-        )
-    except Exception as e:
-        log.warning("PromptCompiler init failed, falling back to PromptBuilder: %s", e)
-        prompt_compiler = None
+    prompt_compiler = PromptCompiler(
+        max_context=get("llm.tier1.max_context", 200_000),
+        reserve_response=get("llm.tier1.max_tokens", 8192),
+    )
 
     # ── v3: Importance Scorer ──
     importance_scorer = ImportanceScorer()
@@ -210,7 +203,6 @@ async def _init_llm(config: dict, tool_registry, tool_executor, memory_store) ->
 
     return {
         "llm_router": llm_router,
-        "prompt_builder": prompt_builder,
         "prompt_compiler": prompt_compiler,
         "token_budget": token_budget,
         "importance_scorer": importance_scorer,
@@ -233,7 +225,7 @@ async def _init_heartbeat(config: dict, core: dict, llm: dict) -> dict:
 
     # Wire LLM to agent manager so internal agents can run agentic loops
     core["agent_manager"].wire_llm(
-        llm["llm_router"], core["tool_executor"], core["tool_registry"], llm["prompt_builder"],
+        llm["llm_router"], core["tool_executor"], core["tool_registry"],
     )
 
     heartbeat = HeartbeatEngine(
@@ -243,7 +235,6 @@ async def _init_heartbeat(config: dict, core: dict, llm: dict) -> dict:
         emotion_state=core["emotion_state"],
         working_memory=core["working_memory"],
         llm_router=llm["llm_router"],
-        prompt_builder=llm["prompt_builder"],
         config=config,
     )
 
@@ -316,7 +307,7 @@ async def _init_network(config: dict, core: dict, llm: dict, heartbeat_deps: dic
 
     from anima.network.node import NodeIdentity, NodeState
     from anima.network.gossip import GossipMesh
-    from anima.network.discovery import DiscoveryService, get_local_ip
+    from anima.network.discovery import get_local_ip
     from anima.network.sync import MemorySync
     from anima.network.split_brain import SplitBrainDetector
 
@@ -638,7 +629,6 @@ async def _init_cognitive(config: dict, core: dict, llm: dict, heartbeat_deps: d
         memory_store=core["memory_store"],
         emotion_state=core["emotion_state"],
         llm_router=llm["llm_router"],
-        prompt_builder=llm["prompt_builder"],
         tool_executor=core["tool_executor"],
         tool_registry=core["tool_registry"],
         config=config,

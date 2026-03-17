@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import time
-from pathlib import Path
 
 from anima.config import data_dir
 from anima.models.tool_spec import ToolSpec, RiskLevel

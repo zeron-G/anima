@@ -8,9 +8,7 @@ Supports:
 
 import json
 import subprocess
-import sys
 from pathlib import Path
-from typing import Any
 
 from anima.config import project_root
 from anima.models.tool_spec import ToolSpec, RiskLevel

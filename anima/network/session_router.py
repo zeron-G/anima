@@ -5,7 +5,7 @@ import heapq
 import time
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Callable, Any, Optional
+from typing import Callable, Optional
 
 from anima.utils.ids import gen_id
 from anima.utils.logging import get_logger

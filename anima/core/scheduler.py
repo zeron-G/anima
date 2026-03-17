@@ -7,12 +7,9 @@ with full LLM + tool access.
 Jobs persist to data/scheduler.json so they survive restarts.
 """
 
-import asyncio
 import json
 import time
 from dataclasses import dataclass, field
-from pathlib import Path
-from typing import Callable
 
 from anima.config import data_dir
 from anima.utils.ids import gen_id

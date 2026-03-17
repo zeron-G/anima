@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import os
 import sys
-from pathlib import Path
 
 from anima.config import data_dir
 from anima.utils.logging import get_logger

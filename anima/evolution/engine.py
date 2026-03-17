@@ -7,15 +7,13 @@ This is the main entry point. Called by the major heartbeat.
 
 from __future__ import annotations
 
-import asyncio
 import json
 import os
 import subprocess as _sp
 import time
-from typing import Any
 
-from anima.config import get, project_root
-from anima.evolution.proposal import Proposal, ProposalQueue, ProposalStatus, create_proposal
+from anima.config import project_root
+from anima.evolution.proposal import Proposal, ProposalQueue, ProposalStatus
 from anima.evolution.consensus import ConsensusEngine
 from anima.evolution.sandbox import Worktree, TestRunner
 from anima.evolution.memory import EvolutionMemory

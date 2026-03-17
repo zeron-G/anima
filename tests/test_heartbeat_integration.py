@@ -19,7 +19,7 @@ from anima.core.event_queue import EventQueue
 from anima.core.heartbeat import HeartbeatEngine
 from anima.core.cognitive import AgenticLoop
 from anima.emotion.state import EmotionState
-from anima.llm.prompts import PromptBuilder
+from anima.llm.prompt_compiler import PromptCompiler
 from anima.llm.router import LLMRouter
 from anima.memory.store import MemoryStore
 from anima.memory.working import WorkingMemory
@@ -52,20 +52,20 @@ async def test_heartbeat_integration_file_detection(tmp_path):
     memory_store = await MemoryStore.create(str(tmp_path / "test.db"))
     # LLM router with zero budget → LLM calls return None
     llm_router = LLMRouter("test/m1", "test/m2", daily_budget=0.0)
-    prompt_builder = PromptBuilder(max_tokens=2000)
     tool_registry = ToolRegistry()
     tool_registry.register_builtins()
     tool_executor = ToolExecutor(tool_registry, max_risk=3)
 
     heartbeat = HeartbeatEngine(
         event_queue, snapshot_cache, diff_engine, emotion_state,
-        working_memory, llm_router, prompt_builder, config,
+        working_memory, llm_router, config,
     )
 
     cognitive = AgenticLoop(
         event_queue, snapshot_cache, memory_store, emotion_state,
-        llm_router, prompt_builder, tool_executor, tool_registry, config,
+        llm_router, tool_executor, tool_registry, config,
     )
+    cognitive.set_prompt_compiler(PromptCompiler())
 
     outputs = []
     cognitive.set_output_callback(lambda text, **kw: outputs.append(text))
@@ -140,11 +140,10 @@ async def test_heartbeat_integration_system_monitoring(tmp_path):
     emotion_state = EmotionState()
     working_memory = WorkingMemory()
     llm_router = LLMRouter("t1", "t2", daily_budget=0.0)
-    prompt_builder = PromptBuilder()
 
     heartbeat = HeartbeatEngine(
         event_queue, snapshot_cache, diff_engine, emotion_state,
-        working_memory, llm_router, prompt_builder, config,
+        working_memory, llm_router, config,
     )
 
     # Run 3 ticks
@@ -207,15 +206,15 @@ async def test_heartbeat_integration_user_message_flow(tmp_path):
     memory_store = await MemoryStore.create(str(tmp_path / "test.db"))
     emotion_state = EmotionState()
     llm_router = LLMRouter("t1", "t2", daily_budget=0.0)
-    prompt_builder = PromptBuilder()
     tool_registry = ToolRegistry()
     tool_registry.register_builtins()
     tool_executor = ToolExecutor(tool_registry, max_risk=3)
 
     cognitive = AgenticLoop(
         event_queue, snapshot_cache, memory_store, emotion_state,
-        llm_router, prompt_builder, tool_executor, tool_registry, config,
+        llm_router, tool_executor, tool_registry, config,
     )
+    cognitive.set_prompt_compiler(PromptCompiler())
 
     outputs = []
     cognitive.set_output_callback(lambda text, **kw: outputs.append(text))

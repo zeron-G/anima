@@ -6,8 +6,7 @@ Multi node: broadcast proposal, collect votes, ≥50% approve → pass.
 
 from __future__ import annotations
 
-import time
-from typing import Any, Callable
+from typing import Callable
 
 from anima.evolution.proposal import Proposal, ProposalStatus
 from anima.utils.logging import get_logger

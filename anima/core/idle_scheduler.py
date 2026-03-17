@@ -12,11 +12,10 @@ from __future__ import annotations
 
 import asyncio
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import IntEnum
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
-from anima.config import get
 from anima.models.event import Event, EventType, EventPriority
 from anima.utils.logging import get_logger
 

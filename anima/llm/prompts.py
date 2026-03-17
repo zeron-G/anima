@@ -14,11 +14,10 @@ operational, not bloated with context the LLM doesn't need right now.
 from __future__ import annotations
 
 import platform
-import time
 from datetime import datetime
 from pathlib import Path
 
-from anima.config import prompts_dir, agent_dir, data_dir, project_root
+from anima.config import prompts_dir, agent_dir, project_root
 from anima.utils.logging import get_logger
 
 log = get_logger("prompts")

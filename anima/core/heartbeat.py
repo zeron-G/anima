@@ -4,16 +4,13 @@ from __future__ import annotations
 
 import asyncio
 import time
-from typing import Any
 
 from anima.config import get
 from anima.core.event_queue import EventQueue
 from anima.emotion.state import EmotionState
-from anima.llm.prompts import PromptBuilder
 from anima.llm.router import LLMRouter
 from anima.memory.working import WorkingMemory
 from anima.models.event import Event, EventType, EventPriority
-from anima.models.memory_item import MemoryItem, MemoryType
 from anima.perception.diff_engine import DiffEngine
 from anima.perception.file_watcher import FileWatcher
 from anima.perception.snapshot_cache import SnapshotCache
@@ -42,7 +39,6 @@ class HeartbeatEngine:
         emotion_state: EmotionState,
         working_memory: WorkingMemory,
         llm_router: LLMRouter,
-        prompt_builder: PromptBuilder,
         config: dict,
     ) -> None:
         self._event_queue = event_queue
@@ -51,7 +47,6 @@ class HeartbeatEngine:
         self._emotion = emotion_state
         self._working_memory = working_memory
         self._llm_router = llm_router
-        self._prompt_builder = prompt_builder
 
         self._script_interval = get("heartbeat.script_interval_s", 15)
         self._llm_interval = get("heartbeat.llm_interval_s", 180)
@@ -418,7 +413,6 @@ class HeartbeatEngine:
         When File_Changes_Detected notes exceed 50, compress them into a
         single archive file and delete the originals to keep notes/ clean.
         """
-        import os
         from anima.config import data_dir
 
         notes_path = data_dir() / "notes"

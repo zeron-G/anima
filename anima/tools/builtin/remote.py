@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import time
 
 from anima.models.tool_spec import ToolSpec, RiskLevel
 from anima.utils.logging import get_logger

@@ -11,7 +11,6 @@ import os
 import queue
 import sys
 import threading
-from typing import Any
 
 from anima.channels.base import BaseChannel
 from anima.utils.logging import get_logger

@@ -7,11 +7,11 @@ from anima.config import load_config
 from anima.core.cognitive import AgenticLoop
 from anima.core.event_queue import EventQueue
 from anima.emotion.state import EmotionState
-from anima.llm.prompts import PromptBuilder
 from anima.llm.router import LLMRouter
 from anima.memory.store import MemoryStore
 from anima.models.event import Event, EventType, EventPriority
 from anima.perception.snapshot_cache import SnapshotCache
+from anima.llm.prompt_compiler import PromptCompiler
 from anima.tools.executor import ToolExecutor
 from anima.tools.registry import ToolRegistry
 
@@ -24,11 +24,11 @@ async def cognitive_deps(tmp_path):
     ms = await MemoryStore.create(str(tmp_path / "test.db"))
     em = EmotionState()
     lr = LLMRouter("test/model1", "test/model2")
-    pb = PromptBuilder()
     tr = ToolRegistry()
     tr.register_builtins()
     te = ToolExecutor(tr, max_risk=2)
-    al = AgenticLoop(eq, sc, ms, em, lr, pb, te, tr, config)
+    al = AgenticLoop(eq, sc, ms, em, lr, te, tr, config)
+    al.set_prompt_compiler(PromptCompiler())
     yield al, eq, sc, ms
     await ms.close()
 

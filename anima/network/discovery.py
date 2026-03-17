@@ -1,6 +1,5 @@
 """Node discovery — mDNS (zeroconf) + manual peer configuration."""
 
-import asyncio
 import socket
 from typing import Callable
 

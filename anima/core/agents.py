@@ -75,14 +75,11 @@ class AgentManager:
         self._llm_router = None
         self._tool_executor = None
         self._tool_registry = None
-        self._prompt_builder = None
-
-    def wire_llm(self, llm_router, tool_executor, tool_registry, prompt_builder) -> None:
+    def wire_llm(self, llm_router, tool_executor, tool_registry) -> None:
         """Wire LLM components so internal agents can run agentic loops."""
         self._llm_router = llm_router
         self._tool_executor = tool_executor
         self._tool_registry = tool_registry
-        self._prompt_builder = prompt_builder
 
     def set_status_callback(self, cb: Callable) -> None:
         self._status_callback = cb

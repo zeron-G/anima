@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import time
 from pathlib import Path
 
@@ -247,7 +246,6 @@ class DashboardServer:
                 log.debug("_handle_tts: %s", e)
 
             # Run TTS in thread to avoid event loop conflicts with edge-tts
-            import asyncio
             from anima.voice.tts import synthesize, _clean_text
             clean = _clean_text(text)
             if not clean or len(clean) < 2:

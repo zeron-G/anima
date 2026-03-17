@@ -9,7 +9,6 @@ import json
 import smtplib
 from email.mime.text import MIMEText
 from email.header import decode_header
-from pathlib import Path
 
 from anima.config import data_dir
 from anima.models.tool_spec import ToolSpec, RiskLevel

@@ -8,8 +8,6 @@ from __future__ import annotations
 
 import asyncio
 import subprocess
-import time
-from pathlib import Path
 
 from anima.config import project_root
 from anima.evolution.proposal import Proposal, ProposalStatus

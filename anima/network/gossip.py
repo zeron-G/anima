@@ -8,17 +8,15 @@ from __future__ import annotations
 
 import asyncio
 import math
-import random
 import threading
 import time
 from collections import defaultdict
 from typing import Callable, Any
 
 import zmq
-import msgpack
 
 from anima.network.protocol import NetworkMessage
-from anima.network.node import NodeState, NodeStatus, NodeIdentity
+from anima.network.node import NodeState, NodeIdentity
 from anima.utils.logging import get_logger
 
 log = get_logger("network.gossip")

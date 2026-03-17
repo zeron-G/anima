@@ -21,7 +21,6 @@ from __future__ import annotations
 
 import json
 import time
-from pathlib import Path
 
 from anima.config import data_dir
 from anima.utils.logging import get_logger

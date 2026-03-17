@@ -7,7 +7,6 @@ from anima.config import load_config
 from anima.core.event_queue import EventQueue
 from anima.core.heartbeat import HeartbeatEngine
 from anima.emotion.state import EmotionState
-from anima.llm.prompts import PromptBuilder
 from anima.llm.router import LLMRouter
 from anima.memory.working import WorkingMemory
 from anima.perception.diff_engine import DiffEngine
@@ -24,14 +23,13 @@ def heartbeat_deps():
     em = EmotionState()
     wm = WorkingMemory()
     lr = LLMRouter("test/model1", "test/model2")
-    pb = PromptBuilder()
-    return eq, sc, de, em, wm, lr, pb, config
+    return eq, sc, de, em, wm, lr, config
 
 
 @pytest.mark.asyncio
 async def test_heartbeat_start_stop(heartbeat_deps):
-    eq, sc, de, em, wm, lr, pb, config = heartbeat_deps
-    hb = HeartbeatEngine(eq, sc, de, em, wm, lr, pb, config)
+    eq, sc, de, em, wm, lr, config = heartbeat_deps
+    hb = HeartbeatEngine(eq, sc, de, em, wm, lr, config)
     await hb.start()
     # Let it tick once
     await asyncio.sleep(0.1)
@@ -43,13 +41,13 @@ async def test_heartbeat_start_stop(heartbeat_deps):
 @pytest.mark.asyncio
 async def test_heartbeat_detects_file_changes(heartbeat_deps, tmp_path):
     """Heartbeat should push FILE_CHANGE event when files change."""
-    eq, sc, de, em, wm, lr, pb, config = heartbeat_deps
+    eq, sc, de, em, wm, lr, config = heartbeat_deps
     # Override config to watch tmp_path
     config["perception"] = {
         "watch_paths": [str(tmp_path)],
         "watch_extensions": [".txt"],
     }
-    hb = HeartbeatEngine(eq, sc, de, em, wm, lr, pb, config)
+    hb = HeartbeatEngine(eq, sc, de, em, wm, lr, config)
 
     # Initialize file watcher (first scan = baseline)
     await hb._on_script_tick()
@@ -68,23 +66,23 @@ async def test_heartbeat_detects_file_changes(heartbeat_deps, tmp_path):
 
 @pytest.mark.asyncio
 async def test_emotion_decay(heartbeat_deps):
-    eq, sc, de, em, wm, lr, pb, config = heartbeat_deps
+    eq, sc, de, em, wm, lr, config = heartbeat_deps
     em.adjust(engagement=0.3)  # Push above baseline
     initial = em.engagement
-    hb = HeartbeatEngine(eq, sc, de, em, wm, lr, pb, config)
+    hb = HeartbeatEngine(eq, sc, de, em, wm, lr, config)
     await hb._decay_emotion()
     assert em.engagement < initial  # Should have decayed
 
 
 def test_should_llm_think_on_consecutive_skips(heartbeat_deps):
-    eq, sc, de, em, wm, lr, pb, config = heartbeat_deps
-    hb = HeartbeatEngine(eq, sc, de, em, wm, lr, pb, config)
+    eq, sc, de, em, wm, lr, config = heartbeat_deps
+    hb = HeartbeatEngine(eq, sc, de, em, wm, lr, config)
     hb._consecutive_skips = 3
     assert hb._should_llm_think()
 
 
 def test_should_llm_think_on_significant_diffs(heartbeat_deps):
-    eq, sc, de, em, wm, lr, pb, config = heartbeat_deps
-    hb = HeartbeatEngine(eq, sc, de, em, wm, lr, pb, config)
+    eq, sc, de, em, wm, lr, config = heartbeat_deps
+    hb = HeartbeatEngine(eq, sc, de, em, wm, lr, config)
     hb._recent_significance_scores = [0.5, 0.6, 0.4]
     assert hb._should_llm_think()

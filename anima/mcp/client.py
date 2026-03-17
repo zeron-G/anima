@@ -6,7 +6,6 @@ Uses the official `mcp` Python SDK (pip install mcp).
 
 from __future__ import annotations
 
-import asyncio
 from contextlib import AsyncExitStack
 from dataclasses import dataclass, field
 from enum import Enum

@@ -10,7 +10,7 @@ from __future__ import annotations
 import importlib
 import sys
 
-from anima.models.tool_spec import ToolSpec, RiskLevel
+from anima.models.tool_spec import ToolSpec
 from anima.utils.logging import get_logger
 
 log = get_logger("tool_registry")
