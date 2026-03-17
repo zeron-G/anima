@@ -293,7 +293,7 @@ def _build_health_check_prompt(health_issues: str, log_context: str) -> str:
    - Import error: check the module exists, fix typos
    - Config issue: check config/default.yaml
 3. Fix the root cause
-4. Run tests: `.venv/Scripts/python.exe -m pytest tests/ --ignore=tests/test_oauth_live.py --ignore=tests/stress_test.py --tb=short -q`
+4. Run tests: `python -m pytest tests/ --ignore=tests/test_oauth_live.py --ignore=tests/stress_test.py --tb=short -q`
 5. If tests pass, commit: `git add <files> && git commit -m "watchdog: fix <description>"`
 
 IMPORTANT: Only fix the specific health issue. Minimal changes.
