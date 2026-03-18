@@ -33,6 +33,7 @@ log = get_logger("idle_scheduler")
 _memory_decay = None
 _llm_router = None
 _memory_store = None
+_self_audit = None
 
 
 def set_memory_decay(decay, llm_router, store=None):
@@ -41,6 +42,12 @@ def set_memory_decay(decay, llm_router, store=None):
     _memory_decay = decay
     _llm_router = llm_router
     _memory_store = store
+
+
+def set_self_audit(audit):
+    """Wire SelfAudit for direct tier 1-3 execution in idle tasks."""
+    global _self_audit
+    _self_audit = audit
 
 
 # ── Idle score helpers ──
@@ -269,6 +276,39 @@ def _default_task_pool() -> list[IdleTask]:
             cooldown_s=600, max_duration_s=300, priority=7,
             handler="network.assist_peers",
         ),
+        # ── AUDIT tasks (integrated with self-audit system) ──
+        IdleTask(
+            id="audit_static",
+            name="代码静态审查",
+            description="Run ruff + bandit static analysis on codebase",
+            weight=TaskWeight.LIGHT, min_idle_level="light",
+            cooldown_s=3600, max_duration_s=60, priority=6,
+            handler="audit.static",
+        ),
+        IdleTask(
+            id="audit_tests",
+            name="测试套件检查",
+            description="Run pytest to verify test suite health",
+            weight=TaskWeight.MEDIUM, min_idle_level="moderate",
+            cooldown_s=7200, max_duration_s=120, priority=5,
+            handler="audit.tests",
+        ),
+        IdleTask(
+            id="audit_deps",
+            name="依赖安全审计",
+            description="Check dependencies for known vulnerabilities",
+            weight=TaskWeight.MEDIUM, min_idle_level="moderate",
+            cooldown_s=14400, max_duration_s=60, priority=4,
+            handler="audit.deps",
+        ),
+        IdleTask(
+            id="audit_issues",
+            name="Issue 审查",
+            description="Review open issues and attempt auto-fixes via cognitive loop",
+            weight=TaskWeight.HEAVY, min_idle_level="deep",
+            cooldown_s=7200, max_duration_s=600, priority=6,
+            handler="audit.issues",
+        ),
     ]
 
 
@@ -458,6 +498,11 @@ class IdleScheduler:
             asyncio.ensure_future(self._run_memory_consolidation(task.id))
             return
 
+        # Direct execution for audit tiers 1-3 (no LLM needed)
+        if task.handler in ("audit.static", "audit.tests", "audit.deps"):
+            asyncio.ensure_future(self._run_audit(task))
+            return
+
         await self._event_queue.put(Event(
             type=EventType.IDLE_TASK,
             payload={
@@ -495,6 +540,22 @@ class IdleScheduler:
             log.warning("Deep memory consolidation failed: %s", e)
         finally:
             self.mark_task_done(task_id)
+
+    async def _run_audit(self, task: IdleTask) -> None:
+        """Execute audit tier directly (no LLM cost)."""
+        try:
+            if not _self_audit:
+                log.debug("Audit skipped — SelfAudit not wired")
+                return
+            tier_map = {"audit.static": 1, "audit.tests": 2, "audit.deps": 3}
+            tier = tier_map.get(task.handler, 1)
+            result = await _self_audit.run_tier(tier)
+            log.info("Audit tier %d completed: %s (passed=%s)",
+                     tier, result.summary, result.passed)
+        except Exception as e:
+            log.warning("Audit tier execution failed: %s", e)
+        finally:
+            self.mark_task_done(task.id)
 
     def mark_task_done(self, task_id: str) -> None:
         """Called when an idle task finishes (from cognitive loop)."""

@@ -173,6 +173,11 @@ class EvolutionEngine:
                 self._on_failure(proposal, stage="review", error=review_msg)
                 return "review_failed"
 
+            # Create evo/* branch for PR flow
+            branch = f"evo/{proposal.id}"
+            _sp.run(["git", "checkout", "-b", branch],
+                    cwd=str(project_root()), capture_output=True)
+
             # Commit changes in main project (SubAgent edited files there)
             _sp.run(["git", "add", "-A"], cwd=str(project_root()), capture_output=True)
             _sp.run(
@@ -180,15 +185,13 @@ class EvolutionEngine:
                 cwd=str(project_root()), capture_output=True,
             )
 
-            # Layer 6: Deploy
-            log.info("Layer 6 (Deploy): pushing...")
-            try:
-                _sp.run(
-                    ["git", "push", "origin", "private"],
-                    cwd=str(project_root()), capture_output=True, timeout=30,
-                )
+            # Layer 6: Deploy via evo/* branch + PR
+            log.info("Layer 6 (Deploy): creating PR on %s...", branch)
+            pr_ok, pr_msg = self._deploy_via_pr(proposal, branch)
+
+            if pr_ok:
                 proposal.status = ProposalStatus.DEPLOYED
-                log.info("Deployed: Evolution %s: %s", proposal.id, proposal.title)
+                log.info("Deployed via PR: %s — %s", proposal.title, pr_msg)
                 self.memory.record_success(
                     proposal.id, proposal.type.value, proposal.title,
                     proposal.files, proposal.solution[:200],
@@ -208,8 +211,23 @@ class EvolutionEngine:
                         log.info("Broadcast evolution_deployed to peers")
                     except Exception as e:
                         log.warning("Failed to broadcast deployment: %s", e)
-            except Exception as e:
-                log.warning("Push failed: %s", e)
+            else:
+                # Fallback: push to private branch (backward compat)
+                log.warning("PR flow failed (%s), falling back to private branch", pr_msg)
+                _sp.run(["git", "checkout", "master"],
+                        cwd=str(project_root()), capture_output=True)
+                _sp.run(["git", "cherry-pick", branch],
+                        cwd=str(project_root()), capture_output=True)
+                try:
+                    _sp.run(["git", "push", "origin", "private"],
+                            cwd=str(project_root()), capture_output=True, timeout=30)
+                    proposal.status = ProposalStatus.DEPLOYED
+                    self.memory.record_success(
+                        proposal.id, proposal.type.value, proposal.title,
+                        proposal.files, proposal.solution[:200],
+                    )
+                except Exception as e:
+                    log.warning("Private push also failed: %s", e)
 
             # Post-deploy verification
             ok, msg = await self.deployer.verify_deployment()
@@ -367,6 +385,64 @@ class EvolutionEngine:
         if issues:
             return False, "; ".join(issues)
         return True, "OK"
+
+    def _deploy_via_pr(self, proposal: Proposal, branch: str) -> tuple[bool, str]:
+        """Push evo/* branch and create PR. Auto-merge if low risk (≤3 files)."""
+        root = str(project_root())
+        try:
+            # Push branch
+            push = _sp.run(
+                ["git", "push", "-u", "origin", branch],
+                cwd=root, capture_output=True, text=True, timeout=30,
+            )
+            if push.returncode != 0:
+                raise RuntimeError(f"Push failed: {push.stderr}")
+
+            # Create PR
+            body = (
+                f"## Evolution: {proposal.title}\n\n"
+                f"**Problem:** {proposal.problem[:200]}\n"
+                f"**Solution:** {proposal.solution[:200]}\n"
+                f"**Risk:** {proposal.risk}\n"
+                f"**Files:** {', '.join(proposal.files[:10])}"
+            )
+            pr = _sp.run(
+                ["gh", "pr", "create",
+                 "--base", "master", "--head", branch,
+                 "--title", f"evo: {proposal.title}",
+                 "--body", body],
+                cwd=root, capture_output=True, text=True, timeout=30,
+            )
+            if pr.returncode != 0:
+                raise RuntimeError(f"PR creation failed: {pr.stderr}")
+
+            pr_url = pr.stdout.strip()
+
+            # Auto-merge if low risk (≤3 files changed)
+            if len(proposal.files) <= 3 and proposal.risk == "low":
+                merge = _sp.run(
+                    ["gh", "pr", "merge", "--merge", "--delete-branch"],
+                    cwd=root, capture_output=True, text=True, timeout=30,
+                )
+                if merge.returncode == 0:
+                    # Pull merged changes back to master
+                    _sp.run(["git", "checkout", "master"],
+                            cwd=root, capture_output=True)
+                    _sp.run(["git", "pull", "origin", "master"],
+                            cwd=root, capture_output=True)
+                    return True, f"Auto-merged: {pr_url}"
+                else:
+                    log.warning("Auto-merge failed: %s", merge.stderr)
+
+            # High risk or merge failed: leave PR open, return to master
+            _sp.run(["git", "checkout", "master"], cwd=root, capture_output=True)
+            return True, f"PR created (awaiting review): {pr_url}"
+
+        except Exception as e:
+            # Return to master and clean up failed branch
+            _sp.run(["git", "checkout", "master"], cwd=root, capture_output=True)
+            _sp.run(["git", "branch", "-D", branch], cwd=root, capture_output=True)
+            return False, str(e)
 
     def _on_success(self, proposal: Proposal) -> None:
         self._consecutive_failures = 0

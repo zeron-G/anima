@@ -69,6 +69,17 @@ async def _init_core(config: dict) -> dict:
     for tool in get_evolution_tools():
         tool_registry.register(tool)
 
+    # Register audit tools + issue tracker
+    from anima.core.issue_tracker import IssueTracker
+    from anima.core.self_audit import SelfAudit
+    from anima.tools.builtin.audit_tools import get_audit_tools, set_audit_deps
+
+    issue_tracker = IssueTracker()
+    self_audit = SelfAudit(issue_tracker=issue_tracker, event_queue=event_queue)
+    set_audit_deps(self_audit, issue_tracker)
+    for tool in get_audit_tools():
+        tool_registry.register(tool)
+
     # Register known remote nodes for cross-node communication
     from anima.tools.builtin.remote import register_node
     for node_cfg in get("network.remote_nodes", []):
@@ -131,6 +142,8 @@ async def _init_core(config: dict) -> dict:
         "rule_engine": rule_engine,
         "mcp_manager": mcp_manager,
         "set_evo_tools_engine": set_evo_tools_engine,
+        "issue_tracker": issue_tracker,
+        "self_audit": self_audit,
     }
 
 
@@ -264,6 +277,10 @@ async def _init_heartbeat(config: dict, core: dict, llm: dict) -> dict:
 
     # Wire memory decay into idle scheduler for deep consolidation tasks
     set_idle_memory_decay(llm["memory_decay"], llm["llm_router"], core["memory_store"])
+
+    # Wire self-audit into idle scheduler for direct tier 1-3 execution
+    from anima.core.idle_scheduler import set_self_audit as set_idle_audit
+    set_idle_audit(core.get("self_audit"))
 
     # ── Evolution engine v2 ──
     evolution_engine = EvolutionEngine()

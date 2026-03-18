@@ -648,6 +648,8 @@ class AgenticLoop:
                 ("email",        "Check for unread emails: use read_email(limit=5, unread_only=True). If there's anything important or requiring action, summarize it. If it's urgent, notify 主人 proactively."),
                 ("calendar",     "Check scheduled jobs: use list_jobs() to see all cron tasks. Are any jobs misconfigured or disabled that should be running? Report anything unusual."),
                 ("late_night",   "Check the current time with get_datetime(). If it's between 23:00 and 05:00, check data/logs/anima.log last 30 lines for recent USER_MESSAGE activity. If 主人 has been active late at night, write a warm short note to data/workspace/late_night_note.md — caring, not lecturing."),
+                ("code_audit",   "Run a code quality audit: use audit_run(tier=1) for static analysis. Review any critical findings. If you find fixable issues, fix them. Report a brief summary."),
+                ("issue_review", "Check open issues: use issue_manage(action='list', status='open'). Pick the highest priority issue and try to make progress — fix it, investigate, or update its status."),
             ]
             # Tick-based dedup: each task has a cooldown before it can repeat.
             # The old approach checked for English keywords in Chinese thought-text — always failed.

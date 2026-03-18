@@ -1,0 +1,41 @@
+name: CD Deploy
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Verify tests pass
+        run: |
+          python -m pytest tests/ \
+            --ignore=tests/stress_test.py \
+            --ignore=tests/test_oauth_live.py \
+            --ignore=tests/test_full_system.py \
+            --ignore=tests/test_integration_network.py \
+            -q --tb=short
+
+      - name: Tag release
+        run: |
+          VERSION=$(python -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")
+          git tag -f "v${VERSION}" || true
+          echo "Tagged v${VERSION}"

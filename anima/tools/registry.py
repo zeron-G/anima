@@ -35,6 +35,7 @@ _BUILTIN_MODULES = [
     "anima.tools.builtin.env_tools",
     "anima.tools.builtin.memory_tools",
     "anima.tools.builtin.evolution_tools",
+    "anima.tools.builtin.audit_tools",
 ]
 
 
