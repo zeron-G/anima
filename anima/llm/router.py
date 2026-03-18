@@ -108,12 +108,12 @@ class LLMRouter:
                                  max_tokens=self._tier2_max_tokens, temperature=temperature)
                     if tools:
                         kwargs["tools"] = tools
-                    resp = await _aio.wait_for(completion(**kwargs), timeout=60)
+                    resp = await _aio.wait_for(completion(**kwargs), timeout=120)
                     self._record_usage(resp, tier=2)
                     self._on_success()
                     return resp
                 except _aio.TimeoutError:
-                    log.warning("Tier2 timeout (60s)")
+                    log.warning("Tier2 timeout (120s)")
                     self._on_failure()
                 except Exception as e:
                     if "529" in str(e) or "overloaded" in str(e).lower():
@@ -127,12 +127,12 @@ class LLMRouter:
                              max_tokens=self._tier1_max_tokens, temperature=temperature)
                 if tools:
                     kwargs["tools"] = tools
-                resp = await _aio.wait_for(completion(**kwargs), timeout=90)
+                resp = await _aio.wait_for(completion(**kwargs), timeout=150)
                 self._record_usage(resp, tier=1)
                 self._on_success()
                 return resp
             except _aio.TimeoutError:
-                log.error("Tier1 timeout (90s)")
+                log.error("Tier1 timeout (150s)")
                 self._on_failure()
                 return None
             except Exception as e:
