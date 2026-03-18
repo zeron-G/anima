@@ -376,18 +376,18 @@ class HeartbeatEngine:
         recent_sigs = [f"{s:.2f}" for s in self._recent_significance_scores[-5:]]
         wm_summary = self._working_memory.get_summary()
 
-        # Check tracker for agents running >90s that haven't been notified yet
+        # Check tracker for agents running >60s that are due for a status check
         from anima.tools.builtin import agent_tracker
-        stale = agent_tracker.get_stale_unnotified()
+        overdue = agent_tracker.get_overdue_agents()
         running_agents = []
-        for entry in stale:
+        for entry in overdue:
             running_agents.append({
                 "id": entry["session_id"],
                 "type": "agent",
                 "prompt": entry["task_summary"],
                 "runtime_s": entry["runtime_s"],
             })
-            agent_tracker.mark_notified(entry["session_id"])
+            agent_tracker.mark_checked(entry["session_id"])
 
         payload: dict = {
             "reason": "periodic proactive thinking",

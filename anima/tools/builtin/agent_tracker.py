@@ -1,7 +1,7 @@
 """Persistent active-agent tracker — data/workspace/active_agents.json.
 
 Stores in-progress spawn_agent sessions so SELF_THINKING can detect
-long-running agents (>90s) and notify the user exactly once.
+long-running agents (>60s) and periodically report status to the user.
 """
 
 from __future__ import annotations
@@ -14,7 +14,8 @@ from anima.utils.logging import get_logger
 
 log = get_logger("agent_tracker")
 
-_STALE_THRESHOLD = 60  # seconds before notifying user
+_STALE_THRESHOLD = 60   # seconds before first report
+_RECHECK_INTERVAL = 60  # seconds between re-reports
 
 
 def _path() -> Path:
@@ -48,7 +49,7 @@ def register(session_id: str, task_summary: str) -> None:
         "session_id": session_id,
         "task_summary": task_summary[:200],
         "started_at": time.time(),
-        "notified": False,
+        "last_checked": None,
     }
     _save(data)
 
@@ -61,23 +62,25 @@ def remove(session_id: str) -> None:
         _save(data)
 
 
-def mark_notified(session_id: str) -> None:
-    """Mark so we don't notify again on the next heartbeat."""
+def mark_checked(session_id: str) -> None:
+    """Update last_checked timestamp so we don't re-report too soon."""
     data = _load()
     if session_id in data:
-        data[session_id]["notified"] = True
+        data[session_id]["last_checked"] = time.time()
         _save(data)
 
 
-def get_stale_unnotified() -> list[dict]:
-    """Return agents running >STALE_THRESHOLD seconds that haven't been notified yet."""
+def get_overdue_agents() -> list[dict]:
+    """Return agents running >STALE_THRESHOLD that haven't been checked in RECHECK_INTERVAL."""
     now = time.time()
     data = _load()
-    stale = []
+    overdue = []
     for entry in data.values():
-        if entry.get("notified"):
-            continue
         runtime = now - entry.get("started_at", now)
-        if runtime >= _STALE_THRESHOLD:
-            stale.append({**entry, "runtime_s": int(runtime)})
-    return stale
+        if runtime < _STALE_THRESHOLD:
+            continue
+        last_checked = entry.get("last_checked")
+        if last_checked and (now - last_checked) < _RECHECK_INTERVAL:
+            continue
+        overdue.append({**entry, "runtime_s": int(runtime)})
+    return overdue

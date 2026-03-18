@@ -643,9 +643,10 @@ class AgenticLoop:
             return (
                 f"[INTERNAL: AGENT_STATUS tick #{p.get('tick_count', 0)}]\n"
                 f"You have sub-agents that have been running for a while:\n{agents_info}\n\n"
-                "TASK: Send the user a brief friendly status update, e.g. "
-                "'Still working on: [task summary] (running Xs, please wait)'. "
-                "Keep it short. No need to use tools — just reply with the update."
+                "TASK: For each agent, use check_agent(session_id=...) to get its real-time status. "
+                "Then send the user a brief friendly update, e.g. "
+                "'Still working on: [task summary] (running Xs, status: running/done/error)'. "
+                "If an agent is done or errored, report its result."
             )
         if t == EventType.SELF_THINKING and p.get("evolution"):
             # Evolution cycle — use the full evolution prompt
