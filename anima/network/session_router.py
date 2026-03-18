@@ -692,7 +692,7 @@ class TaskDelegate:
         for store in (self._outbound, self._inbound):
             for tid in list(store):
                 t = store[tid]
-                if t.status in (TaskStatus.DONE, TaskStatus.FAILED, TaskStatus.TIMEOUT):
+                if t.status in (TaskStatus.DONE, TaskStatus.FAILED, TaskStatus.TIMEOUT, TaskStatus.CANCELLED):
                     if now - t.completed_at > self.TASK_TTL:
                         del store[tid]
                         expired_ids.append(tid)
