@@ -1,5 +1,7 @@
 """Check VRM model expressions — saves results to vrm_report.txt"""
-import http.server, threading, webbrowser, json
+import http.server
+import threading
+import webbrowser
 from pathlib import Path
 
 REPORT = Path(__file__).parent / 'vrm_report.txt'
@@ -129,7 +131,7 @@ class H(http.server.SimpleHTTPRequestHandler):
     def log_message(self,*a): pass
 
 s = http.server.HTTPServer(('127.0.0.1',8889),H)
-print(f'VRM Check: http://localhost:8889')
+print('VRM Check: http://localhost:8889')
 print(f'Report will be saved to: {REPORT}')
 threading.Timer(1, lambda: webbrowser.open('http://localhost:8889')).start()
 try: s.serve_forever()

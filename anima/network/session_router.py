@@ -2,6 +2,7 @@
 
 import asyncio
 import heapq
+import random
 import time
 from dataclasses import dataclass, field
 from enum import Enum
@@ -497,9 +498,12 @@ class TaskDelegate:
                 if task.retry_count < task.max_retries:
                     task.retry_count += 1
                     task.status = TaskStatus.PENDING  # reset for retry
-                    log.info("Retrying task %s (attempt %d/%d)",
-                             task.task_id, task.retry_count + 1, task.max_retries + 1)
-                    await asyncio.sleep(0)  # yield before retrying
+                    backoff = min(2 ** (task.retry_count - 1), 30.0)
+                    jitter = random.uniform(0, backoff * 0.1)
+                    delay = backoff + jitter
+                    log.info("Retrying task %s (attempt %d/%d) after %.1fs backoff",
+                             task.task_id, task.retry_count + 1, task.max_retries + 1, delay)
+                    await asyncio.sleep(delay)
                     continue
                 else:
                     task.status = TaskStatus.FAILED

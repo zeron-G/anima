@@ -27,6 +27,9 @@ from anima.utils.logging import setup_logging, get_logger
 
 log = get_logger("main")
 
+# Module-level mutable state for cross-function references (e.g. degradation callback → dashboard hub)
+_module_state: dict = {}
+
 
 async def _init_core(config: dict) -> dict:
     """Initialize core subsystems: event queue, scheduler, agents, tools, skills."""
@@ -185,8 +188,6 @@ async def _init_llm(config: dict, tool_registry, tool_executor, memory_store) ->
     )
 
     # ── Model degradation/recovery notifications ──
-    _degradation_hub = [None]  # mutable ref, set later when dashboard_hub exists
-
     def _on_model_change(event: str, from_model: str, to_model: str, reason: str):
         """Notify user when LLM model degrades or recovers."""
         if event == "degraded":
@@ -196,7 +197,7 @@ async def _init_llm(config: dict, tool_registry, tool_executor, memory_store) ->
             msg = f"✅ 模型恢复: {from_model} → {to_model}"
             log.info(msg)
         try:
-            hub = _degradation_hub[0]
+            hub = _module_state.get("dashboard_hub")
             if hub and hasattr(hub, "add_activity"):
                 hub.add_activity("llm", msg)
         except Exception:
@@ -765,13 +766,14 @@ def _init_dashboard(core: dict, llm: dict, heartbeat_deps: dict, cognitive_deps:
     dashboard_hub.tool_registry = core["tool_registry"]
     usage_tracker = UsageTracker(core["memory_store"])
     llm["llm_router"].set_usage_tracker(usage_tracker)
-    _degradation_hub[0] = dashboard_hub  # wire for model change notifications
+    _module_state["dashboard_hub"] = dashboard_hub  # wire for model change notifications
     dashboard_hub.usage_tracker = usage_tracker
     dashboard_hub.agent_manager = core["agent_manager"]
     dashboard_hub.scheduler = core["scheduler"]
     dashboard_hub.skill_loader = core["skill_loader"]
     dashboard_hub.gossip_mesh = network.get("gossip_mesh")
     dashboard_hub.evolution_engine = heartbeat_deps["evolution_engine"]
+    dashboard_hub.idle_scheduler = heartbeat_deps.get("idle_scheduler")
     dashboard_hub.config = config
 
     dashboard_port = get("dashboard.port", 8420)

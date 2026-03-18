@@ -251,9 +251,11 @@ class GossipMesh:
                     "status": state.status,
                     "phi": round(phi, 2),
                     "last_seen": last_seen,
+                    "seconds_ago": round(time.time() - last_seen, 1) if last_seen else None,
                     "ip": getattr(state, "ip", ""),
                     "port": getattr(state, "port", 0),
                 })
+            alive_count = 1 + sum(1 for p in peers if p["status"] == "alive")
             return {
                 "self": {
                     "node_id": self._identity.node_id,
@@ -263,6 +265,7 @@ class GossipMesh:
                     "port": self._port,
                 },
                 "peers": peers,
+                "alive_count": alive_count,
             }
 
     # ── Thread ──
@@ -621,6 +624,7 @@ class GossipMesh:
                     log.warning("Node DEAD: %s (phi=%.1f)", nid, phi)
                 elif phi >= self.SUSPECT_PHI and state.status == "alive":
                     state.status = "suspect"
+                    self._identity.update_node_status(nid, "suspect")
                     pending_callbacks.append((self._on_node_suspect, nid, state))
                     log.warning("Node SUSPECT: %s (phi=%.1f)", nid, phi)
 

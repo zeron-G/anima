@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess as _sp
 import time
 
@@ -372,8 +373,12 @@ class EvolutionEngine:
                 # Check for hardcoded paths
                 if "D:\\program" in line or "D:\\data\\code" in line or "C:\\Users" in line:
                     issues.append(f"Hardcoded path found: line {i}")
-                # Check for debug leftovers
-                if "print(" in line and "log." not in line:
+                # Check for debug leftovers (word-boundary match to avoid false positives
+                # like sprint(, blueprint(, print_func(, etc.)
+                if (re.search(r'\bprint\(', line)
+                        and "log." not in line
+                        and "# noqa" not in line
+                        and "# allow-print" not in line):
                     issues.append(f"Debug print found: line {i}")
                 # Check for secrets
                 if any(kw in line.lower() for kw in ["password=", "token=", "secret="]):

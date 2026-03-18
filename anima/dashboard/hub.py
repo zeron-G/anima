@@ -36,6 +36,7 @@ class DashboardHub:
         self.skill_loader = None
         self.gossip_mesh = None
         self.evolution_engine = None
+        self.idle_scheduler = None
         self.config: dict = {}
         self._start_time = time.time()
         self._chat_history: list[dict] = []
@@ -158,6 +159,18 @@ class DashboardHub:
 
         # Git info (cached, refreshed every 30s)
         snapshot["git"] = self._get_git_info()
+
+        # LLM router status (degradation, active model)
+        if self.llm_router:
+            snapshot["llm_status"] = self.llm_router.get_status()
+        else:
+            snapshot["llm_status"] = {}
+
+        # Idle scheduler status
+        if self.idle_scheduler:
+            snapshot["idle_scheduler"] = self.idle_scheduler.get_status()
+        else:
+            snapshot["idle_scheduler"] = {}
 
         return snapshot
 

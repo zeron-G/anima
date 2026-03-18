@@ -89,6 +89,35 @@ def _emotion_to_natural(emotion: dict) -> str:
     )
 
 
+def _emotion_to_tone_hint(emotion: dict) -> str:
+    """Derive a speaking-tone instruction from the emotion vector.
+
+    Takes the top 1-2 most salient dimensions and returns a short
+    directive string to append to the system prompt.
+    """
+    engagement = emotion.get("engagement", 0.5)
+    confidence = emotion.get("confidence", 0.6)
+    curiosity = emotion.get("curiosity", 0.7)
+    concern = emotion.get("concern", 0.2)
+
+    candidates: list[tuple[float, str]] = []
+    if concern > 0.6:
+        candidates.append((concern, "语气偏谨慎担心，少俏皮，措辞更稳重"))
+    if curiosity > 0.7:
+        candidates.append((curiosity, "语气偏活跃好奇，可以多追问一个问题"))
+    if engagement < 0.4:
+        candidates.append((1.0 - engagement, "语气偏平淡疲惫，回复简短"))
+    if confidence > 0.8:
+        candidates.append((confidence, "语气偏自信直接，少犹豫语气词"))
+
+    if not candidates:
+        return ""
+
+    candidates.sort(key=lambda x: x[0], reverse=True)
+    hints = [hint for _, hint in candidates[:2]]
+    return "## Tone\n" + "；".join(hints) + "。"
+
+
 def _fix_message_alternation(messages: list[dict]) -> list[dict]:
     """Merge consecutive same-role messages to satisfy Claude's alternation requirement."""
     if not messages:
@@ -336,6 +365,10 @@ class PromptCompiler:
             # Emotion
             if emotion_state:
                 parts.append(f"## Emotion\n{_emotion_to_natural(emotion_state)}")
+                if event_type == "USER_MESSAGE":
+                    tone_hint = _emotion_to_tone_hint(emotion_state)
+                    if tone_hint:
+                        parts.append(tone_hint)
 
             # System state
             if system_state:

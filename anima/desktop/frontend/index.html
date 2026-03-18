@@ -31,7 +31,17 @@
 </div>
 
 <!-- ═══ APP ═══ -->
-<div id="app" class="app" style="display:none">
+<div id="app" class="app has-status-bar" style="display:none">
+
+  <!-- Status bar (fixed top, right of nav) -->
+  <div class="status-bar">
+    <div class="status-model"><span class="status-dot green" id="sb-dot"></span><span id="sb-model-name">Loading...</span></div>
+    <div class="status-idle"><span class="status-idle-label">IDLE</span><div class="status-idle-bar"><div class="status-idle-fill" id="sb-idle-fill"></div></div><span id="sb-idle-level">&mdash;</span></div>
+    <div class="status-cost"><span id="sb-cost">$0.00</span></div>
+    <div class="status-nodes"><span id="sb-nodes">0</span> nodes</div>
+    <div class="status-spacer"></div>
+    <div class="status-degradation" id="sb-degraded"><span class="status-degradation-dot"></span>DEGRADED</div>
+  </div>
 
   <!-- Nav bar (left) -->
   <nav class="nav">
@@ -59,6 +69,9 @@
       </button>
       <button class="nav-btn" data-page="settings" title="Settings">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="3"/><path d="M12 1v4M12 19v4M4.22 4.22l2.83 2.83M16.95 16.95l2.83 2.83M1 12h4M19 12h4M4.22 19.78l2.83-2.83M16.95 7.05l2.83-2.83"/></svg>
+      </button>
+      <button class="nav-btn" data-page="logs" title="Logs">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 6h16M4 10h16M4 14h12M4 18h8"/></svg>
       </button>
     </div>
     <div class="nav-bottom">
@@ -126,6 +139,15 @@
     <div class="page" id="page-overview">
       <div class="page-scroll">
         <h2 class="page-title">Overview</h2>
+
+        <!-- Model Cascade -->
+        <h3 class="section-title">Model Cascade</h3>
+        <div class="card wide" id="ov-cascade"><span class="card-label">Loading...</span></div>
+
+        <!-- Idle Scheduler -->
+        <h3 class="section-title">Idle Scheduler</h3>
+        <div class="card wide" id="ov-idle-sched"><span class="card-label">Loading...</span></div>
+
         <div class="card-grid">
           <div class="card">
             <div class="card-label">Status</div>
@@ -144,27 +166,52 @@
             <div class="card-value" id="ov-queue">0</div>
           </div>
         </div>
+
+        <!-- Circular gauges for system metrics -->
+        <h3 class="section-title">System</h3>
         <div class="card-grid">
           <div class="card">
-            <div class="card-label">CPU</div>
-            <div class="card-value" id="ov-cpu">--</div>
-            <div class="card-bar"><div class="card-bar-fill" id="ov-cpu-bar"></div></div>
+            <div class="gauge-ring">
+              <svg viewBox="0 0 90 90">
+                <circle class="gauge-ring-bg" cx="45" cy="45" r="36" />
+                <circle class="gauge-ring-fill cpu" id="gauge-cpu" cx="45" cy="45" r="36" stroke-dasharray="226.2" stroke-dashoffset="226.2" />
+              </svg>
+              <div class="gauge-ring-center">
+                <div class="gauge-ring-value" id="ov-cpu">--</div>
+                <div class="gauge-ring-label">CPU</div>
+              </div>
+            </div>
           </div>
           <div class="card">
-            <div class="card-label">Memory</div>
-            <div class="card-value" id="ov-mem">--</div>
-            <div class="card-bar"><div class="card-bar-fill" id="ov-mem-bar"></div></div>
+            <div class="gauge-ring">
+              <svg viewBox="0 0 90 90">
+                <circle class="gauge-ring-bg" cx="45" cy="45" r="36" />
+                <circle class="gauge-ring-fill mem" id="gauge-mem" cx="45" cy="45" r="36" stroke-dasharray="226.2" stroke-dashoffset="226.2" />
+              </svg>
+              <div class="gauge-ring-center">
+                <div class="gauge-ring-value" id="ov-mem">--</div>
+                <div class="gauge-ring-label">MEM</div>
+              </div>
+            </div>
           </div>
           <div class="card">
-            <div class="card-label">Disk</div>
-            <div class="card-value" id="ov-disk">--</div>
-            <div class="card-bar"><div class="card-bar-fill" id="ov-disk-bar"></div></div>
+            <div class="gauge-ring">
+              <svg viewBox="0 0 90 90">
+                <circle class="gauge-ring-bg" cx="45" cy="45" r="36" />
+                <circle class="gauge-ring-fill disk" id="gauge-disk" cx="45" cy="45" r="36" stroke-dasharray="226.2" stroke-dashoffset="226.2" />
+              </svg>
+              <div class="gauge-ring-center">
+                <div class="gauge-ring-value" id="ov-disk">--</div>
+                <div class="gauge-ring-label">DISK</div>
+              </div>
+            </div>
           </div>
           <div class="card">
             <div class="card-label">Processes</div>
             <div class="card-value" id="ov-proc">--</div>
           </div>
         </div>
+
         <h3 class="section-title">Emotion State</h3>
         <div class="card-grid cols-2">
           <div class="card"><div class="card-label">Engagement</div><div class="card-bar"><div class="card-bar-fill" id="ov-eng"></div></div></div>
@@ -209,6 +256,10 @@
     <div class="page" id="page-evolution">
       <div class="page-scroll">
         <h2 class="page-title">Evolution</h2>
+
+        <!-- Timeline visualization -->
+        <div class="card wide" id="evo-timeline"><span class="card-label">Loading timeline...</span></div>
+
         <div class="card-grid cols-3">
           <div class="card"><div class="card-label">Successes</div><div class="card-value" id="evo-successes">0</div></div>
           <div class="card"><div class="card-label">Failures</div><div class="card-value" id="evo-failures">0</div></div>
@@ -253,8 +304,33 @@
       </div>
     </div>
 
+    <!-- PAGE: Logs -->
+    <div class="page page-logs" id="page-logs">
+      <div class="page-scroll">
+        <h2 class="page-title">Logs</h2>
+        <div class="log-toolbar">
+          <div class="log-filter">
+            <button class="log-filter-btn active" data-level="all">All</button>
+            <button class="log-filter-btn level-error" data-level="error">Errors</button>
+            <button class="log-filter-btn level-warning" data-level="warning">Warnings</button>
+            <button class="log-filter-btn level-info" data-level="info">Info</button>
+          </div>
+          <div class="log-search">
+            <button class="ctrl-btn" id="btn-logs-clear" style="padding:5px 12px;font-size:11px">Clear</button>
+            <button class="ctrl-btn" id="btn-logs-pause" style="padding:5px 12px;font-size:11px">Pause</button>
+          </div>
+        </div>
+        <div class="log-stream" id="logs-container">
+          <div class="log-empty">Waiting for logs...</div>
+        </div>
+      </div>
+    </div>
+
   </div>
 </div>
+
+<!-- Toast container -->
+<div class="toast-container" id="toast-container"></div>
 
 <!-- SDKs -->
 <script src="/static/live2dcubismcore.min.js"></script>
@@ -275,7 +351,7 @@
   window.smd = smd;
 </script>
 <!-- Debug: catches all JS errors, pushes to backend log + visual overlay -->
-<div id="dbg" style="position:fixed;bottom:0;left:60px;right:0;max-height:100px;overflow-y:auto;background:rgba(0,0,0,.9);color:#0f0;font:10px/1.5 monospace;padding:4px 8px;z-index:9999;display:none"><span onclick="this.parentElement.style.display='none'" style="position:absolute;top:2px;right:8px;cursor:pointer;color:#666">✕</span></div>
+<div id="dbg" style="position:fixed;bottom:0;left:60px;right:0;max-height:100px;overflow-y:auto;background:rgba(0,0,0,.9);color:#0f0;font:10px/1.5 monospace;padding:4px 8px;z-index:9999;display:none"><span onclick="this.parentElement.style.display='none'" style="position:absolute;top:2px;right:8px;cursor:pointer;color:#666">&#10005;</span></div>
 <script>
 const _dbg = document.getElementById('dbg');
 let _dbgQueue = [];

@@ -20,6 +20,15 @@ let evaProcessing = false;
 // Track which tts_urls we already played (by message index)
 let playedTTS = new Set();
 
+// Logs state
+let logEntries = [];
+let logsPaused = false;
+let logFilter = 'all';
+const MAX_LOG_ENTRIES = 500;
+
+// Degradation tracking
+let _lastDegradedState = false;
+
 // ═══ BOOT ═══
 const BOOT = [
   ['Loading core...', 100], ['Neural matrix...', 140], ['Heartbeat...', 100],
@@ -52,6 +61,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   setupNav();
   setupChat();
   setupModeSwitch();
+  setupLogs();
   voiceManager = new VoiceManager();
   voiceManager.init();
   setVrmAvatarGetter(() => currentMode === 'vrm' ? vrmAvatar : null);
@@ -176,6 +186,12 @@ function render(d) {
   s('pill-hb', '#' + (hb.tick_count || 0));
   s('chat-agent', a.name || 'Eva');
 
+  // Status bar
+  updateStatusBar(d);
+
+  // Degradation monitoring
+  monitorDegradation(d);
+
   // Chat (messages + activity stream)
   renderChat(d);
 
@@ -202,7 +218,92 @@ function render(d) {
   }
   evaProcessing = isProcessing;
 
+  // Collect log entries from activity
+  collectLogs(d);
+
   renderPage(d);
+}
+
+// ═══ STATUS BAR ═══
+function updateStatusBar(d) {
+  const llm = d.llm_status || {};
+  const idle = d.idle_scheduler || {};
+  const usage = d.usage || {};
+  const net = d.network || {};
+
+  // Model name + status dot color
+  document.getElementById('sb-model-name').textContent = llm.active_model || '?';
+  const dotEl = document.getElementById('sb-dot');
+  if (dotEl) {
+    dotEl.className = 'status-dot ' + (llm.degraded ? 'red' : 'green');
+  }
+
+  // Idle bar
+  const score = idle.idle_score || 0;
+  const idleFill = document.getElementById('sb-idle-fill');
+  if (idleFill) idleFill.style.width = (score * 100) + '%';
+  document.getElementById('sb-idle-level').textContent = (idle.idle_level || '\u2014').toUpperCase();
+
+  // Cost
+  document.getElementById('sb-cost').textContent = '$' + (usage.cost || 0).toFixed(2);
+
+  // Nodes
+  document.getElementById('sb-nodes').textContent = net.alive_count || 0;
+
+  // Degradation badge
+  const badge = document.getElementById('sb-degraded');
+  if (badge) {
+    badge.classList.toggle('visible', !!llm.degraded);
+  }
+}
+
+// ═══ DEGRADATION MONITOR ═══
+function monitorDegradation(d) {
+  const llm = d.llm_status || {};
+  const degraded = !!llm.degraded;
+
+  if (degraded && !_lastDegradedState) {
+    // Just entered degraded state
+    showNotificationToast('LLM Degraded', llm.degraded_reason || 'model cascade fallback', 'warning');
+  } else if (!degraded && _lastDegradedState) {
+    // Recovered
+    showNotificationToast('LLM Recovered', llm.active_model || 'primary model restored', 'success');
+  }
+
+  _lastDegradedState = degraded;
+}
+
+// ═══ TOAST NOTIFICATIONS ═══
+function showNotificationToast(title, message, type) {
+  const container = document.getElementById('toast-container');
+  if (!container) return;
+
+  const icons = { info: '\u2139', warning: '\u26A0', error: '\u2718', success: '\u2714' };
+
+  const toast = document.createElement('div');
+  toast.className = 'toast ' + (type || 'info');
+  toast.innerHTML = `<div class="toast-icon">${icons[type] || icons.info}</div>
+    <div class="toast-body">
+      <div class="toast-title">${esc(title)}</div>
+      <div class="toast-message">${esc(message)}</div>
+    </div>
+    <button class="toast-close" onclick="this.parentElement.classList.add('dismissing');setTimeout(()=>this.parentElement.remove(),250)">\u00D7</button>
+    <div class="toast-progress"><div class="toast-progress-fill" style="width:100%"></div></div>`;
+
+  container.appendChild(toast);
+
+  // Animate progress bar
+  const progressFill = toast.querySelector('.toast-progress-fill');
+  if (progressFill) {
+    progressFill.style.transitionDuration = '5s';
+    requestAnimationFrame(() => { progressFill.style.width = '0%'; });
+  }
+
+  // Auto-remove after 5s
+  setTimeout(() => {
+    toast.classList.add('dismissing');
+    setTimeout(() => toast.remove(), 250);
+  }, 5000);
 }
 
 let _lastPageRender = 0;
@@ -216,6 +317,7 @@ function renderPage(d) {
   else if (currentPage === 'network') renderNetwork(d);
   else if (currentPage === 'evolution') renderEvolution(d);
   else if (currentPage === 'settings') renderSettings(d);
+  else if (currentPage === 'logs') renderLogs(d);
 }
 
 // ═══ MARKDOWN RENDERER (fallback only — primary is streaming-markdown) ═══
@@ -324,10 +426,10 @@ function renderChat(d) {
       const stg = last.stage;
       const det = (last.detail || '').substring(0, 80);
       const tool = last.tool || '';
-      if (stg === 'executing' && tool) _lastActLine.innerHTML = `<span class="act-ok">⚙</span> ${esc(tool)} ${esc(det)}`;
-      else if (stg === 'thinking' || stg === 'deciding') _lastActLine.textContent = '◐ thinking...';
-      else if (stg === 'tool_done') _lastActLine.innerHTML = `<span class="act-ok">✓</span> ${esc(det)}`;
-      else if (stg === 'error') _lastActLine.innerHTML = `<span class="act-err">✕</span> ${esc(det)}`;
+      if (stg === 'executing' && tool) _lastActLine.innerHTML = `<span class="act-ok">\u2699</span> ${esc(tool)} ${esc(det)}`;
+      else if (stg === 'thinking' || stg === 'deciding') _lastActLine.textContent = '\u25D0 thinking...';
+      else if (stg === 'tool_done') _lastActLine.innerHTML = `<span class="act-ok">\u2713</span> ${esc(det)}`;
+      else if (stg === 'error') _lastActLine.innerHTML = `<span class="act-err">\u2715</span> ${esc(det)}`;
       else _lastActLine.textContent = `${stg} ${det}`;
       if (!_lastActLine.parentNode) el.appendChild(_lastActLine);
     } else if (_lastActLine && _lastActLine.parentNode) {
@@ -440,13 +542,31 @@ async function send() {
 function renderOverview(d) {
   const a = d.agent || {}, hb = d.heartbeat || {}, sys = d.system || {}, emo = d.emotion || {};
   const usage = d.llm_usage_summary || {}, u = d.usage || {};
+  const llm = d.llm_status || {};
+  const idle = d.idle_scheduler || {};
+
+  // Model Cascade visualization
+  renderModelCascade(llm);
+
+  // Idle Scheduler visualization
+  renderIdleScheduler(idle);
+
   s('ov-status', a.status === 'alive' ? 'Online' : 'Offline');
   s('ov-uptime', fmtUp(d.uptime_s || 0));
   s('ov-tick', '#' + (hb.tick_count || 0));
   s('ov-queue', (d.event_queue || {}).size || 0);
-  s('ov-cpu', (sys.cpu_percent || 0).toFixed(0) + '%'); bar('ov-cpu-bar', sys.cpu_percent || 0);
-  s('ov-mem', (sys.memory_percent || 0).toFixed(0) + '%'); bar('ov-mem-bar', sys.memory_percent || 0);
-  s('ov-disk', (sys.disk_percent || 0).toFixed(0) + '%'); bar('ov-disk-bar', sys.disk_percent || 0);
+
+  // Circular gauges
+  const cpuPct = sys.cpu_percent || 0;
+  const memPct = sys.memory_percent || 0;
+  const diskPct = sys.disk_percent || 0;
+  s('ov-cpu', cpuPct.toFixed(0) + '%');
+  s('ov-mem', memPct.toFixed(0) + '%');
+  s('ov-disk', diskPct.toFixed(0) + '%');
+  setGauge('gauge-cpu', cpuPct);
+  setGauge('gauge-mem', memPct);
+  setGauge('gauge-disk', diskPct);
+
   s('ov-proc', sys.process_count || '--');
   bar('ov-eng', (emo.engagement || 0) * 100); bar('ov-conf', (emo.confidence || 0) * 100);
   bar('ov-cur', (emo.curiosity || 0) * 100); bar('ov-con', (emo.concern || 0) * 100);
@@ -467,6 +587,75 @@ function renderOverview(d) {
       return `${t}  ${a.stage}  ${a.detail || ''}`;
     }).join('\n');
   }
+}
+
+// ═══ MODEL CASCADE VISUALIZATION ═══
+function renderModelCascade(llm) {
+  const el = document.getElementById('ov-cascade');
+  if (!el) return;
+
+  const activeModel = llm.active_model || '?';
+  const degraded = llm.degraded || false;
+  const cascade = llm.cascade || llm.models || [];
+  const reason = llm.degraded_reason || '';
+
+  if (cascade.length) {
+    el.innerHTML = `<div class="model-cascade">${cascade.map((m, i) => {
+      const isActive = m === activeModel || (m.name && m.name === activeModel);
+      const name = typeof m === 'string' ? m : m.name || '?';
+      const tierLabel = 'T' + (i + 1);
+      return `<div class="cascade-node ${isActive ? 'active' : ''}">
+        <span class="cascade-node-tier">${tierLabel}</span>
+        <span class="cascade-node-name">${esc(name)}</span>
+      </div>${i < cascade.length - 1 ? '<div class="cascade-arrow"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M6 10h8M11 6l4 4-4 4"/></svg></div>' : ''}`;
+    }).join('')}</div>${degraded ? `<div style="color:var(--red);font-size:11px;margin-top:8px">\u26A0 ${esc(reason)}</div>` : ''}`;
+  } else {
+    el.innerHTML = `<div style="display:flex;align-items:center;gap:8px;font-size:13px">
+      <span class="status-dot ${degraded ? 'red' : 'green'}" style="display:inline-block"></span>
+      <span style="color:var(--w60)">${esc(activeModel)}</span>
+      ${degraded ? `<span style="color:var(--red);font-size:11px;margin-left:8px">\u26A0 ${esc(reason)}</span>` : ''}
+    </div>`;
+  }
+}
+
+// ═══ IDLE SCHEDULER VISUALIZATION ═══
+function renderIdleScheduler(idle) {
+  const el = document.getElementById('ov-idle-sched');
+  if (!el) return;
+
+  const score = idle.idle_score || 0;
+  const level = idle.idle_level || 'unknown';
+  const tasks = idle.pending_tasks || idle.queue || [];
+  const current = idle.current_task || null;
+
+  // Determine level class for color
+  const lvl = level.toLowerCase();
+  const levelClass = lvl === 'low' ? 'low' : lvl === 'medium' ? 'medium' : lvl === 'high' ? 'high' : lvl === 'critical' ? 'critical' : '';
+
+  let html = `<div class="idle-meter">
+    <div class="idle-meter-bar"><div class="idle-meter-fill" style="width:${score * 100}%"></div></div>
+    <span class="idle-meter-label ${levelClass}">${(score * 100).toFixed(0)}% ${esc(level.toUpperCase())}</span>
+  </div>`;
+
+  if (current) {
+    html += `<div style="font-size:12px;color:var(--accent);margin-top:4px">\u25B6 ${esc(typeof current === 'string' ? current : current.name || current.title || '?')}</div>`;
+  }
+
+  if (tasks.length) {
+    html += `<div style="font-size:11px;color:var(--w40);margin-top:6px">Queue: ${tasks.map(t => `<span class="tool-chip" style="margin:1px 2px">${esc(typeof t === 'string' ? t : t.name || t.title || '?')}</span>`).join('')}</div>`;
+  }
+
+  el.innerHTML = html;
+}
+
+// ═══ CIRCULAR GAUGE HELPER ═══
+function setGauge(id, pct) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  // r=36, circumference = 2*PI*36 = ~226.2
+  const circumference = 2 * Math.PI * 36;
+  const offset = circumference - (Math.min(100, pct) / 100) * circumference;
+  el.style.strokeDashoffset = offset;
 }
 
 // ═══ NETWORK ═══
@@ -517,6 +706,9 @@ function renderEvolution(d) {
   const mem = evo.memory || {};
   const git = d.git || {};
 
+  // Timeline visualization
+  renderEvolutionTimeline(mem);
+
   s('evo-successes', (mem.successes || []).length);
   s('evo-failures', (mem.failures || []).length);
   s('evo-cooldown', evo.cooldown_remaining > 0 ? evo.cooldown_remaining + 's' : 'Ready');
@@ -547,22 +739,56 @@ function renderEvolution(d) {
     }).join('');
   }
 
-  // Goals
+  // Goals with progress bars
   const goalsEl = document.getElementById('evo-goals');
   const goals = mem.goals || [];
   if (goals.length) {
     goalsEl.innerHTML = goals.map(g => {
       const pct = Math.round((g.progress || 0) * 100);
+      const statusClass = g.status === 'completed' ? 'complete' : g.status === 'stalled' ? 'stalled' : '';
       const color = g.status === 'completed' ? 'var(--green)' : g.status === 'in_progress' ? 'var(--white)' : 'var(--w40)';
-      return `<div style="padding:6px 0;border-bottom:1px solid var(--border);font-size:12px">
-        <div style="display:flex;justify-content:space-between">
-          <span style="color:${color}">${esc(g.title || '?')}</span>
-          <span style="color:var(--w20)">${pct}%</span>
+      return `<div class="goal-progress ${statusClass}">
+        <div class="goal-progress-header">
+          <span class="goal-progress-name" style="color:${color}">${esc(g.title || '?')}</span>
+          <span class="goal-progress-value">${pct}%</span>
         </div>
-        <div class="card-bar" style="margin-top:4px"><div class="card-bar-fill" style="width:${pct}%"></div></div>
+        <div class="goal-progress-bar"><div class="goal-progress-fill" style="width:${pct}%"></div></div>
       </div>`;
     }).join('');
   }
+}
+
+// ═══ EVOLUTION TIMELINE ═══
+function renderEvolutionTimeline(mem) {
+  const el = document.getElementById('evo-timeline');
+  if (!el) return;
+
+  const successes = (mem.successes || []).slice(-10);
+  const failures = (mem.failures || []).slice(-5);
+
+  // Merge and sort by timestamp
+  const events = [
+    ...successes.map(e => ({ ...e, _type: 'success' })),
+    ...failures.map(e => ({ ...e, _type: 'failure' }))
+  ].sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0)).slice(-10);
+
+  if (!events.length) {
+    el.innerHTML = '<span class="card-label">No evolution events yet</span>';
+    return;
+  }
+
+  el.innerHTML = `<div class="evo-timeline">${events.map(ev => {
+    const dt = ev.timestamp ? new Date(ev.timestamp * 1000).toLocaleString('en', {month:'short',day:'numeric',hour:'2-digit',minute:'2-digit',hour12:false}) : '';
+    const isSuccess = ev._type === 'success';
+    return `<div class="evo-timeline-item ${isSuccess ? 'success' : 'failure'}">
+      <div class="evo-timeline-dot"></div>
+      <div class="evo-timeline-header">
+        <span class="evo-timeline-title">${esc((ev.title || '?').substring(0, 50))}</span>
+        <span class="evo-timeline-time">${dt}</span>
+      </div>
+      <div class="evo-timeline-body">${esc(ev.type || '?')} ${ev.files ? '| ' + ev.files.join(', ') : ''}</div>
+    </div>`;
+  }).join('')}</div>`;
 }
 
 // ═══ SETTINGS ═══
@@ -580,6 +806,102 @@ function renderSettings(d) {
   const toolsEl = document.getElementById('set-tools');
   if (tools.length) {
     toolsEl.innerHTML = tools.map(t => `<span class="tool-chip" title="${esc(t.description||'')}">${esc(t.name)}</span>`).join('');
+  }
+}
+
+// ═══ LOGS ═══
+function setupLogs() {
+  // Filter buttons
+  document.querySelectorAll('.log-filter-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      logFilter = btn.dataset.level;
+      document.querySelectorAll('.log-filter-btn').forEach(b => b.classList.toggle('active', b === btn));
+      renderLogEntries();
+    });
+  });
+
+  // Clear button
+  const clearBtn = document.getElementById('btn-logs-clear');
+  if (clearBtn) clearBtn.addEventListener('click', () => {
+    logEntries = [];
+    renderLogEntries();
+  });
+
+  // Pause button
+  const pauseBtn = document.getElementById('btn-logs-pause');
+  if (pauseBtn) pauseBtn.addEventListener('click', () => {
+    logsPaused = !logsPaused;
+    pauseBtn.textContent = logsPaused ? 'Resume' : 'Pause';
+  });
+}
+
+function collectLogs(d) {
+  if (logsPaused) return;
+
+  const activity = d.activity || [];
+  const logs = d.logs || [];
+
+  // Collect from activity stream
+  for (const act of activity) {
+    const key = act.timestamp + ':' + act.stage + ':' + (act.detail || '');
+    if (!logEntries.some(e => e._key === key)) {
+      const level = act.stage === 'error' ? 'error' : 'info';
+      logEntries.push({
+        _key: key,
+        timestamp: act.timestamp,
+        level: level,
+        source: act.tool || 'agent',
+        message: `[${act.stage}] ${act.detail || act.tool || ''}`
+      });
+    }
+  }
+
+  // Collect from dedicated logs array if present
+  for (const log of logs) {
+    const key = (log.timestamp || 0) + ':' + (log.message || log.msg || '');
+    if (!logEntries.some(e => e._key === key)) {
+      logEntries.push({
+        _key: key,
+        timestamp: log.timestamp || Date.now() / 1000,
+        level: log.level || 'info',
+        source: log.source || 'system',
+        message: log.message || log.msg || ''
+      });
+    }
+  }
+
+  // Cap entries
+  if (logEntries.length > MAX_LOG_ENTRIES) {
+    logEntries = logEntries.slice(-MAX_LOG_ENTRIES);
+  }
+}
+
+function renderLogs(_d) {
+  renderLogEntries();
+}
+
+function renderLogEntries() {
+  const el = document.getElementById('logs-container');
+  if (!el) return;
+
+  const filtered = logFilter === 'all' ? logEntries : logEntries.filter(e => e.level === logFilter);
+
+  if (!filtered.length) {
+    el.innerHTML = '<div class="log-empty">No log entries</div>';
+    return;
+  }
+
+  const wasScrolledToBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 20;
+
+  el.innerHTML = filtered.map(entry => {
+    const t = entry.timestamp ? new Date(entry.timestamp * 1000).toLocaleTimeString('en', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '--:--:--';
+    const lvl = entry.level || 'info';
+    return `<div class="log-line"><span class="log-time">${t}</span><span class="log-level ${lvl}">${lvl.toUpperCase()}</span><span class="log-source">${esc(entry.source)}</span><span class="log-msg">${esc(entry.message)}</span></div>`;
+  }).join('');
+
+  // Auto-scroll if was at bottom
+  if (wasScrolledToBottom) {
+    el.scrollTop = el.scrollHeight;
   }
 }
 
