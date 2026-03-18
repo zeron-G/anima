@@ -96,11 +96,14 @@ class SelfAudit:
 
         return result
 
-    async def run_all(self) -> list[AuditResult]:
-        """Run tiers 1-3 sequentially."""
+    async def run_all(self, include_tier4: bool = False) -> list[AuditResult]:
+        """Run tiers 1-3 sequentially. Optionally dispatch tier 4."""
         results = []
         for tier in (1, 2, 3):
             result = await self.run_tier(tier)
+            results.append(result)
+        if include_tier4:
+            result = await self.run_tier(4)
             results.append(result)
         return results
 
