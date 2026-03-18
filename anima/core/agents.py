@@ -316,6 +316,10 @@ class AgentManager:
         def _run_sync():
             import subprocess
             try:
+                # stdin=DEVNULL is critical: in PyWebView desktop mode there's
+                # no console, so inherited stdin is invalid and Claude Code hangs.
+                # Also explicitly avoid CREATE_NO_WINDOW (set by __main__.py patch)
+                # as it can interfere with Claude Code's own subprocess spawning.
                 result = subprocess.run(
                     ["claude", "-p", session.prompt,
                      "--output-format", "text",
@@ -323,9 +327,11 @@ class AgentManager:
                      "--max-turns", "25",
                      "--model", "sonnet"],
                     capture_output=True, text=True,
+                    stdin=subprocess.DEVNULL,
                     encoding="utf-8", errors="replace",
                     timeout=timeout,
                     cwd=working_dir or None,
+                    creationflags=0,  # override __main__.py CREATE_NO_WINDOW patch
                     env={**os.environ, "CLAUDE_CODE_ENTRYPOINT": "evolution", "PYTHONIOENCODING": "utf-8"},
                 )
                 session.result = (result.stdout or "").strip()
