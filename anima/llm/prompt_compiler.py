@@ -119,11 +119,26 @@ def _emotion_to_tone_hint(emotion: dict) -> str:
 
 
 def _fix_message_alternation(messages: list[dict]) -> list[dict]:
-    """Merge consecutive same-role messages to satisfy Claude's alternation requirement."""
+    """Merge consecutive same-role messages and remove empty messages.
+
+    Anthropic API rejects: "user messages must have non-empty content".
+    """
     if not messages:
         return messages
-    fixed: list[dict] = [messages[0]]
-    for msg in messages[1:]:
+    # Filter out empty messages first
+    non_empty = []
+    for msg in messages:
+        content = msg.get("content", "")
+        if isinstance(content, str) and not content.strip():
+            continue
+        if isinstance(content, list) and not content:
+            continue
+        non_empty.append(msg)
+    if not non_empty:
+        return non_empty
+    # Merge consecutive same-role
+    fixed: list[dict] = [non_empty[0]]
+    for msg in non_empty[1:]:
         if msg["role"] == fixed[-1]["role"]:
             fixed[-1]["content"] += "\n\n" + msg["content"]
         else:

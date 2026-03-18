@@ -324,13 +324,18 @@ async def _anthropic_completion(
             "accept": "application/json",
         }
 
-    # Separate system from conversation messages
+    # Separate system from conversation messages, filter empty content
     system_prompt = None
     api_messages = []
     for msg in messages:
         if msg["role"] == "system":
             system_prompt = msg["content"]
         else:
+            content = msg.get("content", "")
+            if isinstance(content, str) and not content.strip():
+                continue  # Anthropic rejects empty user/assistant messages
+            if isinstance(content, list) and not content:
+                continue
             api_messages.append(msg)
 
     # Build payload
