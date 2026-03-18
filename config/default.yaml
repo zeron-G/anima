@@ -12,13 +12,13 @@ agent:
 # ── Heartbeat ──
 heartbeat:
   script_interval_s: 30
-  llm_interval_s: 600
-  major_interval_s: 1800
+  llm_interval_s: 300        # 5 min (was 10 min) — Eva thinks more often
+  major_interval_s: 900      # 15 min (was 30 min) — evolution checks more often
 
 llm_trigger:
-  min_significant_diffs: 5
-  significance_threshold: 0.5
-  max_consecutive_skips: 10
+  min_significant_diffs: 3   # trigger on fewer changes (was 5)
+  significance_threshold: 0.3 # lower bar to trigger thinking (was 0.5)
+  max_consecutive_skips: 5   # force thinking sooner (was 10)
 
 # ── Perception ──
 diff_rules:
@@ -74,19 +74,19 @@ idle_scheduler:
   enabled: true
   max_concurrent_tasks: 2
   weights:
-    user_activity: 0.5
-    system_load: 0.3
-    queue_depth: 0.2
+    user_activity: 0.3       # reduced from 0.5 — don't suppress Eva just because user is active
+    system_load: 0.4         # increased — system load matters more
+    queue_depth: 0.3         # increased — empty queue = Eva should work
   thresholds:
     busy: 0.0
-    light: 0.3
-    moderate: 0.6
-    deep: 0.8
+    light: 0.15              # was 0.3 — enter light sooner (almost always active)
+    moderate: 0.35            # was 0.6 — enter moderate much sooner
+    deep: 0.6                # was 0.8 — enter deep at 60% idle (was 80%)
   budget:
     busy: 0.0
-    light: 0.5
-    moderate: 1.0
-    deep: 2.0
+    light: 1.0               # was 0.5 — more budget in light
+    moderate: 2.0             # was 1.0 — double budget in moderate
+    deep: 5.0                # was 2.0 — full budget in deep
   user_activity:
     use_system_api: true
   env_scan:
