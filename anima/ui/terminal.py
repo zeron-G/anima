@@ -99,6 +99,16 @@ class TerminalUI:
     async def start(self) -> None:
         """Start the input loop."""
         self._running = True
+
+        # Detect non-interactive mode (headless, piped stdin, background)
+        # and exit cleanly instead of flooding logs with input errors
+        if not sys.stdin or not sys.stdin.isatty():
+            log.info("Terminal: non-interactive mode detected, input loop disabled")
+            # Keep the coroutine alive so the task doesn't end immediately
+            while self._running:
+                await asyncio.sleep(2)
+            return
+
         self._console.print(
             Panel(f"{self._agent_name} is alive. Type your message and press Enter.\n"
                   f"Commands: /quit  /status",

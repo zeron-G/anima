@@ -320,6 +320,7 @@ class AgentManager:
                     ["claude", "-p", session.prompt,
                      "--output-format", "text",
                      "--allowedTools", "Read,Edit,Bash,Grep,Glob,Write",
+                     "--max-turns", "25",
                      "--model", "sonnet"],
                     capture_output=True, text=True,
                     encoding="utf-8", errors="replace",

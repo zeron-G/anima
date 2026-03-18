@@ -104,7 +104,15 @@ class DashboardServer:
         return ws
 
     async def _handle_chat(self, request: web.Request) -> web.Response:
-        data = await request.json()
+        try:
+            data = await request.json()
+        except (UnicodeDecodeError, ValueError):
+            # Handle non-UTF-8 encoded bodies (e.g. Windows GBK terminals)
+            raw = await request.read()
+            try:
+                data = __import__("json").loads(raw.decode("utf-8", errors="replace"))
+            except Exception:
+                return web.json_response({"error": "invalid JSON or encoding"}, status=400)
         text = data.get("text", "").strip()
         if not text:
             return web.json_response({"error": "empty message"}, status=400)
@@ -125,7 +133,14 @@ class DashboardServer:
 
     async def _handle_chat_stream(self, request: web.Request) -> web.StreamResponse:
         """SSE streaming chat — sends events as Eva processes the message."""
-        data = await request.json()
+        try:
+            data = await request.json()
+        except (UnicodeDecodeError, ValueError):
+            raw = await request.read()
+            try:
+                data = __import__("json").loads(raw.decode("utf-8", errors="replace"))
+            except Exception:
+                return web.json_response({"error": "invalid JSON or encoding"}, status=400)
         text = data.get("text", "").strip()
         if not text:
             return web.json_response({"error": "empty"}, status=400)
