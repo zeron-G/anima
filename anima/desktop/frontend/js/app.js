@@ -427,20 +427,12 @@ async function send() {
     document.getElementById('file-previews').innerHTML = '';
     fetch('/api/chat/upload', {method:'POST', body:fd}).catch(console.error);
   } else {
-    // Use streaming endpoint
-    fetch('/api/chat/stream', {
+    // Fire-and-forget — response arrives via WebSocket push
+    fetch('/api/chat', {
       method:'POST',
       headers:{'Content-Type':'application/json'},
       body:JSON.stringify({text})
-    }).catch(err => {
-      // Fallback to non-streaming
-      console.warn('Stream failed, using fallback:', err);
-      fetch('/api/chat', {
-        method:'POST',
-        headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({text})
-      }).catch(console.error);
-    });
+    }).catch(console.error);
   }
 }
 
