@@ -9,6 +9,26 @@ from anima.network.session_router import (
 )
 
 
+@pytest.fixture(autouse=True)
+async def _cleanup_delegates():
+    """Cancel all TaskDelegate workers after each test to prevent memory leaks."""
+    delegates: list[TaskDelegate] = []
+    _orig_init = TaskDelegate._ensure_workers
+
+    def _tracking_init(self):
+        delegates.append(self)
+        return _orig_init(self)
+
+    TaskDelegate._ensure_workers = _tracking_init
+    yield
+    TaskDelegate._ensure_workers = _orig_init
+    for td in delegates:
+        for w in td._workers:
+            w.cancel()
+        td._workers.clear()
+    await asyncio.sleep(0.01)
+
+
 # ── DelegatedTask dataclass ──────────────────────────────────────────────────
 
 def test_task_to_from_dict():
@@ -510,7 +530,11 @@ def test_task_to_from_dict_includes_priority_and_retries():
 
 @pytest.mark.asyncio
 async def test_task_retried_on_failure():
-    """A task with max_retries=2 should be attempted 3 times total."""
+    """A task with max_retries=2 should be attempted 3 times total.
+
+    Backoff: attempt 2 = 2^0 = 1s, attempt 3 = 2^1 = 2s.
+    Total wait ~3-4s with jitter.
+    """
     broadcasts = []
     call_count = 0
 
@@ -536,7 +560,8 @@ async def test_task_retried_on_failure():
         max_retries=2,
     )
     await td.handle_incoming_task(task.to_dict())
-    await asyncio.sleep(0.1)
+    # Backoff: 1s + 2s + jitter ≈ 3.5s. Wait enough for all retries.
+    await asyncio.sleep(5.0)
 
     inbound = td._inbound[task.task_id]
     assert inbound.status == TaskStatus.DONE
@@ -567,7 +592,8 @@ async def test_task_fails_after_max_retries_exhausted():
         max_retries=1,
     )
     await td.handle_incoming_task(task.to_dict())
-    await asyncio.sleep(0.1)
+    # Backoff: 1 retry = 2^0 = 1s + jitter
+    await asyncio.sleep(3.0)
 
     inbound = td._inbound[task.task_id]
     assert inbound.status == TaskStatus.FAILED

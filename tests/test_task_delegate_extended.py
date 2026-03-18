@@ -15,6 +15,26 @@ from anima.network.session_router import (
 )
 
 
+@pytest.fixture(autouse=True)
+async def _cleanup_delegates():
+    """Cancel all TaskDelegate workers after each test to prevent memory leaks."""
+    delegates: list[TaskDelegate] = []
+    _orig_init = TaskDelegate._ensure_workers
+
+    def _tracking_init(self):
+        delegates.append(self)
+        return _orig_init(self)
+
+    TaskDelegate._ensure_workers = _tracking_init
+    yield
+    TaskDelegate._ensure_workers = _orig_init
+    for td in delegates:
+        for w in td._workers:
+            w.cancel()
+        td._workers.clear()
+    await asyncio.sleep(0.01)
+
+
 # ── Priority queue ordering ──────────────────────────────────────────────────
 
 @pytest.mark.asyncio
