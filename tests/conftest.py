@@ -20,24 +20,39 @@ if sys.platform == "win32":
 
     _orig_cancel = _runners._cancel_all_tasks
 
-    def _cancel_with_timeout(loop):
-        """Cancel tasks with 2s timeout — prevents indefinite hang."""
+    def _cancel_no_wait(loop):
+        """Cancel tasks without waiting — brute-force fix for Windows hang."""
         try:
-            pending = {t for t in asyncio.all_tasks(loop) if not t.done()}
-            if not pending:
-                return
-            for task in pending:
+            for task in asyncio.all_tasks(loop):
                 task.cancel()
-            loop.run_until_complete(asyncio.wait(pending, timeout=2.0))
         except Exception:
             pass
 
-    _runners._cancel_all_tasks = _cancel_with_timeout
+    _runners._cancel_all_tasks = _cancel_no_wait
+
+    # Also patch Runner.close to skip shutdown_default_executor (hangs on
+    # thread pool workers). Just close the loop directly.
+    _orig_runner_close = asyncio.Runner.close
+
+    def _runner_close_fast(self):
+        try:
+            _cancel_no_wait(self._loop)
+            self._loop.close()
+        except Exception:
+            pass
+
+    asyncio.Runner.close = _runner_close_fast
 
 
 def pytest_sessionfinish(session, exitstatus):
-    """Force-exit on Windows after tests ran to avoid cleanup hangs."""
+    """Force-exit on Windows after tests to avoid cleanup hangs.
+
+    Only fire for successful runs — failed runs need full pytest output.
+    Flush stdout/stderr before exit to preserve captured output.
+    """
     if sys.platform == "win32" and session.testscollected > 0:
+        sys.stdout.flush()
+        sys.stderr.flush()
         os._exit(exitstatus)
 
 

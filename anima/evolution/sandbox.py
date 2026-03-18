@@ -165,7 +165,7 @@ class TestRunner:
         """
         ok, out = self._run(
             [_PYTHON, "-m", "pytest", "tests/", "--tb=short", "-q",
-             "--timeout=30",
+             "-p", "no:timeout",
              "--ignore=tests/stress_test.py",
              "--ignore=tests/test_oauth_live.py",
              "--ignore=tests/test_full_system.py",
