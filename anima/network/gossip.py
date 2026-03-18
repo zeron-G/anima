@@ -405,6 +405,7 @@ class GossipMesh:
                     if (now - last_reconnect_time) >= self.RECONNECT_INTERVAL:
                         last_reconnect_time = now
                         self._reconnect_dead_peers(sub, connected_peers)
+                        self._identity.unregister_stale_nodes(max_dead_hours=1.0)
 
             except Exception as e:
                 log.error("Gossip thread error: %s", e)

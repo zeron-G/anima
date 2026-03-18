@@ -2,7 +2,7 @@
   "id": "iss_9d1bbf0e0963",
   "title": "[audit-t1] F841: Local variable `old_count` is assigned to but never used",
   "description": "{\n  \"tool\": \"ruff\",\n  \"severity\": \"error\",\n  \"message\": \"F841: Local variable `old_count` is assigned to but never used\",\n  \"file\": \"D:\\\\data\\\\code\\\\github\\\\anima\\\\anima\\\\tools\\\\registry.py\",\n  \"line\": 86,\n  \"files\": [\n    \"D:\\\\data\\\\code\\\\github\\\\anima\\\\anima\\\\tools\\\\registry.py\"\n  ]\n}",
-  "status": "open",
+  "status": "closed",
   "priority": "medium",
   "labels": [
     "audit",
@@ -14,6 +14,6 @@
   "reporter": "self_audit",
   "assignee": "",
   "created_at": 1773808720.9929488,
-  "updated_at": 1773812198.7992945,
-  "resolution": ""
+  "updated_at": 1773829277.5377774,
+  "resolution": "ruff 检查已通过，问题已在之前的进化中修复"
 }

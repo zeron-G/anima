@@ -334,6 +334,7 @@ class TaskDelegate:
         """Lazily initialise the dispatch queue and worker pool.
 
         Must be called from within a running event loop.
+        Also replaces any dead workers to keep the pool at max_concurrent.
         """
         if self._dispatch_queue is None:
             self._dispatch_queue = asyncio.PriorityQueue()
@@ -342,20 +343,36 @@ class TaskDelegate:
             for _ in range(self._max_concurrent):
                 worker = asyncio.ensure_future(self._worker_loop())
                 self._workers.append(worker)
+            return
+        # Health check: replace any dead workers
+        alive = [w for w in self._workers if not w.done()]
+        deficit = self._max_concurrent - len(alive)
+        if deficit > 0:
+            log.warning("Replacing %d dead worker(s)", deficit)
+            for _ in range(deficit):
+                alive.append(asyncio.ensure_future(self._worker_loop()))
+            self._workers = alive
 
     async def _worker_loop(self) -> None:
         """Long-running worker that pops tasks from _dispatch_queue and executes them."""
-        while True:
+        while True:  # outer: self-healing — restarts on unexpected crash
             try:
-                _neg_priority, _seq, task_id = await self._dispatch_queue.get()
-                task = self._inbound.get(task_id)
-                if task is not None:
-                    await self._execute_task(task)
-                self._dispatch_queue.task_done()
+                while True:  # inner: normal operation
+                    try:
+                        _neg_priority, _seq, task_id = await self._dispatch_queue.get()
+                        task = self._inbound.get(task_id)
+                        if task is not None:
+                            await self._execute_task(task)
+                        self._dispatch_queue.task_done()
+                    except asyncio.CancelledError:
+                        raise  # propagate to outer for clean exit
+                    except Exception as exc:
+                        log.error("Worker loop error: %s", exc)
             except asyncio.CancelledError:
                 break
             except Exception as exc:
-                log.error("Worker loop error: %s", exc)
+                log.error("Worker crashed, restarting: %s", exc)
+                await asyncio.sleep(0)
 
     async def handle_incoming_task(self, task_dict: dict) -> None:
         """Handle a task_delegate message received from a remote node.

@@ -2,7 +2,7 @@
   "id": "iss_baed8ba0c90f",
   "title": "[audit-t1] F401: `discord` imported but unused; consider using `importlib.util.find_spec` t",
   "description": "{\n  \"tool\": \"ruff\",\n  \"severity\": \"error\",\n  \"message\": \"F401: `discord` imported but unused; consider using `importlib.util.find_spec` to test for availability\",\n  \"file\": \"D:\\\\data\\\\code\\\\github\\\\anima\\\\anima\\\\channels\\\\discord_channel.py\",\n  \"line\": 53,\n  \"files\": [\n    \"D:\\\\data\\\\code\\\\github\\\\anima\\\\anima\\\\channels\\\\discord_channel.py\"\n  ]\n}",
-  "status": "open",
+  "status": "closed",
   "priority": "medium",
   "labels": [
     "audit",
@@ -14,6 +14,6 @@
   "reporter": "self_audit",
   "assignee": "",
   "created_at": 1773807098.6590502,
-  "updated_at": 1773807098.6590502,
-  "resolution": ""
+  "updated_at": 1773829277.5418901,
+  "resolution": "ruff 检查已通过，问题已在之前的进化中修复"
 }
