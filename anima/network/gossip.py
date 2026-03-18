@@ -267,6 +267,8 @@ class GossipMesh:
                 },
                 "peers": peers,
                 "alive_count": alive_count,
+                "pending_events": len(self._incoming_events),
+                "pending_task_msgs": len(self._outbound_task_msgs),
             }
 
     # ── Thread ──

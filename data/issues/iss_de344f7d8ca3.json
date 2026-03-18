@@ -1,9 +1,9 @@
 {
   "id": "iss_de344f7d8ca3",
   "title": "Gmail IMAP/SMTP 认证失败 — App Password 需要更新",
-  "description": "**问题：** `read_email` 和 `send_email` 均返回 `AUTHENTICATIONFAILED Invalid credentials`。\n\n**根因分析：** `data/credentials/email.json` 中密码长度为 11 字符，Gmail App Password 标准为 16 字符（无空格），说明密码不正确或已过期。\n\n**修复方式：** 需要主人在 Google Account → Security → App Passwords 重新生成一个，然后更新 `data/credentials/email.json` 的 `password` 字段。\n\n**影响：** 邮件收发功能完全不可用，包括定时邮件检查。",
+  "description": "**问题：** `read_email` 和 `send_email` 均返回 `AUTHENTICATIONFAILED Invalid credentials`。\n\n**根因分析：** `data/credentials/email.json` 中密码长度为 11 字符，Gmail App Password 标准为 16 字符（无空格），说明密码不正确或已过期。\n\n**修复方式：** 需要主人在 Google Account → Security → App Passwords 重新生成一个，然后更新 `data/credentials/email.json` 的 `password` 字段。\n\n**影响：** 邮件收发功能完全不可用，包括定时邮件检查。\n\n**2026-03-18 再次验证：** `read_email` 仍返回 `AUTHENTICATIONFAILED`，问题持续存在，等待主人更新 App Password。",
   "status": "open",
-  "priority": "high",
+  "priority": "medium",
   "labels": [
     "blocked",
     "needs-user-action"
@@ -12,6 +12,6 @@
   "reporter": "eva",
   "assignee": "",
   "created_at": 1773844963.7705588,
-  "updated_at": 1773844963.7705588,
+  "updated_at": 1773854568.8994517,
   "resolution": ""
 }
