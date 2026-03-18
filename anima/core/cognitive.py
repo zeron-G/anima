@@ -22,7 +22,7 @@ from anima.emotion.state import EmotionState
 from anima.llm.router import LLMRouter
 from anima.memory.store import MemoryStore
 from anima.models.decision import ActionType
-from anima.models.event import Event, EventType
+from anima.models.event import Event, EventType, EventPriority
 from anima.perception.snapshot_cache import SnapshotCache
 from anima.tools.executor import ToolExecutor
 from anima.tools.registry import ToolRegistry
@@ -81,6 +81,7 @@ class AgenticLoop:
         # Track last proactive task result to inject into next tick's user message
         # Prevents "system normal" loop by giving LLM explicit context of last action
         self._last_proactive_result: str = ""  # "keyword: summary of what was found"
+        self._last_chosen_kw: str = ""  # keyword of the last chosen SELF_THINKING task
         self._user_activity = None  # Set via set_user_activity()
         self._idle_scheduler = None  # Set via set_idle_scheduler()
         # v3: New prompt + memory components (set via setters from main.py)
@@ -340,6 +341,13 @@ class AgenticLoop:
         self._emit_status({"stage": "thinking", "detail": f"processing {event_type_name}"})
 
         while time.time() - start_time < timeout:
+            # Preemption: abort internal tasks if a user message is waiting
+            if is_self and not self._event_queue.empty():
+                peeked = self._event_queue.peek_priority()
+                if peeked is not None and peeked >= EventPriority.HIGH.value:
+                    log.info("Preempting %s — user message waiting", event_type_name)
+                    break
+
             tier = self._pick_tier(event)
             resp = await self._llm_router.call_with_tools(
                 messages=messages, tools=tools, tier=tier,

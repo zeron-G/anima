@@ -42,13 +42,13 @@ class Worktree:
             # Create branch from current HEAD
             subprocess.run(
                 ["git", "branch", self.branch],
-                cwd=str(root), capture_output=True, check=False,
+                cwd=str(root), capture_output=True, check=False, timeout=15,
             )
 
             # Create worktree
             subprocess.run(
                 ["git", "worktree", "add", str(worktree_dir), self.branch],
-                cwd=str(root), capture_output=True, check=True,
+                cwd=str(root), capture_output=True, check=True, timeout=30,
             )
 
             self.path = worktree_dir
@@ -69,11 +69,11 @@ class Worktree:
         try:
             subprocess.run(
                 ["git", "worktree", "remove", str(self.path), "--force"],
-                cwd=str(root), capture_output=True, check=False,
+                cwd=str(root), capture_output=True, check=False, timeout=15,
             )
             subprocess.run(
                 ["git", "branch", "-D", self.branch],
-                cwd=str(root), capture_output=True, check=False,
+                cwd=str(root), capture_output=True, check=False, timeout=15,
             )
             log.info("Worktree cleaned: %s", self.branch)
         except Exception as e:
@@ -100,11 +100,11 @@ class Worktree:
         try:
             subprocess.run(
                 ["git", "add", "-A"],
-                cwd=str(self.path), capture_output=True, check=True,
+                cwd=str(self.path), capture_output=True, check=True, timeout=15,
             )
             subprocess.run(
                 ["git", "commit", "-m", message],
-                cwd=str(self.path), capture_output=True, check=True,
+                cwd=str(self.path), capture_output=True, check=True, timeout=15,
             )
             return True
         except subprocess.CalledProcessError:
@@ -204,7 +204,7 @@ class TestRunner:
                 lines = log_text.splitlines()
                 errors = [l for l in lines[-30:] if "[ERROR]" in l or "[CRITICAL]" in l]
                 if errors:
-                    return False, f"Runtime errors:\n" + "\n".join(errors[:5])
+                    return False, "Runtime errors:\n" + "\n".join(errors[:5])
 
             log.info("Level 3 (sandbox): PASS")
             return True, "OK"

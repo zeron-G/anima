@@ -55,6 +55,23 @@ class EventQueue:
     def empty(self) -> bool:
         return self._queue.empty()
 
+    def peek_priority(self) -> int | None:
+        """Peek at the highest priority in the queue without consuming.
+
+        Returns the priority value of the front item, or None if empty.
+        Used by cognitive loop to preempt internal tasks for user messages.
+        """
+        # asyncio.PriorityQueue stores items sorted; _queue is a heap list
+        # Event.__lt__ sorts by priority DESC (higher priority = dequeued first)
+        # So the front of the heap is the highest-priority event
+        if self._queue.empty():
+            return None
+        try:
+            front = self._queue._queue[0]  # peek at heap front
+            return front.priority.value if hasattr(front, 'priority') else None
+        except (IndexError, AttributeError):
+            return None
+
     def close(self) -> None:
         """Mark queue as closed. Pending gets will see SHUTDOWN event."""
         self._closed = True

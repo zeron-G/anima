@@ -176,13 +176,14 @@ class EvolutionEngine:
             # Create evo/* branch for PR flow
             branch = f"evo/{proposal.id}"
             _sp.run(["git", "checkout", "-b", branch],
-                    cwd=str(project_root()), capture_output=True)
+                    cwd=str(project_root()), capture_output=True, timeout=15)
 
             # Commit changes in main project (SubAgent edited files there)
-            _sp.run(["git", "add", "-A"], cwd=str(project_root()), capture_output=True)
+            _sp.run(["git", "add", "-A"], cwd=str(project_root()),
+                    capture_output=True, timeout=15)
             _sp.run(
                 ["git", "commit", "-m", f"Evolution {proposal.id}: {proposal.title}"],
-                cwd=str(project_root()), capture_output=True,
+                cwd=str(project_root()), capture_output=True, timeout=15,
             )
 
             # Layer 6: Deploy via evo/* branch + PR
@@ -200,7 +201,7 @@ class EvolutionEngine:
                 if self._gossip_mesh:
                     try:
                         commit = _sp.run(["git", "rev-parse", "HEAD"], cwd=str(project_root()),
-                                        capture_output=True, text=True).stdout.strip()
+                                        capture_output=True, text=True, timeout=10).stdout.strip()
                         self._gossip_mesh.broadcast_event({
                             "type": "evolution_deployed",
                             "proposal_id": proposal.id,
@@ -215,9 +216,9 @@ class EvolutionEngine:
                 # Fallback: push to private branch (backward compat)
                 log.warning("PR flow failed (%s), falling back to private branch", pr_msg)
                 _sp.run(["git", "checkout", "master"],
-                        cwd=str(project_root()), capture_output=True)
+                        cwd=str(project_root()), capture_output=True, timeout=15)
                 _sp.run(["git", "cherry-pick", branch],
-                        cwd=str(project_root()), capture_output=True)
+                        cwd=str(project_root()), capture_output=True, timeout=15)
                 try:
                     _sp.run(["git", "push", "origin", "private"],
                             cwd=str(project_root()), capture_output=True, timeout=30)
@@ -360,8 +361,8 @@ class EvolutionEngine:
             except Exception as e:
                 log.debug("engine: %s", e)
             # Claude Code may have made changes that just need staging
-            _sp.run(["git", "add", "-A"], cwd=str(project_root()), capture_output=True)
-            diff_check = _sp.run(["git", "diff", "--cached", "--stat"], cwd=str(project_root()), capture_output=True, text=True)
+            _sp.run(["git", "add", "-A"], cwd=str(project_root()), capture_output=True, timeout=15)
+            diff_check = _sp.run(["git", "diff", "--cached", "--stat"], cwd=str(project_root()), capture_output=True, text=True, timeout=10)
             if diff_check.stdout and diff_check.stdout.strip():
                 return True, "Staged changes found"
             # Really no changes
@@ -427,21 +428,21 @@ class EvolutionEngine:
                 if merge.returncode == 0:
                     # Pull merged changes back to master
                     _sp.run(["git", "checkout", "master"],
-                            cwd=root, capture_output=True)
+                            cwd=root, capture_output=True, timeout=15)
                     _sp.run(["git", "pull", "origin", "master"],
-                            cwd=root, capture_output=True)
+                            cwd=root, capture_output=True, timeout=30)
                     return True, f"Auto-merged: {pr_url}"
                 else:
                     log.warning("Auto-merge failed: %s", merge.stderr)
 
             # High risk or merge failed: leave PR open, return to master
-            _sp.run(["git", "checkout", "master"], cwd=root, capture_output=True)
+            _sp.run(["git", "checkout", "master"], cwd=root, capture_output=True, timeout=15)
             return True, f"PR created (awaiting review): {pr_url}"
 
         except Exception as e:
             # Return to master and clean up failed branch
-            _sp.run(["git", "checkout", "master"], cwd=root, capture_output=True)
-            _sp.run(["git", "branch", "-D", branch], cwd=root, capture_output=True)
+            _sp.run(["git", "checkout", "master"], cwd=root, capture_output=True, timeout=15)
+            _sp.run(["git", "branch", "-D", branch], cwd=root, capture_output=True, timeout=15)
             return False, str(e)
 
     def _on_success(self, proposal: Proposal) -> None:
