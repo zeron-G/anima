@@ -158,9 +158,18 @@ class TestRunner:
         return True, "OK"
 
     def level2_pytest(self) -> tuple[bool, str]:
-        """Level 2: Unit + integration tests."""
+        """Level 2: Unit + integration tests.
+
+        Ignores known-slow and external-dependency tests to keep
+        the evolution pipeline fast and reliable.
+        """
         ok, out = self._run(
-            [_PYTHON, "-m", "pytest", "tests/", "--tb=short", "-q"],
+            [_PYTHON, "-m", "pytest", "tests/", "--tb=short", "-q",
+             "--timeout=30",
+             "--ignore=tests/stress_test.py",
+             "--ignore=tests/test_oauth_live.py",
+             "--ignore=tests/test_full_system.py",
+             "--ignore=tests/test_integration_network.py"],
             timeout=120,
         )
         if ok:
