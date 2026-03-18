@@ -59,8 +59,21 @@ class LLMRouter:
         self._circuit_opened_at = 0.0
         self._last_probe_at = 0.0
 
+        # Degradation tracking
+        self._current_active_model: str = tier1_model  # what's actually being used
+        self._degraded: bool = False
+        self._degradation_callback = None  # set from main.py
+
     def set_usage_tracker(self, tracker) -> None:
         self._usage_tracker = tracker
+
+    def set_degradation_callback(self, callback) -> None:
+        """Set callback for model degradation/recovery notifications.
+
+        callback(event: str, from_model: str, to_model: str, reason: str)
+        event: "degraded" | "recovered"
+        """
+        self._degradation_callback = callback
 
     @property
     def has_local(self) -> bool:
@@ -128,6 +141,9 @@ class LLMRouter:
         if self._local_model:
             models_to_try.append((self._local_model, self._local_max_tokens, 300))
 
+        primary = models_to_try[0][0]
+        failed_models: list[str] = []
+
         for model, max_tokens, timeout in models_to_try:
             try:
                 kwargs = dict(model=model, messages=messages,
@@ -137,9 +153,12 @@ class LLMRouter:
                 resp = await _aio.wait_for(completion(**kwargs), timeout=timeout)
                 self._record_usage(resp, tier=tier)
                 self._on_success()
+                # Track degradation/recovery
+                self._notify_model_change(primary, model, failed_models)
                 return resp
             except _aio.TimeoutError:
                 log.warning("%s timeout (%ds), trying next", model, timeout)
+                failed_models.append(model)
                 self._on_failure()
                 continue
             except Exception as e:
@@ -148,6 +167,7 @@ class LLMRouter:
                 is_transient = is_overload or "500" in err or "502" in err or "503" in err
                 is_local = model.startswith("local/")
                 log.warning("%s %s: %s", model, "overloaded" if is_overload else "failed", err[:200])
+                failed_models.append(model)
                 if not is_local:
                     self._on_failure()
                 if is_transient:
@@ -157,6 +177,39 @@ class LLMRouter:
         log.error("All models exhausted (cloud + local)")
         self._on_failure()
         return None
+
+    def _notify_model_change(self, primary: str, actual: str, failed: list[str]) -> None:
+        """Emit degradation/recovery notifications."""
+        was_degraded = self._degraded
+
+        if actual != primary and not actual.startswith("local/"):
+            # Cloud degradation (e.g. Opus → Sonnet)
+            if not was_degraded:
+                self._degraded = True
+                self._current_active_model = actual
+                reason = f"{', '.join(failed)} failed"
+                log.warning("MODEL DEGRADED: %s → %s (%s)", primary, actual, reason)
+                if self._degradation_callback:
+                    self._degradation_callback("degraded", primary, actual, reason)
+
+        elif actual.startswith("local/"):
+            # Full degradation to local
+            if not was_degraded or "local" not in self._current_active_model:
+                self._degraded = True
+                self._current_active_model = actual
+                reason = f"All cloud models failed: {', '.join(failed)}"
+                log.warning("MODEL DEGRADED TO LOCAL: %s → %s (%s)", primary, actual, reason)
+                if self._degradation_callback:
+                    self._degradation_callback("degraded", primary, actual, reason)
+
+        elif actual == primary and was_degraded:
+            # Recovery — primary model works again
+            old = self._current_active_model
+            self._degraded = False
+            self._current_active_model = actual
+            log.info("MODEL RECOVERED: %s → %s", old, actual)
+            if self._degradation_callback:
+                self._degradation_callback("recovered", old, actual, "Primary model available again")
 
     async def call_local(self, messages, temperature=0.7, tools=None) -> dict | None:
         """Call local LLM directly (bypass cloud, zero cost). Returns response dict or None."""
@@ -227,6 +280,8 @@ class LLMRouter:
             "consecutive_failures": self._consecutive_failures,
             "seconds_in_silent_mode": int(time.time() - self._circuit_opened_at) if self._circuit_open else 0,
             "local_model": self._local_model or "(none)",
+            "degraded": self._degraded,
+            "active_model": self._current_active_model,
         }
 
     def get_usage_stats(self) -> dict:

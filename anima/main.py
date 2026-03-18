@@ -183,6 +183,27 @@ async def _init_llm(config: dict, tool_registry, tool_executor, memory_store) ->
         local_model=local_cfg.get("model", ""),
         local_max_tokens=local_cfg.get("max_tokens", 4096),
     )
+
+    # ── Model degradation/recovery notifications ──
+    _degradation_hub = [None]  # mutable ref, set later when dashboard_hub exists
+
+    def _on_model_change(event: str, from_model: str, to_model: str, reason: str):
+        """Notify user when LLM model degrades or recovers."""
+        if event == "degraded":
+            msg = f"⚠️ 模型降级: {from_model} → {to_model} ({reason})"
+            log.warning(msg)
+        else:
+            msg = f"✅ 模型恢复: {from_model} → {to_model}"
+            log.info(msg)
+        try:
+            hub = _degradation_hub[0]
+            if hub and hasattr(hub, "add_activity"):
+                hub.add_activity("llm", msg)
+        except Exception:
+            pass
+
+    llm_router.set_degradation_callback(_on_model_change)
+
     # ── v3: PromptCompiler (6-layer compilation) ──
     token_budget = TokenBudget(
         max_context=get("llm.tier1.max_context", 200_000),
@@ -744,6 +765,7 @@ def _init_dashboard(core: dict, llm: dict, heartbeat_deps: dict, cognitive_deps:
     dashboard_hub.tool_registry = core["tool_registry"]
     usage_tracker = UsageTracker(core["memory_store"])
     llm["llm_router"].set_usage_tracker(usage_tracker)
+    _degradation_hub[0] = dashboard_hub  # wire for model change notifications
     dashboard_hub.usage_tracker = usage_tracker
     dashboard_hub.agent_manager = core["agent_manager"]
     dashboard_hub.scheduler = core["scheduler"]
