@@ -218,30 +218,13 @@ function renderPage(d) {
   else if (currentPage === 'settings') renderSettings(d);
 }
 
-// ═══ MARKDOWN RENDERER ═══
-const markedInstance = new marked.Marked();
-markedInstance.use({
-  renderer: {
-    code({text, lang}) {
-      const language = (typeof hljs !== 'undefined' && hljs.getLanguage(lang)) ? lang : 'plaintext';
-      const highlighted = (typeof hljs !== 'undefined') ? hljs.highlight(text, {language}).value : esc(text);
-      return `<div class="code-block"><div class="code-header"><span class="code-lang">${lang||'text'}</span><button class="code-copy" onclick="window._copyCode(this)">Copy</button></div><pre><code class="hljs language-${language}">${highlighted}</code></pre></div>`;
-    }
-  }
-});
-
+// ═══ MARKDOWN RENDERER (fallback only — primary is streaming-markdown) ═══
 function renderMd(text) {
-  try { return markedInstance.parse(text); }
-  catch { return esc(text).replace(/\n/g, '<br>'); }
-}
-
-function renderMdStreaming(text) {
-  // Auto-close open constructs for safe parsing during stream
-  let safe = text;
-  if ((safe.match(/```/g)||[]).length % 2 !== 0) safe += '\n```';
-  if ((safe.match(/\*\*/g)||[]).length % 2 !== 0) safe += '**';
-  try { return markedInstance.parse(safe) + '<span class="streaming-cursor"></span>'; }
-  catch { return esc(text).replace(/\n/g,'<br>') + '<span class="streaming-cursor"></span>'; }
+  if (typeof marked !== 'undefined') {
+    try { return marked.parse(text); } catch(_) {}
+  }
+  // Ultra-simple fallback
+  return text.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g,'<br>');
 }
 
 // Copy helpers
@@ -271,55 +254,65 @@ function showToast(text) {
   document.body.appendChild(t); setTimeout(()=>t.remove(),2000);
 }
 
-// ═══ CHAT RENDERING ═══
-let _lastRenderedChat = 0;
+// ═══ CHAT RENDERING — zero flicker ═══
+let _renderedMsgCount = 0;
 
 function renderChat(d) {
   const history = d.chat_history || [];
   const activity = d.activity || [];
 
-  const chatChanged = history.length !== _lastRenderedChat;
-  const actChanged = activity.length !== lastActivityLen;
-  if (!chatChanged && !actChanged) return;
+  // ── Handle history reset/clear ──
+  if (history.length < _renderedMsgCount) {
+    document.getElementById('chat-msgs').innerHTML = '';
+    _renderedMsgCount = 0;
+  }
 
-  // ── Messages: only rebuild when new messages arrive ──
-  if (chatChanged) {
+  // ── Messages: only process NEW ones ──
+  if (history.length > _renderedMsgCount) {
     const el = document.getElementById('chat-msgs');
-    let html = '';
-    for (const m of history) {
+
+    for (let i = _renderedMsgCount; i < history.length; i++) {
+      const m = history[i];
       const role = m.role === 'user' ? 'user' : m.role === 'system' ? 'system' : 'agent';
-      const content = role === 'agent' ? renderMd(m.content) : esc(m.content);
-      const actions = role === 'agent'
-        ? `<div class="msg-actions"><button class="msg-action-btn" onclick="copyMessage(${JSON.stringify(JSON.stringify(m.content))})">Copy</button></div>`
-        : '';
-      html += `<div class="msg ${role}">${content}${actions}</div>`;
-    }
-    el.innerHTML = html;
-    el.scrollTop = el.scrollHeight;
-    _lastRenderedChat = history.length;
-  }
 
-  // ── Activity: separate container, updated independently (no flicker on msgs) ──
-  if (actChanged) {
-    lastActivityLen = activity.length;
-    const actEl = document.getElementById('chat-activity');
-    if (actEl) {
-      const last = activity[activity.length - 1];
-      if (last) {
-        const s = last.stage || '';
-        const t = last.tool || '';
-        const d2 = (last.detail || '').substring(0, 60);
-        if (s === 'executing' && t) actEl.textContent = `⚙ ${t} ${d2}`;
-        else if (s === 'thinking') actEl.textContent = `◐ thinking...`;
-        else if (s === 'idle') actEl.textContent = '';
-        else if (s === 'error') actEl.textContent = `✕ ${d2}`;
-        else actEl.textContent = '';
+      const msgDiv = document.createElement('div');
+      msgDiv.className = `msg ${role}`;
+
+      if (role === 'agent') {
+        // Use streaming-markdown for agent messages (appends DOM nodes, never rebuilds)
+        if (window.smd) {
+          const renderer = window.smd.default_renderer(msgDiv);
+          const parser = window.smd.parser(renderer);
+          window.smd.parser_write(parser, m.content || '');
+          window.smd.parser_end(parser);
+        } else {
+          // Fallback if smd not loaded yet
+          msgDiv.innerHTML = renderMd(m.content || '');
+        }
+
+        // Add copy button
+        const actions = document.createElement('div');
+        actions.className = 'msg-actions';
+        actions.innerHTML = `<button class="msg-action-btn" onclick="copyMessage(${JSON.stringify(JSON.stringify(m.content))})">Copy</button>`;
+        msgDiv.appendChild(actions);
+
+        // Highlight code blocks
+        msgDiv.querySelectorAll('pre code').forEach(block => {
+          if (typeof hljs !== 'undefined') {
+            try { hljs.highlightElement(block); } catch(_) {}
+          }
+        });
+      } else {
+        msgDiv.textContent = m.content || '';
       }
-    }
-  }
 
-  // Bubble + TTS for new messages
-  if (chatChanged && history.length > 0) {
+      el.appendChild(msgDiv);
+    }
+
+    _renderedMsgCount = history.length;
+    el.scrollTop = el.scrollHeight;
+
+    // Bubble + TTS for latest new message
     const last = history[history.length - 1];
     if (last && last.role !== 'user' && last.role !== 'system') {
       showBubble(last.content);
@@ -328,6 +321,30 @@ function renderChat(d) {
         voiceManager.playUrl(last.tts_url);
       }
     }
+  }
+
+  // ── Activity: separate container, textContent only ──
+  const actEl = document.getElementById('chat-activity');
+  if (actEl && activity.length !== lastActivityLen) {
+    lastActivityLen = activity.length;
+    const last = activity[activity.length - 1];
+    if (last) {
+      const s = last.stage || '';
+      const t = last.tool || '';
+      const det = (last.detail || '').substring(0, 60);
+      if (s === 'executing' && t) actEl.textContent = `⚙ ${t} ${det}`;
+      else if (s === 'thinking') actEl.textContent = '◐ thinking...';
+      else if (s === 'idle') actEl.textContent = '';
+      else if (s === 'error') actEl.textContent = `✕ ${det}`;
+      else actEl.textContent = '';
+    }
+  }
+
+  // ── Update processing state for typing indicator ──
+  if (activity.length > 0) {
+    const lastAct = activity[activity.length - 1];
+    const isProcessing = lastAct && lastAct.stage && !['idle', 'error'].includes(lastAct.stage);
+    evaProcessing = isProcessing;
   }
 }
 

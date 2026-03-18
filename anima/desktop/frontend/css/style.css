@@ -188,6 +188,8 @@ html,body{height:100%;overflow:hidden;background:var(--black);color:var(--white)
 .msg.agent h1,.msg.agent h2,.msg.agent h3 { margin:12px 0 6px; color:var(--w90); }
 .msg.agent h1 { font-size:18px; } .msg.agent h2 { font-size:16px; } .msg.agent h3 { font-size:14px; }
 .msg.agent p { margin:4px 0; }
+.msg.agent p:first-child { margin-top: 0; }
+.msg.agent p:last-child { margin-bottom: 0; }
 .msg.agent ul,.msg.agent ol { margin:4px 0; padding-left:20px; }
 .msg.agent a { color:var(--accent,#60c8d0); text-decoration:none; }
 .msg.agent a:hover { text-decoration:underline; }

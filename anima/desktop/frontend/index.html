@@ -277,7 +277,10 @@
 }
 </script>
 <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11/build/highlight.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<script type="module">
+  import * as smd from 'https://cdn.jsdelivr.net/npm/streaming-markdown/smd.min.js';
+  window.smd = smd;
+</script>
 <!-- Debug: catches all JS errors, pushes to backend log + visual overlay -->
 <div id="dbg" style="position:fixed;bottom:0;left:60px;right:0;max-height:100px;overflow-y:auto;background:rgba(0,0,0,.9);color:#0f0;font:10px/1.5 monospace;padding:4px 8px;z-index:9999;display:none"><span onclick="this.parentElement.style.display='none'" style="position:absolute;top:2px;right:8px;cursor:pointer;color:#666">✕</span></div>
 <script>
