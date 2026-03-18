@@ -14,7 +14,7 @@ from anima.utils.logging import get_logger
 
 log = get_logger("agent_tracker")
 
-_STALE_THRESHOLD = 90  # seconds before notifying user
+_STALE_THRESHOLD = 60  # seconds before notifying user
 
 
 def _path() -> Path:

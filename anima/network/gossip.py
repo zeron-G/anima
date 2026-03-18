@@ -646,7 +646,7 @@ class GossipMesh:
             self._safe_callback(cb, *args)
 
     def _reconnect_dead_peers(self, sub_socket, connected: set) -> None:
-        """Refresh TCP connections for dead/suspect peers by disconnect+connect.
+        """Ensure TCP connections exist for dead/suspect peers (connect-only, no disconnect).
 
         Called every RECONNECT_INTERVAL seconds (from _gossip_thread on gossip
         ticks).  Does not change peer state — status is managed by phi detector.
@@ -662,11 +662,11 @@ class GossipMesh:
                 continue
             addr = f"{ip}:{port}"
             try:
-                if addr in connected:
-                    sub_socket.disconnect(f"tcp://{addr}")
-                    connected.discard(addr)
-                sub_socket.connect(f"tcp://{addr}")
-                connected.add(addr)
-                log.debug("Reconnected to %s peer %s at %s", state.status, nid, addr)
+                if addr not in connected:
+                    sub_socket.connect(f"tcp://{addr}")
+                    connected.add(addr)
+                    log.debug("Re-connected to %s peer %s at %s", state.status, nid, addr)
+                else:
+                    log.debug("Skip reconnect for %s peer %s at %s (already connected)", state.status, nid, addr)
             except zmq.ZMQError as e:
                 log.debug("Reconnect failed for %s at %s: %s", nid, addr, e)
