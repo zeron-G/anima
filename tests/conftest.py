@@ -36,8 +36,8 @@ if sys.platform == "win32":
 
 
 def pytest_sessionfinish(session, exitstatus):
-    """Force-exit on Windows after all tests to avoid cleanup hangs."""
-    if sys.platform == "win32":
+    """Force-exit on Windows after tests ran to avoid cleanup hangs."""
+    if sys.platform == "win32" and session.testscollected > 0:
         os._exit(exitstatus)
 
 

@@ -205,15 +205,13 @@ class TestSoulContainer:
 
 class TestStaticKnowledge:
     @pytest.fixture
-    def store(self, tmp_path):
+    async def store(self, tmp_path):
         """Create a real MemoryStore with static_knowledge table."""
-        import asyncio
         from anima.memory.store import MemoryStore
         db_path = str(tmp_path / "test.db")
-        store = asyncio.get_event_loop().run_until_complete(MemoryStore.create(db_path))
-        return store
+        return await MemoryStore.create(db_path)
 
-    def test_upsert_and_query(self, store):
+    async def test_upsert_and_query(self, store):
         from anima.memory.static_store import StaticKnowledgeStore
         sk = StaticKnowledgeStore(store, node_id="desktop-123")
 
@@ -224,7 +222,7 @@ class TestStaticKnowledge:
         results = sk.query(categories=["env", "project"])
         assert len(results) == 2
 
-    def test_node_isolation(self, store):
+    async def test_node_isolation(self, store):
         from anima.memory.static_store import StaticKnowledgeStore
         sk = StaticKnowledgeStore(store, node_id="desktop-123")
 
@@ -239,7 +237,7 @@ class TestStaticKnowledge:
         results = sk.query(categories=["env"], include_other_nodes=True)
         assert len(results) == 2
 
-    def test_cannot_write_other_node(self, store):
+    async def test_cannot_write_other_node(self, store):
         from anima.memory.static_store import StaticKnowledgeStore
         sk = StaticKnowledgeStore(store, node_id="desktop-123")
 
@@ -250,26 +248,22 @@ class TestStaticKnowledge:
 # ── ConversationSummarizer ──
 
 class TestConversationSummarizer:
-    def test_add_message(self):
+    async def test_add_message(self):
         from anima.memory.summarizer import ConversationSummarizer
         mock_llm = MagicMock()
         s = ConversationSummarizer(mock_llm, summary_interval=100, keep_recent=5)
-        asyncio.get_event_loop().run_until_complete(
-            s.add_message("user", "hello")
-        )
+        await s.add_message("user", "hello")
         ctx = s.get_context()
         assert len(ctx) == 1
         assert ctx[0]["role"] == "user"
 
-    def test_check_overflow(self):
+    async def test_check_overflow(self):
         from anima.memory.summarizer import ConversationSummarizer
         mock_llm = MagicMock()
         s = ConversationSummarizer(mock_llm, summary_interval=100, keep_recent=5)
         # Add a lot of messages
         for i in range(50):
-            asyncio.get_event_loop().run_until_complete(
-                s.add_message("user", "x" * 1000)
-            )
+            await s.add_message("user", "x" * 1000)
         # With a small budget, should detect overflow
         assert s.check_overflow(100) is True
         # With a huge budget, should not
@@ -280,7 +274,7 @@ class TestConversationSummarizer:
         mock_llm = MagicMock()
         s = ConversationSummarizer(mock_llm, summary_interval=100, keep_recent=5)
         s._summary = "之前讨论了项目进展"
-        asyncio.get_event_loop().run_until_complete(s.add_message("user", "继续"))
+        asyncio.run(s.add_message("user", "继续"))
         ctx = s.get_context()
         assert len(ctx) == 2  # summary + message
         assert "摘要" in ctx[0]["content"] or "summary" in ctx[0]["content"].lower() or "之前" in ctx[0]["content"]
@@ -289,12 +283,10 @@ class TestConversationSummarizer:
 # ── MemoryRetriever ──
 
 class TestMemoryRetriever:
-    def test_empty_retrieval(self):
+    async def test_empty_retrieval(self):
         from anima.memory.retriever import MemoryRetriever, MemoryContext
         r = MemoryRetriever()
-        result = asyncio.get_event_loop().run_until_complete(
-            r.retrieve("test query", "USER_MESSAGE")
-        )
+        result = await r.retrieve("test query", "USER_MESSAGE")
         assert isinstance(result, MemoryContext)
         assert result.total_tokens >= 0
 
@@ -320,19 +312,18 @@ class TestMemoryTools:
 
 class TestStoreNewMethods:
     @pytest.fixture
-    def store(self, tmp_path):
-        import asyncio
+    async def store(self, tmp_path):
         from anima.memory.store import MemoryStore
         db_path = str(tmp_path / "test.db")
-        return asyncio.get_event_loop().run_until_complete(MemoryStore.create(db_path))
+        return await MemoryStore.create(db_path)
 
-    def test_touch_memories(self, store):
+    async def test_touch_memories(self, store):
         mid = store._save_memory_sync("test content", "chat", 0.5, {}, [])
         store.touch_memories([mid])
         mem = store.get_recent_memories(limit=1)[0]
         assert mem["access_count"] == 1
 
-    def test_static_knowledge_crud(self, store):
+    async def test_static_knowledge_crud(self, store):
         store.upsert_static_knowledge("env", "test.key", '{"val": 1}', scope="global")
         results = store.query_static_knowledge(categories=["env"], scopes=["global"])
         assert len(results) == 1
@@ -342,7 +333,7 @@ class TestStoreNewMethods:
         results = store.query_static_knowledge(categories=["env"], scopes=["global"])
         assert len(results) == 0
 
-    def test_batch_update_decay_scores(self, store):
+    async def test_batch_update_decay_scores(self, store):
         mid = store._save_memory_sync("test", "chat", 0.5, {}, [])
         store.batch_update_decay_scores([(mid, 0.42)])
         mems = store.get_unconsolidated_memories(limit=1)
