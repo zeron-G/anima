@@ -265,23 +265,20 @@ class EvolutionEngine:
             log.error("No agent_manager wired — cannot implement")
             return False
 
+        files_hint = ', '.join(proposal.files) if proposal.files else 'determine from analysis'
         impl_prompt = (
-            f"EVOLUTION TASK: {proposal.title}\n\n"
+            f"TASK: {proposal.title}\n"
             f"PROBLEM: {proposal.problem}\n"
             f"SOLUTION: {proposal.solution}\n"
-            f"FILES TO MODIFY: {', '.join(proposal.files) if proposal.files else 'determine from analysis'}\n"
+            f"FILES: {files_hint}\n"
             f"RISK: {proposal.risk}\n\n"
-            "INSTRUCTIONS:\n"
-            "1. Read the relevant source files\n"
-            "2. Make the necessary code changes using edit_file or write_file\n"
-            "3. Run tests: shell(command=\"python -m pytest tests/ --tb=short -q\")\n"
-            "4. If tests fail, fix the issues\n"
-            "5. Report what you changed\n\n"
-            "IMPORTANT: Only modify files related to this task. Minimal changes."
+            "Make the code changes. Minimal edits only.\n"
+            "Do NOT run the full test suite — the pipeline handles testing.\n"
+            "Just read the files, make the fix, and report what you changed."
         )
 
         log.info("Spawning implementation agent for %s (using Claude Code)", proposal.id)
-        timeout = 600 if proposal.complexity in ("medium", "large") else 300
+        timeout = 600
 
         # Use Claude Code for code development tasks (user requirement)
         # Falls back to internal agent if Claude Code CLI not available
