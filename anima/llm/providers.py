@@ -253,10 +253,15 @@ async def completion(
     temperature: float = 0.7,
     tools: list[dict] | None = None,
 ) -> dict:
-    """Call LLM — auto-detects OAuth token vs API key and routes accordingly.
+    """Call LLM — routes to local (llama.cpp/ollama) or Anthropic API.
 
-    No litellm, no proxy — direct HTTP to Anthropic API.
+    Routing logic:
+    1. If model starts with "local/" → local OpenAI-compatible server
+    2. Else → Anthropic (OAuth or API key)
     """
+    if model.startswith("local/"):
+        return await _local_completion(model, messages, max_tokens, temperature, tools)
+
     token = _get_token()
     if not token:
         raise RuntimeError(
@@ -269,3 +274,133 @@ async def completion(
     else:
         log.debug("Using API key auth (x-api-key)")
         return await _apikey_completion(token, model, messages, max_tokens, temperature, tools)
+
+
+# ── Local LLM (llama.cpp / ollama / any OpenAI-compatible server) ──
+
+# Default local server URL — override via LOCAL_LLM_BASE_URL env var
+_LOCAL_LLM_BASE = os.environ.get("LOCAL_LLM_BASE_URL", "http://localhost:8080")
+
+
+def _get_local_base_url() -> str:
+    """Get local LLM server base URL (supports runtime env override)."""
+    return os.environ.get("LOCAL_LLM_BASE_URL", _LOCAL_LLM_BASE)
+
+
+def _convert_tools_to_openai(tools: list[dict] | None) -> list[dict] | None:
+    """Convert Anthropic tool format to OpenAI function-calling format.
+
+    Anthropic: {"name": ..., "description": ..., "input_schema": {...}}
+    OpenAI:    {"type": "function", "function": {"name": ..., "description": ..., "parameters": {...}}}
+    """
+    if not tools:
+        return None
+    converted = []
+    for t in tools:
+        converted.append({
+            "type": "function",
+            "function": {
+                "name": t["name"],
+                "description": t.get("description", ""),
+                "parameters": t.get("input_schema", t.get("parameters", {})),
+            },
+        })
+    return converted
+
+
+def _parse_openai_response(data: dict, model_name: str) -> dict:
+    """Parse OpenAI-format response into our standard format."""
+    choices = data.get("choices", [])
+    if not choices:
+        return {"content": "", "tool_calls": [], "usage": {"prompt_tokens": 0, "completion_tokens": 0}, "model": model_name}
+
+    msg = choices[0].get("message", {})
+    content = msg.get("content", "") or ""
+
+    # Strip <think>...</think> blocks (Qwen thinking mode)
+    if "<think>" in content:
+        import re
+        content = re.sub(r"<think>.*?</think>\s*", "", content, flags=re.DOTALL).strip()
+
+    tool_calls = []
+    for tc in msg.get("tool_calls", []):
+        fn = tc.get("function", {})
+        tool_calls.append({
+            "id": tc.get("id", ""),
+            "name": fn.get("name", ""),
+            "arguments": fn.get("arguments", "{}"),
+        })
+
+    usage = data.get("usage", {})
+    return {
+        "content": content,
+        "tool_calls": tool_calls,
+        "usage": {
+            "prompt_tokens": usage.get("prompt_tokens", 0),
+            "completion_tokens": usage.get("completion_tokens", 0),
+        },
+        "model": model_name,
+    }
+
+
+async def _local_completion(
+    model: str,
+    messages: list[dict],
+    max_tokens: int = 2048,
+    temperature: float = 0.7,
+    tools: list[dict] | None = None,
+) -> dict:
+    """Call local LLM via OpenAI-compatible API (llama.cpp / ollama / vLLM / etc).
+
+    Model format: "local/<model_name>" or just "local/" (use server's loaded model).
+    """
+    base_url = _get_local_base_url()
+    model_name = model.removeprefix("local/").strip() or None
+
+    # Merge system messages into the first user message (many local models
+    # don't support system role well)
+    api_messages = []
+    system_parts = []
+    for msg in messages:
+        if msg["role"] == "system":
+            system_parts.append(msg["content"])
+        else:
+            api_messages.append(dict(msg))
+
+    if system_parts and api_messages:
+        system_text = "\n\n".join(system_parts)
+        if api_messages[0]["role"] == "user":
+            api_messages[0]["content"] = f"[System Instructions]\n{system_text}\n\n[User Message]\n{api_messages[0]['content']}"
+        else:
+            api_messages.insert(0, {"role": "user", "content": f"[System Instructions]\n{system_text}"})
+            # Ensure alternation
+            if len(api_messages) > 1 and api_messages[1]["role"] == "user":
+                api_messages[1]["content"] = api_messages[0]["content"] + "\n\n" + api_messages[1]["content"]
+                api_messages.pop(0)
+    elif system_parts:
+        api_messages = [{"role": "user", "content": "\n\n".join(system_parts)}]
+
+    payload: dict[str, Any] = {
+        "messages": api_messages,
+        "max_tokens": max_tokens,
+        "temperature": temperature,
+        "stream": False,
+    }
+    if model_name:
+        payload["model"] = model_name
+
+    openai_tools = _convert_tools_to_openai(tools)
+    if openai_tools:
+        payload["tools"] = openai_tools
+        payload["tool_choice"] = "auto"
+
+    log.debug("Local LLM call: %s (model=%s, tokens=%d)", base_url, model_name or "default", max_tokens)
+
+    async with httpx.AsyncClient(timeout=300.0) as client:
+        resp = await client.post(f"{base_url}/v1/chat/completions", json=payload)
+
+    if resp.status_code != 200:
+        error_body = resp.text[:500]
+        raise RuntimeError(f"Local LLM error {resp.status_code}: {error_body}")
+
+    return _parse_openai_response(resp.json(), model_name or "local")

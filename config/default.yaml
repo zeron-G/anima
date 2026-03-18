@@ -37,6 +37,10 @@ perception:
 llm:
   tier1: { model: "claude-opus-4-6", max_tokens: 8192, max_context: 200000 }
   tier2: { model: "claude-opus-4-6", max_tokens: 8192, max_context: 200000 }
+  # Local LLM (llama.cpp / ollama / vLLM — OpenAI-compatible API)
+  # Use "local/<model>" as model name. If empty, uses server's loaded model.
+  # Set to "" to disable local tier.
+  local: { model: "local/", base_url: "http://localhost:8080", max_tokens: 4096, max_context: 32768 }
   budget: { daily_limit_usd: 10.0 }
 
 decision:

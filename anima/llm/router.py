@@ -24,7 +24,13 @@ _CB_PROBE_INTERVAL_S = 30      # probe every 30s (was 60 — too slow)
 
 
 class LLMRouter:
-    """Routes LLM calls with circuit breaker for API resilience."""
+    """Routes LLM calls with circuit breaker for API resilience.
+
+    Supports three model sources:
+    - Tier1: High-quality cloud model (Opus) for user messages
+    - Tier2: Cost-effective cloud model (Sonnet) for internal events
+    - Local: On-device model (llama.cpp/ollama) for zero-cost fallback
+    """
 
     def __init__(
         self,
@@ -33,11 +39,15 @@ class LLMRouter:
         tier1_max_tokens: int = 4096,
         tier2_max_tokens: int = 2048,
         daily_budget: float = 1.0,
+        local_model: str = "",
+        local_max_tokens: int = 4096,
     ) -> None:
         self._tier1_model = tier1_model
         self._tier2_model = tier2_model
         self._tier1_max_tokens = tier1_max_tokens
         self._tier2_max_tokens = tier2_max_tokens
+        self._local_model = local_model       # e.g. "local/" or "local/qwen"
+        self._local_max_tokens = local_max_tokens
         self._daily_budget = daily_budget
         self._usage: list[dict] = []
         self._day_start = self._today()
@@ -51,6 +61,11 @@ class LLMRouter:
 
     def set_usage_tracker(self, tracker) -> None:
         self._usage_tracker = tracker
+
+    @property
+    def has_local(self) -> bool:
+        """Whether a local LLM is configured."""
+        return bool(self._local_model)
 
     @property
     def circuit_open(self) -> bool:
@@ -94,22 +109,24 @@ class LLMRouter:
     SONNET_FALLBACK = "claude-sonnet-4-6"
 
     async def _try_call(self, messages, tier, temperature, tools=None):
-        """Core call logic: primary model → 529 fallback to Sonnet → retry.
+        """Core call logic: primary → Sonnet fallback → local fallback.
 
-        On 529 (overloaded), immediately switches to Sonnet instead of
-        retrying the same overloaded model.
+        Cascade: cloud primary → cloud Sonnet → local LLM (if configured).
+        On 529 (overloaded), immediately tries next in cascade.
         """
         import asyncio as _aio
 
-        # Build model cascade: primary model first, Sonnet fallback on 529
+        # Build model cascade: primary → Sonnet → local
         primary_model = self._tier2_model if tier <= 2 else self._tier1_model
         primary_max = self._tier2_max_tokens if tier <= 2 else self._tier1_max_tokens
         models_to_try = [
             (primary_model, primary_max, 120),
         ]
-        # Add Sonnet fallback if primary is not already Sonnet
         if self.SONNET_FALLBACK not in primary_model:
             models_to_try.append((self.SONNET_FALLBACK, 4096, 90))
+        # Local LLM as last resort (free, no API cost)
+        if self._local_model:
+            models_to_try.append((self._local_model, self._local_max_tokens, 300))
 
         for model, max_tokens, timeout in models_to_try:
             try:
@@ -124,20 +141,39 @@ class LLMRouter:
             except _aio.TimeoutError:
                 log.warning("%s timeout (%ds), trying next", model, timeout)
                 self._on_failure()
-                continue  # try Sonnet fallback
+                continue
             except Exception as e:
                 err = str(e)
                 is_overload = "529" in err or "overloaded" in err.lower()
                 is_transient = is_overload or "500" in err or "502" in err or "503" in err
+                is_local = model.startswith("local/")
                 log.warning("%s %s: %s", model, "overloaded" if is_overload else "failed", err[:200])
-                self._on_failure()
+                if not is_local:
+                    self._on_failure()
                 if is_transient:
                     await _aio.sleep(2)
-                continue  # always try next model in cascade
+                continue
 
-        log.error("All models exhausted (primary + Sonnet fallback)")
+        log.error("All models exhausted (cloud + local)")
         self._on_failure()
         return None
+
+    async def call_local(self, messages, temperature=0.7, tools=None) -> dict | None:
+        """Call local LLM directly (bypass cloud, zero cost). Returns response dict or None."""
+        if not self._local_model:
+            return None
+        import asyncio as _aio
+        try:
+            kwargs = dict(model=self._local_model, messages=messages,
+                         max_tokens=self._local_max_tokens, temperature=temperature)
+            if tools:
+                kwargs["tools"] = tools
+            resp = await _aio.wait_for(completion(**kwargs), timeout=300)
+            self._record_usage(resp, tier=0)  # tier 0 = local
+            return resp
+        except Exception as e:
+            log.warning("Local LLM failed: %s", str(e)[:200])
+            return None
 
     async def call(self, messages, tier=2, temperature=0.7) -> str | None:
         """Call LLM. Returns content string or None."""
@@ -190,6 +226,7 @@ class LLMRouter:
             "circuit_open": self._circuit_open,
             "consecutive_failures": self._consecutive_failures,
             "seconds_in_silent_mode": int(time.time() - self._circuit_opened_at) if self._circuit_open else 0,
+            "local_model": self._local_model or "(none)",
         }
 
     def get_usage_stats(self) -> dict:

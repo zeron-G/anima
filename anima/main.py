@@ -159,12 +159,20 @@ async def _init_llm(config: dict, tool_registry, tool_executor, memory_store) ->
     from anima.llm.lorebook import LorebookEngine
     from anima.memory.summarizer import ConversationSummarizer
 
+    # Wire local LLM base URL into providers (before creating router)
+    local_cfg = get("llm.local", {})
+    local_base_url = local_cfg.get("base_url", "")
+    if local_base_url:
+        os.environ.setdefault("LOCAL_LLM_BASE_URL", local_base_url)
+
     llm_router = LLMRouter(
         tier1_model=get("llm.tier1.model", "claude-opus-4-6"),
         tier2_model=get("llm.tier2.model", "claude-opus-4-6"),
         tier1_max_tokens=get("llm.tier1.max_tokens", 8192),
         tier2_max_tokens=get("llm.tier2.max_tokens", 8192),
         daily_budget=get("llm.budget.daily_limit_usd", 5.0),
+        local_model=local_cfg.get("model", ""),
+        local_max_tokens=local_cfg.get("max_tokens", 4096),
     )
     # ── v3: PromptCompiler (6-layer compilation) ──
     token_budget = TokenBudget(
