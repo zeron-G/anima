@@ -159,11 +159,20 @@ async def _init_llm(config: dict, tool_registry, tool_executor, memory_store) ->
     from anima.llm.lorebook import LorebookEngine
     from anima.memory.summarizer import ConversationSummarizer
 
-    # Wire local LLM base URL into providers (before creating router)
+    # Wire local LLM config into env vars for providers.LocalServerManager
     local_cfg = get("llm.local", {})
-    local_base_url = local_cfg.get("base_url", "")
-    if local_base_url:
-        os.environ.setdefault("LOCAL_LLM_BASE_URL", local_base_url)
+    _local_env_map = {
+        "base_url": "LOCAL_LLM_BASE_URL",
+        "server_path": "LOCAL_LLM_SERVER_PATH",
+        "model_path": "LOCAL_LLM_MODEL_PATH",
+        "gpu_layers": "LOCAL_LLM_GPU_LAYERS",
+        "ctx_size": "LOCAL_LLM_CTX_SIZE",
+        "idle_timeout": "LOCAL_LLM_IDLE_TIMEOUT",
+    }
+    for cfg_key, env_key in _local_env_map.items():
+        val = local_cfg.get(cfg_key, "")
+        if val:
+            os.environ.setdefault(env_key, str(val))
 
     llm_router = LLMRouter(
         tier1_model=get("llm.tier1.model", "claude-opus-4-6"),

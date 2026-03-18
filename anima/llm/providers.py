@@ -59,6 +59,148 @@ _LOCAL_LLM_BASE = "http://localhost:8080"
 
 
 # ═══════════════════════════════════════════════════════════════════════════
+#  Local LLM server lifecycle (on-demand start/stop)
+# ═══════════════════════════════════════════════════════════════════════════
+
+class LocalServerManager:
+    """Manages llama-server lifecycle — starts on demand, stops after idle.
+
+    Config via environment variables:
+        LOCAL_LLM_SERVER_CMD: full command (default: auto-detect from LOCAL_LLM_SERVER_PATH)
+        LOCAL_LLM_SERVER_PATH: path to llama-server executable
+        LOCAL_LLM_MODEL_PATH: path to .gguf model file
+        LOCAL_LLM_BASE_URL: server URL (default: http://localhost:8080)
+        LOCAL_LLM_GPU_LAYERS: number of GPU layers (default: 99 = all)
+        LOCAL_LLM_CTX_SIZE: context size (default: 65536)
+        LOCAL_LLM_IDLE_TIMEOUT: seconds before auto-shutdown (default: 300)
+    """
+
+    def __init__(self):
+        self._process: Any = None
+        self._last_used: float = 0
+        self._starting: bool = False
+        self._port: int = 8080
+
+    @property
+    def is_running(self) -> bool:
+        return self._process is not None and self._process.poll() is None
+
+    def _get_server_cmd(self) -> list[str] | None:
+        """Build llama-server command from env vars."""
+        # Option 1: explicit full command
+        full_cmd = os.environ.get("LOCAL_LLM_SERVER_CMD", "")
+        if full_cmd:
+            return full_cmd.split()
+
+        # Option 2: build from path + model
+        server = os.environ.get("LOCAL_LLM_SERVER_PATH", "")
+        model = os.environ.get("LOCAL_LLM_MODEL_PATH", "")
+        if not server or not model:
+            return None
+
+        ngl = os.environ.get("LOCAL_LLM_GPU_LAYERS", "99")
+        ctx = os.environ.get("LOCAL_LLM_CTX_SIZE", "65536")
+        base = os.environ.get("LOCAL_LLM_BASE_URL", _LOCAL_LLM_BASE)
+        # Extract port from base URL
+        try:
+            from urllib.parse import urlparse
+            self._port = urlparse(base).port or 8080
+        except Exception:
+            self._port = 8080
+
+        return [
+            server, "-m", model,
+            "-ngl", ngl,
+            "--port", str(self._port),
+            "-c", ctx,
+        ]
+
+    async def ensure_running(self, timeout: float = 30) -> bool:
+        """Start server if not running. Returns True if server is ready."""
+        if self.is_running:
+            self._last_used = time.time()
+            return True
+
+        if self._starting:
+            # Another call is starting it — wait
+            for _ in range(int(timeout * 2)):
+                await asyncio.sleep(0.5)
+                if self.is_running:
+                    self._last_used = time.time()
+                    return True
+            return False
+
+        cmd = self._get_server_cmd()
+        if not cmd:
+            return False
+
+        self._starting = True
+        try:
+            import subprocess
+            log.info("Starting local LLM server: %s", " ".join(cmd[:3]) + "...")
+            self._process = subprocess.Popen(
+                cmd,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
+
+            # Wait for server to be ready
+            base = os.environ.get("LOCAL_LLM_BASE_URL", _LOCAL_LLM_BASE)
+            start = time.time()
+            while time.time() - start < timeout:
+                try:
+                    async with httpx.AsyncClient(timeout=2) as c:
+                        r = await c.get(f"{base}/health")
+                        if r.status_code == 200:
+                            self._last_used = time.time()
+                            log.info("Local LLM server ready (%.1fs)", time.time() - start)
+                            return True
+                except Exception:
+                    pass
+                await asyncio.sleep(1)
+
+            log.warning("Local LLM server failed to start within %ds", timeout)
+            self.stop()
+            return False
+        finally:
+            self._starting = False
+
+    def stop(self):
+        """Stop the local server."""
+        if self._process:
+            try:
+                self._process.terminate()
+                self._process.wait(timeout=5)
+            except Exception:
+                try:
+                    self._process.kill()
+                except Exception:
+                    pass
+            log.info("Local LLM server stopped")
+            self._process = None
+
+    def check_idle_shutdown(self):
+        """Stop server if idle for too long. Called periodically."""
+        if not self.is_running:
+            return
+        idle_timeout = int(os.environ.get("LOCAL_LLM_IDLE_TIMEOUT", "300"))
+        if time.time() - self._last_used > idle_timeout:
+            log.info("Local LLM idle for %ds — shutting down", idle_timeout)
+            self.stop()
+
+    def mark_used(self):
+        self._last_used = time.time()
+
+
+# Singleton
+import asyncio as _asyncio
+import time as _time
+
+_local_server = LocalServerManager()
+
+
+# ═══════════════════════════════════════════════════════════════════════════
 #  Auth helpers (Anthropic)
 # ═══════════════════════════════════════════════════════════════════════════
 
@@ -112,6 +254,10 @@ async def completion(
     if model.startswith("local/"):
         base = os.environ.get("LOCAL_LLM_BASE_URL", _LOCAL_LLM_BASE)
         model_id = model.removeprefix("local/").strip() or None
+        # On-demand: start server if not running
+        if not await _local_server.ensure_running(timeout=60):
+            raise RuntimeError("Local LLM server failed to start")
+        _local_server.mark_used()
         return await _openai_completion(
             base_url=base, model_id=model_id, api_key=None,
             messages=messages, max_tokens=max_tokens,
@@ -227,6 +373,11 @@ async def _anthropic_completion(
         )
 
     return _parse_anthropic_response(resp.json(), model)
+
+
+def get_local_server_manager() -> LocalServerManager:
+    """Get the singleton local server manager (for idle shutdown checks)."""
+    return _local_server
 
 
 def _parse_anthropic_response(data: dict, model: str) -> dict:

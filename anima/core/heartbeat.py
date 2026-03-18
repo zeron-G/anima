@@ -168,6 +168,13 @@ class HeartbeatEngine:
         await self._confirm_alive()
         await self._check_agent_timeouts()
 
+        # Check local LLM server idle shutdown (every tick)
+        try:
+            from anima.llm.providers import get_local_server_manager
+            get_local_server_manager().check_idle_shutdown()
+        except Exception:
+            pass
+
         # Update idle scheduler (must be before snapshot cache for correct ordering)
         if self._idle_scheduler:
             await self._idle_scheduler.tick(snapshot)
