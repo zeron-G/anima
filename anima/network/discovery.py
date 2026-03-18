@@ -3,7 +3,7 @@
 import socket
 from typing import Callable
 
-from zeroconf import ServiceBrowser, ServiceInfo, Zeroconf
+from zeroconf import ServiceBrowser, ServiceInfo, ServiceStateChange, Zeroconf
 from anima.utils.logging import get_logger
 
 log = get_logger("network.discovery")
@@ -32,11 +32,13 @@ class DiscoveryService:
         port: int = 9420,
         capabilities: list[str] | None = None,
         on_node_found: Callable | None = None,
+        on_node_removed: Callable | None = None,
     ):
         self._node_id = node_id
         self._port = port
         self._capabilities = capabilities or []
         self._on_node_found = on_node_found
+        self._on_node_removed = on_node_removed
         self._zeroconf: Zeroconf | None = None
         self._browser: ServiceBrowser | None = None
         self._info: ServiceInfo | None = None
@@ -78,7 +80,7 @@ class DiscoveryService:
 
     def _on_service_change(self, zeroconf: Zeroconf, service_type: str,
                            name: str, state_change) -> None:
-        if state_change.name == "Added":
+        if state_change == ServiceStateChange.Added or state_change == ServiceStateChange.Updated:
             info = zeroconf.get_service_info(service_type, name)
             if info:
                 node_id = info.properties.get(b"node_id", b"").decode()
@@ -90,3 +92,11 @@ class DiscoveryService:
                         log.info("Discovered node: %s at %s", node_id, addr)
                         if self._on_node_found:
                             self._on_node_found(node_id, addr)
+        elif state_change == ServiceStateChange.Removed:
+            # Extract node_id from service name (format: "<node_id>._anima._tcp.local.")
+            node_id = name.replace(f".{service_type}", "").rstrip(".")
+            addr = self._discovered.pop(node_id, None)
+            if addr:
+                log.info("Node removed: %s at %s", node_id, addr)
+                if self._on_node_removed:
+                    self._on_node_removed(node_id, addr)

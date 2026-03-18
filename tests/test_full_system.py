@@ -69,7 +69,7 @@ async def full_system(tmp_path):
     ut = UsageTracker(ms)
     lr.set_usage_tracker(ut)
     pb = PromptBuilder()
-    am.wire_llm(lr, te, tr, pb)
+    am.wire_llm(lr, te, tr)
 
     hb = HeartbeatEngine(eq, sc, de, em, wm, lr, pb, config)
     hb.set_scheduler(scheduler)

@@ -393,6 +393,24 @@ class GossipMesh:
         sub.close()
         ctx.term()
 
+    def _safe_callback(self, cb: Callable | None, *args: Any) -> None:
+        """Invoke a node-state callback safely from the gossip thread.
+
+        Handles both sync and async callbacks:
+        - async (coroutine function): scheduled via run_coroutine_threadsafe
+        - sync: called directly
+        """
+        if cb is None:
+            return
+        if asyncio.iscoroutinefunction(cb):
+            loop = self._event_loop
+            if loop is not None and loop.is_running():
+                asyncio.run_coroutine_threadsafe(cb(*args), loop)
+            else:
+                log.debug("No running event loop for async callback %s; dropping", getattr(cb, "__name__", cb))
+        else:
+            cb(*args)
+
     def _handle_gossip(self, msg: NetworkMessage, sub_socket, connected: set) -> None:
         remote = NodeState.from_dict(msg.payload)
         nid = msg.source_node
@@ -400,31 +418,35 @@ class GossipMesh:
         with self._lock:
             old = self._peers.get(nid)
             old_status = old.status if old else None
+            old_addr = f"{old.ip}:{old.port}" if (old and old.ip and old.port) else None
 
             if old is None or remote.version > old.version:
                 remote.status = "alive"
                 self._peers[nid] = remote
                 self._identity.register_node(nid)
 
-                # Auto-connect SUB to new peer if we don't have it
+                # Auto-connect SUB to new peer; handle address change on reconnect
                 if remote.ip and remote.port:
-                    addr = f"{remote.ip}:{remote.port}"
-                    if addr not in connected:
-                        sub_socket.connect(f"tcp://{addr}")
-                        connected.add(addr)
-                        log.info("Auto-connected to new peer: %s at %s", nid, addr)
+                    new_addr = f"{remote.ip}:{remote.port}"
+                    if new_addr not in connected:
+                        # Disconnect stale address if the peer restarted elsewhere
+                        if old_addr and old_addr != new_addr and old_addr in connected:
+                            sub_socket.disconnect(f"tcp://{old_addr}")
+                            connected.discard(old_addr)
+                            log.info("Disconnected stale address for %s: %s", nid, old_addr)
+                        sub_socket.connect(f"tcp://{new_addr}")
+                        connected.add(new_addr)
+                        log.info("Auto-connected to new peer: %s at %s", nid, new_addr)
 
         self._detector.report_heartbeat(nid)
 
         if old_status is None:
             # First discovery
-            if self._on_node_alive:
-                self._on_node_alive(nid, remote)
+            self._safe_callback(self._on_node_alive, nid, remote)
             log.info("Node discovered: %s (%s)", nid, remote.hostname)
-        elif old_status in ("suspect", "dead") and remote.status == "alive":
+        elif old_status in ("suspect", "dead"):
             # Recovery from failure
-            if self._on_node_alive:
-                self._on_node_alive(nid, remote)
+            self._safe_callback(self._on_node_alive, nid, remote)
             log.info("Node recovered: %s (%s)", nid, remote.hostname)
 
     def _handle_task_delegate(self, msg: NetworkMessage) -> None:
@@ -572,13 +594,11 @@ class GossipMesh:
                 if phi >= self.DEAD_PHI and state.status != "dead":
                     state.status = "dead"
                     self._identity.update_node_status(nid, "dead")
-                    if self._on_node_dead:
-                        self._on_node_dead(nid, state)
+                    self._safe_callback(self._on_node_dead, nid, state)
                     log.warning("Node DEAD: %s (phi=%.1f)", nid, phi)
                 elif phi >= self.SUSPECT_PHI and state.status == "alive":
                     state.status = "suspect"
-                    if self._on_node_suspect:
-                        self._on_node_suspect(nid, state)
+                    self._safe_callback(self._on_node_suspect, nid, state)
                     log.warning("Node SUSPECT: %s (phi=%.1f)", nid, phi)
 
             # Mark registered nodes as dead if they never appeared in gossip
@@ -594,5 +614,6 @@ class GossipMesh:
                     if grace_passed:
                         # Never seen in gossip this session — mark dead
                         self._identity.update_node_status(rid, "dead")
+                        self._safe_callback(self._on_node_dead, rid, None)
                         log.warning("Node DEAD (never seen in gossip): %s", rid)
                     # else: still within startup grace period — wait for first heartbeat
