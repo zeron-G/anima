@@ -50,14 +50,22 @@ class UsageTracker:
 
     @staticmethod
     def _detect_provider(model: str) -> str:
-        """Infer the provider from a model name."""
+        """Infer the provider from a model name (supports prefix routing)."""
         model_lower = model.lower()
-        if model_lower.startswith("local/") or "gguf" in model_lower or "llama" in model_lower or "qwen" in model_lower:
+        # Prefix-based (explicit)
+        if model_lower.startswith("local/"):
             return "local"
+        if model_lower.startswith("openai/"):
+            return "openai"
+        if model_lower.startswith("anthropic/"):
+            return "anthropic"
+        # Name-based (implicit)
         if "claude" in model_lower or "haiku" in model_lower or "sonnet" in model_lower or "opus" in model_lower:
             return "anthropic"
         if "gpt" in model_lower or "o1" in model_lower or "o3" in model_lower:
             return "openai"
         if "gemini" in model_lower:
             return "google"
+        if "gguf" in model_lower or "llama" in model_lower or "qwen" in model_lower:
+            return "local"
         return "unknown"
