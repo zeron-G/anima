@@ -202,7 +202,7 @@ class MemorySync:
             try:
                 conn.execute(sql)
             except Exception as e:
-                log.warning("_ensure_sync_columns: %s", e)
+                log.debug("_ensure_sync_columns: %s", e)
         conn.commit()
 
     def _load_watermarks(self) -> None:
