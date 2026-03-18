@@ -13,6 +13,12 @@ from anima.utils.logging import get_logger
 log = get_logger("network.session")
 
 
+class NetworkTimeoutError(TimeoutError):
+    """Raised when no task heartbeat is received within the expected interval,
+    indicating a network disconnect rather than a slow task."""
+    pass
+
+
 # ── Task Delegation ──────────────────────────────────────────────────────────
 
 class TaskStatus(str, Enum):
@@ -90,7 +96,8 @@ class TaskDelegate:
         delegate.register_handler("llm_inference", my_handler_coroutine)
     """
 
-    TASK_TTL = 300.0  # seconds to keep completed tasks in memory
+    TASK_TTL = 300.0        # seconds to keep completed tasks in memory
+    HEARTBEAT_INTERVAL = 15.0  # executor sends task_heartbeat every N seconds
 
     def __init__(
         self,
@@ -134,6 +141,9 @@ class TaskDelegate:
 
         # Futures awaiting task_status_reply (correlation_id → Future)
         self._status_query_futures: dict[str, asyncio.Future] = {}
+
+        # Last heartbeat timestamp for outbound tasks (task_id → epoch seconds)
+        self._heartbeat_times: dict[str, float] = {}
 
     def set_broadcast(self, fn: Callable) -> None:
         self._broadcast_fn = fn
@@ -239,10 +249,24 @@ class TaskDelegate:
         log.info("Cancelled task %s", task_id)
         return True
 
-    async def wait_result(self, task_id: str, timeout: float = 60.0) -> dict:
+    async def wait_result(
+        self,
+        task_id: str,
+        timeout: float = 60.0,
+        heartbeat_timeout: float = 45.0,
+    ) -> dict:
         """
         Await the result of a delegated task.
-        Returns result dict on success, raises TimeoutError or RuntimeError on failure.
+
+        Args:
+            timeout:           Overall deadline in seconds.
+            heartbeat_timeout: If >0, raise NetworkTimeoutError when no
+                               heartbeat (or initial response) is received
+                               within this many seconds.  Defaults to 45 s.
+
+        Returns result dict on success.
+        Raises TimeoutError on overall deadline, NetworkTimeoutError on
+        heartbeat silence, or RuntimeError on task failure.
         """
         task = self._outbound.get(task_id)
         if task is None:
@@ -253,19 +277,45 @@ class TaskDelegate:
                 raise RuntimeError(f"Task {task_id} failed: {task.error}")
             return task.result
 
-        # Create a Future that will be resolved when the result arrives.
-        # Use get_running_loop() (preferred over deprecated get_event_loop()).
         loop = asyncio.get_running_loop()
         fut: asyncio.Future = loop.create_future()
         self._result_futures[task_id] = fut
 
+        # Seed heartbeat reference time with task creation so the window
+        # starts from when we first sent the task, not from when a heartbeat
+        # actually arrived (which may never happen for short tasks).
+        if task_id not in self._heartbeat_times:
+            self._heartbeat_times[task_id] = task.created_at
+
+        # How often to wake up and check heartbeat staleness.
+        check_interval = (
+            min(heartbeat_timeout / 3.0, 10.0) if heartbeat_timeout > 0 else timeout
+        )
+
         try:
-            result = await asyncio.wait_for(asyncio.shield(fut), timeout=timeout)
-            return result
-        except asyncio.TimeoutError:
-            task.status = TaskStatus.TIMEOUT
-            self._result_futures.pop(task_id, None)
-            raise TimeoutError(f"Task {task_id} timed out after {timeout}s")
+            deadline = time.time() + timeout
+            while True:
+                remaining = deadline - time.time()
+                if remaining <= 0:
+                    task.status = TaskStatus.TIMEOUT
+                    raise TimeoutError(f"Task {task_id} timed out after {timeout}s")
+
+                wait_time = min(remaining, check_interval)
+                try:
+                    result = await asyncio.wait_for(asyncio.shield(fut), timeout=wait_time)
+                    return result
+                except asyncio.TimeoutError:
+                    pass  # No result yet — check heartbeat below
+
+                if heartbeat_timeout > 0:
+                    last_hb = self._heartbeat_times.get(task_id, task.created_at)
+                    since_hb = time.time() - last_hb
+                    if since_hb > heartbeat_timeout:
+                        task.status = TaskStatus.TIMEOUT
+                        raise NetworkTimeoutError(
+                            f"Task {task_id}: no heartbeat for {since_hb:.0f}s "
+                            f"(possible network disconnect)"
+                        )
         finally:
             self._result_futures.pop(task_id, None)
 
@@ -355,6 +405,26 @@ class TaskDelegate:
         log.info("Task %s cancelled by remote request", task_id)
         await self._send_result(task, status=TaskStatus.CANCELLED)
 
+    async def _heartbeat_sender(self, task: DelegatedTask) -> None:
+        """Periodically broadcast task_heartbeat while the task is RUNNING."""
+        start = time.time()
+        while task.status == TaskStatus.RUNNING:
+            await asyncio.sleep(self.HEARTBEAT_INTERVAL)
+            if task.status != TaskStatus.RUNNING:
+                break
+            if self._broadcast_fn:
+                await self._broadcast_fn({
+                    "type": "task_heartbeat",
+                    "task_id": task.task_id,
+                    "executor_node": self._local_node_id,
+                    "source_node": task.source_node,
+                    "elapsed_time": time.time() - start,
+                })
+            log.debug(
+                "Sent heartbeat for task %s (elapsed=%.1fs)",
+                task.task_id, time.time() - start,
+            )
+
     async def _execute_task(self, task: DelegatedTask) -> None:
         # Bail out immediately if already cancelled before we even start
         if task.status == TaskStatus.CANCELLED:
@@ -376,6 +446,7 @@ class TaskDelegate:
                 return
 
             task.status = TaskStatus.RUNNING
+            hb_task = asyncio.ensure_future(self._heartbeat_sender(task))
             try:
                 result = await asyncio.wait_for(handler(task), timeout=task.timeout)
                 task.result = result if isinstance(result, dict) else {"value": result}
@@ -407,6 +478,12 @@ class TaskDelegate:
                 else:
                     task.status = TaskStatus.FAILED
                     break
+            finally:
+                hb_task.cancel()
+                try:
+                    await hb_task
+                except asyncio.CancelledError:
+                    pass
 
         await self._send_result(task, status=task.status)
 
@@ -537,6 +614,21 @@ class TaskDelegate:
         )
 
     # ── Result reception ─────────────────────────────────────────────────────
+
+    def handle_task_heartbeat(self, msg: dict) -> None:
+        """Handle a task_heartbeat from the executing node (sync, gossip thread).
+
+        Updates the last-heartbeat timestamp so wait_result() can detect
+        network silence vs. a normally-running long task.
+        """
+        task_id = msg.get("task_id", "")
+        if task_id not in self._outbound:
+            return
+        self._heartbeat_times[task_id] = time.time()
+        log.debug(
+            "Heartbeat received for task %s (executor=%s elapsed=%.1fs)",
+            task_id, msg.get("executor_node"), msg.get("elapsed_time", 0),
+        )
 
     def handle_task_result(self, msg: dict) -> None:
         """Handle a task_result message received from a remote node (sync, called from gossip thread)."""

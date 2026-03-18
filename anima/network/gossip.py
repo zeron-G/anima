@@ -7,6 +7,7 @@ issues. The gossip loop runs in a daemon thread.
 from __future__ import annotations
 
 import asyncio
+import collections
 import math
 import threading
 import time
@@ -97,11 +98,19 @@ class GossipMesh:
         self._on_task_cancel: Callable | None = None      # async(task_id) — called when a cancel arrives
         self._on_task_status_query: Callable | None = None  # async(msg) — status query from remote node
         self._on_task_status_reply: Callable | None = None  # sync(msg) — status reply to a query we sent
+        self._on_task_heartbeat: Callable | None = None   # sync(msg) — periodic heartbeat from executor
 
         # Pending outbound task messages (task_delegate / task_result)
         self._outbound_task_msgs: list[dict] = []
 
+        # Event that wakes the gossip thread immediately when outbound messages
+        # are queued (avoids waiting up to GOSSIP_INTERVAL for task messages).
+        self._send_now = threading.Event()
+
         self._started_at: float = time.time()
+
+        # LRU cache of recently seen message IDs for deduplication (max 1000)
+        self._seen_msgs: collections.OrderedDict = collections.OrderedDict()
 
         # Event loop reference captured at start() time so the gossip thread
         # can safely post callbacks via call_soon_threadsafe.
@@ -147,6 +156,7 @@ class GossipMesh:
         # Store it and send on next gossip tick.
         with self._lock:
             self._incoming_events.append(event_data)
+        self._send_now.set()  # wake gossip thread immediately
 
     async def send_task_message(self, msg_type: str, payload: dict) -> None:
         """Queue a task protocol message for broadcast on the next gossip tick.
@@ -156,6 +166,7 @@ class GossipMesh:
         """
         with self._lock:
             self._outbound_task_msgs.append({"_msg_type": msg_type, **payload})
+        self._send_now.set()  # wake gossip thread immediately
 
     def attach_task_delegate(self, delegate: "Any") -> None:
         """Wire a TaskDelegate instance into the gossip mesh.
@@ -186,6 +197,7 @@ class GossipMesh:
         self._on_task_cancel = delegate.handle_cancel                # async coroutine
         self._on_task_status_query = delegate.handle_status_query    # async coroutine
         self._on_task_status_reply = delegate.handle_status_reply    # sync callback
+        self._on_task_heartbeat = delegate.handle_task_heartbeat     # sync callback
         log.debug("TaskDelegate attached to GossipMesh")
 
     def get_peers(self) -> dict[str, NodeState]:
@@ -257,25 +269,37 @@ class GossipMesh:
             log.info("Connected to peer: %s", addr)
 
         connected_peers: set[str] = set(self._peer_addresses)
+        last_gossip_time: float = 0.0
 
         while self._running:
-            tick_start = time.time()
+            # Clear before computing wait to avoid missing a concurrent set().
+            self._send_now.clear()
+            elapsed = time.time() - last_gossip_time
+            wait_time = max(0.0, self.GOSSIP_INTERVAL - elapsed)
+            self._send_now.wait(timeout=wait_time)
+
             try:
-                # 1. Bump local state
-                self._local_state.bump_version()
+                now = time.time()
+                do_gossip = (now - last_gossip_time) >= self.GOSSIP_INTERVAL
 
-                # 2. Broadcast own state
-                msg = NetworkMessage(
-                    type="gossip",
-                    source_node=self._identity.node_id,
-                    target_node="*",
-                    payload=self._local_state.to_dict(),
-                )
-                if self._secret:
-                    msg.sign(self._secret)
-                pub.send(msg.pack())
+                if do_gossip:
+                    last_gossip_time = now
 
-                # 3. Send any pending events
+                    # 1. Bump local state
+                    self._local_state.bump_version()
+
+                    # 2. Broadcast own state
+                    msg = NetworkMessage(
+                        type="gossip",
+                        source_node=self._identity.node_id,
+                        target_node="*",
+                        payload=self._local_state.to_dict(),
+                    )
+                    if self._secret:
+                        msg.sign(self._secret)
+                    pub.send(msg.pack())
+
+                # 3. Send any pending events (always — not just on gossip ticks)
                 with self._lock:
                     pending = list(self._incoming_events)
                     self._incoming_events.clear()
@@ -313,7 +337,7 @@ class GossipMesh:
                     pub.send(tmsg.pack())
                     log.debug("Sent %s to %s", msg_type, target)
 
-                # 4. Receive messages
+                # 4. Receive messages (always — drain on every wakeup)
                 for _ in range(50):  # drain up to 50 messages per tick
                     try:
                         data = sub.recv(zmq.NOBLOCK)
@@ -326,6 +350,17 @@ class GossipMesh:
                             continue
                         if self._secret and not rmsg.verify(self._secret):
                             continue
+
+                        # Dedup non-gossip messages by ID; drop expired TTL
+                        if rmsg.type != "gossip":
+                            if rmsg.ttl <= 0:
+                                continue
+                            rmsg.ttl -= 1
+                            if rmsg.id in self._seen_msgs:
+                                continue
+                            self._seen_msgs[rmsg.id] = True
+                            if len(self._seen_msgs) > 1000:
+                                self._seen_msgs.popitem(last=False)
 
                         if rmsg.type == "gossip":
                             self._handle_gossip(rmsg, sub, connected_peers)
@@ -342,18 +377,17 @@ class GossipMesh:
                             self._handle_task_status_query(rmsg)
                         elif rmsg.type == "task_status_reply":
                             self._handle_task_status_reply(rmsg)
+                        elif rmsg.type == "task_heartbeat":
+                            self._handle_task_heartbeat(rmsg)
                     except Exception as e:
                         log.debug("Message processing error: %s", e)
 
-                # 5. Check failures
-                self._check_failures()
+                # 5. Check failures (only on gossip ticks — phi needs real intervals)
+                if do_gossip:
+                    self._check_failures()
 
             except Exception as e:
                 log.error("Gossip thread error: %s", e)
-
-            # Sleep to the next absolute tick — prevents interval drift
-            sleep_time = max(0, self.GOSSIP_INTERVAL - (time.time() - tick_start))
-            time.sleep(sleep_time)
 
         pub.close()
         sub.close()
@@ -507,6 +541,26 @@ class GossipMesh:
             msg.source_node,
             msg.payload.get("task_id"),
             msg.payload.get("status"),
+        )
+
+    def _handle_task_heartbeat(self, msg: NetworkMessage) -> None:
+        """Handle an incoming task_heartbeat from an executing node.
+
+        Only acts on heartbeats for tasks this node originated
+        (source_node == our node_id).  Forwards to the sync TaskDelegate
+        callback so it can refresh the last-heartbeat timestamp.
+        """
+        source_node = msg.payload.get("source_node", "")
+        if source_node and source_node != self._identity.node_id:
+            return  # Heartbeat is for a different requester
+
+        if self._on_task_heartbeat:
+            self._on_task_heartbeat(msg.payload)
+        log.debug(
+            "Received task_heartbeat from %s: task=%s elapsed=%.1fs",
+            msg.source_node,
+            msg.payload.get("task_id"),
+            msg.payload.get("elapsed_time", 0),
         )
 
     def _check_failures(self) -> None:

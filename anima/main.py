@@ -72,7 +72,8 @@ async def _init_core(config: dict) -> dict:
     # Register known remote nodes for cross-node communication
     from anima.tools.builtin.remote import register_node
     for node_cfg in get("network.remote_nodes", []):
-        register_node(node_cfg["name"], node_cfg["host"], node_cfg["user"], node_cfg["password"])
+        register_node(node_cfg["name"], node_cfg["host"], node_cfg["user"], node_cfg["password"],
+                      hosts=node_cfg.get("hosts"))
 
     tool_executor = ToolExecutor(
         registry=tool_registry,

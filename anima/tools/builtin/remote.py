@@ -28,8 +28,8 @@ def set_task_delegate(td) -> None:
     _task_delegate = td
 
 
-def register_node(name: str, host: str, user: str, password: str) -> None:
-    _KNOWN_NODES[name] = {"host": host, "user": user, "password": password}
+def register_node(name: str, host: str, user: str, password: str, hosts: list[str] | None = None) -> None:
+    _KNOWN_NODES[name] = {"host": host, "hosts": hosts or [], "user": user, "password": password}
 
 
 def _get_ssh(node: str):
@@ -37,11 +37,19 @@ def _get_ssh(node: str):
     info = _KNOWN_NODES.get(node)
     if not info:
         raise ValueError(f"Unknown node '{node}'. Available: {list(_KNOWN_NODES.keys())}")
-    ssh = paramiko.SSHClient()
-    ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-    ssh.connect(info["host"], username=info["user"], password=info["password"],
-                timeout=10, look_for_keys=False, allow_agent=False)
-    return ssh
+    hosts_to_try = [info["host"]] + (info.get("hosts") or [])
+    last_exc: Exception = RuntimeError("No hosts to try")
+    for host in hosts_to_try:
+        try:
+            ssh = paramiko.SSHClient()
+            ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+            ssh.connect(host, username=info["user"], password=info["password"],
+                        timeout=10, look_for_keys=False, allow_agent=False)
+            return ssh
+        except Exception as e:
+            last_exc = e
+            log.debug("SSH connect to %s failed (%s), trying next host", host, e)
+    raise last_exc
 
 
 def _exec_sync(node: str, command: str, timeout: int = 30) -> dict:
@@ -154,12 +162,15 @@ async def _delegate_task(node: str, task: str, timeout: int = 120) -> dict:
             remote_nodes: list[dict] = cfg_get("network.remote_nodes", [])
             for rn in remote_nodes:
                 if rn.get("name", "").lower() == node.lower():
-                    host_ip = rn.get("host", "")
-                    # Try IP match
-                    matched = ip_to_peer.get(host_ip)
-                    if matched:
-                        target_node_id = matched
-                        log.info("Resolved '%s' via config IP %s → %s", node, host_ip, matched)
+                    # Try primary host then fallback hosts list
+                    candidate_ips = [rn.get("host", "")] + (rn.get("hosts") or [])
+                    for host_ip in candidate_ips:
+                        matched = ip_to_peer.get(host_ip)
+                        if matched:
+                            target_node_id = matched
+                            log.info("Resolved '%s' via config IP %s → %s", node, host_ip, matched)
+                            break
+                    if target_node_id:
                         break
                     # Try hostname match from config name
                     for hname, pid in hostname_to_peer.items():

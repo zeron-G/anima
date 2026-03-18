@@ -278,57 +278,45 @@ function renderChat(d) {
   const history = d.chat_history || [];
   const activity = d.activity || [];
 
-  const el = document.getElementById('chat-msgs');
   const chatChanged = history.length !== _lastRenderedChat;
   const actChanged = activity.length !== lastActivityLen;
   if (!chatChanged && !actChanged) return;
 
-  // ── Incremental message rendering (no full innerHTML rebuild) ──
+  // ── Messages: only rebuild when new messages arrive ──
   if (chatChanged) {
-    // Remove old activity lines (they'll be re-added below)
-    el.querySelectorAll('.msg.activity').forEach(n => n.remove());
-
-    // Only append NEW messages (don't touch existing ones)
-    const startIdx = _lastRenderedChat;
-    for (let i = startIdx; i < history.length; i++) {
-      const m = history[i];
+    const el = document.getElementById('chat-msgs');
+    let html = '';
+    for (const m of history) {
       const role = m.role === 'user' ? 'user' : m.role === 'system' ? 'system' : 'agent';
-      const div = document.createElement('div');
-      div.className = `msg ${role}`;
-      if (role === 'agent') {
-        div.innerHTML = renderMd(m.content) +
-          `<div class="msg-actions"><button class="msg-action-btn" onclick="copyMessage(${JSON.stringify(JSON.stringify(m.content))})"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg> Copy</button></div>`;
-      } else {
-        div.textContent = m.content;
-      }
-      el.appendChild(div);
+      const content = role === 'agent' ? renderMd(m.content) : esc(m.content);
+      const actions = role === 'agent'
+        ? `<div class="msg-actions"><button class="msg-action-btn" onclick="copyMessage(${JSON.stringify(JSON.stringify(m.content))})">Copy</button></div>`
+        : '';
+      html += `<div class="msg ${role}">${content}${actions}</div>`;
     }
+    el.innerHTML = html;
+    el.scrollTop = el.scrollHeight;
     _lastRenderedChat = history.length;
   }
 
-  // ── Activity lines: replace only these (lightweight) ──
+  // ── Activity: separate container, updated independently (no flicker on msgs) ──
   if (actChanged) {
-    el.querySelectorAll('.msg.activity').forEach(n => n.remove());
     lastActivityLen = activity.length;
-    const recentAct = activity.slice(-3);
-    for (const a of recentAct) {
-      const stage = a.stage || '';
-      const detail = a.detail || '';
-      const tool = a.tool || '';
-      let text = '';
-      if (stage === 'executing' && tool) text = `⚙ ${tool} ${detail.substring(0,50)}`;
-      else if (stage === 'thinking' && detail) text = `◐ ${detail.substring(0,60)}`;
-      if (text) {
-        const div = document.createElement('div');
-        div.className = 'msg activity';
-        div.textContent = text;
-        el.appendChild(div);
+    const actEl = document.getElementById('chat-activity');
+    if (actEl) {
+      const last = activity[activity.length - 1];
+      if (last) {
+        const s = last.stage || '';
+        const t = last.tool || '';
+        const d2 = (last.detail || '').substring(0, 60);
+        if (s === 'executing' && t) actEl.textContent = `⚙ ${t} ${d2}`;
+        else if (s === 'thinking') actEl.textContent = `◐ thinking...`;
+        else if (s === 'idle') actEl.textContent = '';
+        else if (s === 'error') actEl.textContent = `✕ ${d2}`;
+        else actEl.textContent = '';
       }
     }
   }
-
-  // Scroll to bottom only when new content added
-  if (chatChanged) el.scrollTop = el.scrollHeight;
 
   // Bubble + TTS for new messages
   if (chatChanged && history.length > 0) {
