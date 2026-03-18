@@ -1,0 +1,19 @@
+{
+  "id": "iss_4fc80e9b677f",
+  "title": "[audit-t1] F401: `asyncio` imported but unused",
+  "description": "{\n  \"tool\": \"ruff\",\n  \"severity\": \"error\",\n  \"message\": \"F401: `asyncio` imported but unused\",\n  \"file\": \"D:\\\\data\\\\code\\\\github\\\\anima\\\\anima\\\\llm\\\\providers.py\",\n  \"line\": 198,\n  \"files\": [\n    \"D:\\\\data\\\\code\\\\github\\\\anima\\\\anima\\\\llm\\\\providers.py\"\n  ]\n}",
+  "status": "closed",
+  "priority": "medium",
+  "labels": [
+    "audit",
+    "tier-1"
+  ],
+  "files": [
+    "D:\\data\\code\\github\\anima\\anima\\llm\\providers.py"
+  ],
+  "reporter": "self_audit",
+  "assignee": "",
+  "created_at": 1773851552.3682048,
+  "updated_at": 1773852631.7435796,
+  "resolution": "误报。asyncio 在文件顶部第22行已正确导入，并在多处 await asyncio.sleep() 中使用。audit 扫描时行号已过期，实际代码无问题。"
+}

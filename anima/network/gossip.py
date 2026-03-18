@@ -114,6 +114,7 @@ class GossipMesh:
         # are queued (avoids waiting up to GOSSIP_INTERVAL for task messages).
         self._send_now = threading.Event()
 
+        self._node_addr_map: dict[str, str] = {}  # node_id → currently connected addr
         self._started_at: float = time.time()
 
         # LRU cache of recently seen message IDs for deduplication (max 1000)
@@ -298,16 +299,26 @@ class GossipMesh:
             wait_time = max(0.0, self.GOSSIP_INTERVAL - elapsed)
             self._send_now.wait(timeout=wait_time)
 
+            now = time.time()
+            do_gossip = (now - last_gossip_time) >= self.GOSSIP_INTERVAL
+
+            if do_gossip:
+                last_gossip_time = now
+
+                # 1. Bump local state
+                self._local_state.bump_version()
+
+            # Drain outbound queues before entering send block
+            with self._lock:
+                pending = list(self._incoming_events)
+                self._incoming_events.clear()
+                pending_tasks = list(self._outbound_task_msgs)
+                self._outbound_task_msgs.clear()
+
+            # --- Block 1: Send (isolated — failure won't skip receive) ---
+            sent_task_count = 0
             try:
-                now = time.time()
-                do_gossip = (now - last_gossip_time) >= self.GOSSIP_INTERVAL
-
                 if do_gossip:
-                    last_gossip_time = now
-
-                    # 1. Bump local state
-                    self._local_state.bump_version()
-
                     # 2. Broadcast own state
                     msg = NetworkMessage(
                         type="gossip",
@@ -320,11 +331,6 @@ class GossipMesh:
                     pub.send(msg.pack())
 
                 # 3. Send any pending events (always — not just on gossip ticks)
-                with self._lock:
-                    pending = list(self._incoming_events)
-                    self._incoming_events.clear()
-                    pending_tasks = list(self._outbound_task_msgs)
-                    self._outbound_task_msgs.clear()
                 for evt in pending:
                     emsg = NetworkMessage(
                         type="event",
@@ -355,8 +361,22 @@ class GossipMesh:
                     if self._secret:
                         tmsg.sign(self._secret)
                     pub.send(tmsg.pack())
+                    sent_task_count += 1
                     log.debug("Sent %s to %s", msg_type, target)
+            except zmq.ZMQError as e:
+                log.warning("Gossip send error (will retry task msgs next tick): %s", e)
+                # Re-queue unsent task messages
+                unsent = pending_tasks[sent_task_count:]
+                if unsent:
+                    # Restore _msg_type on the message that failed mid-send
+                    # (already popped but send didn't complete)
+                    if "_msg_type" not in unsent[0]:
+                        unsent[0]["_msg_type"] = msg_type
+                    with self._lock:
+                        self._outbound_task_msgs[:0] = unsent
 
+            # --- Block 2: Receive + failure detection (independent of send) ---
+            try:
                 # 4. Receive messages (always — drain on every wakeup)
                 for _ in range(50):  # drain up to 50 messages per tick
                     try:
@@ -409,9 +429,8 @@ class GossipMesh:
                         last_reconnect_time = now
                         self._reconnect_dead_peers(sub, connected_peers)
                         self._identity.unregister_stale_nodes(max_dead_hours=1.0)
-
             except Exception as e:
-                log.error("Gossip thread error: %s", e)
+                log.error("Gossip receive/check error: %s", e)
 
         pub.close()
         sub.close()
@@ -461,6 +480,7 @@ class GossipMesh:
                         sub_socket.connect(f"tcp://{new_addr}")
                         connected.add(new_addr)
                         log.info("Auto-connected to new peer: %s at %s", nid, new_addr)
+                    self._node_addr_map[nid] = new_addr
 
         self._detector.report_heartbeat(nid)
 
@@ -667,11 +687,20 @@ class GossipMesh:
                 continue
             addr = f"{ip}:{port}"
             try:
+                old_addr = self._node_addr_map.get(nid)
+                if old_addr and old_addr != addr and old_addr in connected:
+                    try:
+                        sub_socket.disconnect(f"tcp://{old_addr}")
+                        connected.discard(old_addr)
+                        log.debug("Disconnected stale addr for %s: %s", nid, old_addr)
+                    except zmq.ZMQError:
+                        pass
                 if addr not in connected:
                     sub_socket.connect(f"tcp://{addr}")
                     connected.add(addr)
                     log.debug("Re-connected to %s peer %s at %s", state.status, nid, addr)
                 else:
                     log.debug("Skip reconnect for %s peer %s at %s (already connected)", state.status, nid, addr)
+                self._node_addr_map[nid] = addr
             except zmq.ZMQError as e:
                 log.debug("Reconnect failed for %s at %s: %s", nid, addr, e)
