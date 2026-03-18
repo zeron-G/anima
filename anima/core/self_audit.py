@@ -110,6 +110,8 @@ class SelfAudit:
     def get_status(self) -> dict:
         return {
             "last_results": {k: v.to_dict() for k, v in self._last_results.items()},
+            "tiers_run": {k: v.timestamp for k, v in self._last_results.items()},
+            "last_run_at": max((v.timestamp for v in self._last_results.values()), default=None),
         }
 
     # ── Tier 1: Static Analysis ──

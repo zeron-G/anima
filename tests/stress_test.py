@@ -37,7 +37,7 @@ async def main():
     lr = LLMRouter('claude-haiku-4-5-20251001','claude-haiku-4-5-20251001', daily_budget=5.0)
     ut = UsageTracker(ms); lr.set_usage_tracker(ut)
     pb = PromptBuilder()
-    am.wire_llm(lr, te, tr, pb)
+    am.wire_llm(lr, te, tr)
     loop = AgenticLoop(event_queue=eq, snapshot_cache=sc, memory_store=ms,
         emotion_state=em, llm_router=lr, prompt_builder=pb,
         tool_executor=te, tool_registry=tr, config=config)
