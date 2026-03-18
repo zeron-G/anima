@@ -90,60 +90,52 @@ class LLMRouter:
                     elapsed, int(_CB_PROBE_INTERVAL_S - (time.time() - self._last_probe_at)))
         return False  # skip
 
+    # Sonnet fallback model for 529 overload
+    SONNET_FALLBACK = "claude-sonnet-4-6"
+
     async def _try_call(self, messages, tier, temperature, tools=None):
-        """Core call logic with timeout + retry. Returns response or None."""
+        """Core call logic: primary model → 529 fallback to Sonnet → retry.
+
+        On 529 (overloaded), immediately switches to Sonnet instead of
+        retrying the same overloaded model.
+        """
         import asyncio as _aio
 
-        max_retries = 1 if self._circuit_open else 2
-        for attempt in range(max_retries + 1):
-            if attempt > 0:
-                wait = min(2 ** attempt * 5, 20)
-                log.info("Retrying in %ds (attempt %d/%d)", wait, attempt, max_retries)
-                await _aio.sleep(wait)
+        # Build model cascade: primary model first, Sonnet fallback on 529
+        primary_model = self._tier2_model if tier <= 2 else self._tier1_model
+        primary_max = self._tier2_max_tokens if tier <= 2 else self._tier1_max_tokens
+        models_to_try = [
+            (primary_model, primary_max, 120),
+        ]
+        # Add Sonnet fallback if primary is not already Sonnet
+        if self.SONNET_FALLBACK not in primary_model:
+            models_to_try.append((self.SONNET_FALLBACK, 4096, 90))
 
-            # Tier 2
-            if tier <= 2:
-                try:
-                    kwargs = dict(model=self._tier2_model, messages=messages,
-                                 max_tokens=self._tier2_max_tokens, temperature=temperature)
-                    if tools:
-                        kwargs["tools"] = tools
-                    resp = await _aio.wait_for(completion(**kwargs), timeout=120)
-                    self._record_usage(resp, tier=2)
-                    self._on_success()
-                    return resp
-                except _aio.TimeoutError:
-                    log.warning("Tier2 timeout (120s)")
-                    self._on_failure()
-                except Exception as e:
-                    if "529" in str(e) or "overloaded" in str(e).lower():
-                        self._on_failure()
-                        continue
-                    log.warning("Tier2 failed: %s", e)
-
-            # Tier 1 fallback
+        for model, max_tokens, timeout in models_to_try:
             try:
-                kwargs = dict(model=self._tier1_model, messages=messages,
-                             max_tokens=self._tier1_max_tokens, temperature=temperature)
+                kwargs = dict(model=model, messages=messages,
+                             max_tokens=max_tokens, temperature=temperature)
                 if tools:
                     kwargs["tools"] = tools
-                resp = await _aio.wait_for(completion(**kwargs), timeout=150)
-                self._record_usage(resp, tier=1)
+                resp = await _aio.wait_for(completion(**kwargs), timeout=timeout)
+                self._record_usage(resp, tier=tier)
                 self._on_success()
                 return resp
             except _aio.TimeoutError:
-                log.error("Tier1 timeout (150s)")
+                log.warning("%s timeout (%ds)", model, timeout)
                 self._on_failure()
-                return None
             except Exception as e:
-                if "529" in str(e) or "overloaded" in str(e).lower():
+                err = str(e)
+                if "529" in err or "overloaded" in err.lower():
+                    log.warning("%s overloaded (529), falling back", model)
                     self._on_failure()
+                    await _aio.sleep(2)  # brief pause before fallback
                     continue
-                log.error("Tier1 failed: %s", e)
+                log.error("%s failed: %s", model, e)
                 self._on_failure()
                 return None
 
-        log.error("All retries exhausted")
+        log.error("All models exhausted (primary + Sonnet fallback)")
         self._on_failure()
         return None
 
