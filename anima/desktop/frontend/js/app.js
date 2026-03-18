@@ -254,97 +254,93 @@ function showToast(text) {
   document.body.appendChild(t); setTimeout(()=>t.remove(),2000);
 }
 
-// ═══ CHAT RENDERING — zero flicker ═══
+// ═══ CHAT RENDERING — terminal style, zero flicker ═══
 let _renderedMsgCount = 0;
+let _lastActLine = null;     // reusable activity line at bottom
 
 function renderChat(d) {
   const history = d.chat_history || [];
   const activity = d.activity || [];
+  const el = document.getElementById('chat-msgs');
 
   // ── Handle history reset/clear ──
   if (history.length < _renderedMsgCount) {
-    document.getElementById('chat-msgs').innerHTML = '';
+    el.innerHTML = '';
     _renderedMsgCount = 0;
+    _lastActLine = null;
   }
 
-  // ── Messages: only process NEW ones ──
+  // ── Messages: append only NEW ones ──
   if (history.length > _renderedMsgCount) {
-    const el = document.getElementById('chat-msgs');
+    // Remove activity line before appending (it goes back at the bottom)
+    if (_lastActLine && _lastActLine.parentNode) _lastActLine.remove();
 
     for (let i = _renderedMsgCount; i < history.length; i++) {
       const m = history[i];
       const role = m.role === 'user' ? 'user' : m.role === 'system' ? 'system' : 'agent';
-
-      const msgDiv = document.createElement('div');
-      msgDiv.className = `msg ${role}`;
+      const div = document.createElement('div');
+      div.className = `msg ${role}`;
 
       if (role === 'agent') {
-        // Use streaming-markdown for agent messages (appends DOM nodes, never rebuilds)
         if (window.smd) {
-          const renderer = window.smd.default_renderer(msgDiv);
+          const renderer = window.smd.default_renderer(div);
           const parser = window.smd.parser(renderer);
           window.smd.parser_write(parser, m.content || '');
           window.smd.parser_end(parser);
         } else {
-          // Fallback if smd not loaded yet
-          msgDiv.innerHTML = renderMd(m.content || '');
+          div.innerHTML = renderMd(m.content || '');
         }
-
-        // Add copy button
-        const actions = document.createElement('div');
-        actions.className = 'msg-actions';
-        actions.innerHTML = `<button class="msg-action-btn" onclick="copyMessage(${JSON.stringify(JSON.stringify(m.content))})">Copy</button>`;
-        msgDiv.appendChild(actions);
-
-        // Highlight code blocks
-        msgDiv.querySelectorAll('pre code').forEach(block => {
-          if (typeof hljs !== 'undefined') {
-            try { hljs.highlightElement(block); } catch(_) {}
-          }
+        div.querySelectorAll('pre code').forEach(block => {
+          if (typeof hljs !== 'undefined') try { hljs.highlightElement(block); } catch(_) {}
         });
       } else {
-        msgDiv.textContent = m.content || '';
+        div.textContent = m.content || '';
       }
-
-      el.appendChild(msgDiv);
+      el.appendChild(div);
     }
 
     _renderedMsgCount = history.length;
-    el.scrollTop = el.scrollHeight;
 
-    // Bubble + TTS for latest new message
+    // Bubble + TTS for latest new agent message
     const last = history[history.length - 1];
     if (last && last.role !== 'user' && last.role !== 'system') {
       showBubble(last.content);
-      if (voiceManager?.autoTTS && !evaProcessing && last.tts_url && !playedTTS.has(history.length-1)) {
-        playedTTS.add(history.length-1);
+      if (voiceManager?.autoTTS && !evaProcessing && last.tts_url && !playedTTS.has(history.length - 1)) {
+        playedTTS.add(history.length - 1);
         voiceManager.playUrl(last.tts_url);
       }
     }
   }
 
-  // ── Activity: separate container, textContent only ──
-  const actEl = document.getElementById('chat-activity');
-  if (actEl && activity.length !== lastActivityLen) {
+  // ── Activity: single reusable line at bottom of terminal ──
+  if (activity.length !== lastActivityLen) {
     lastActivityLen = activity.length;
-    const last = activity[activity.length - 1];
-    if (last) {
-      const s = last.stage || '';
-      const t = last.tool || '';
-      const det = (last.detail || '').substring(0, 60);
-      if (s === 'executing' && t) actEl.textContent = `⚙ ${t} ${det}`;
-      else if (s === 'thinking') actEl.textContent = '◐ thinking...';
-      else if (s === 'idle') actEl.textContent = '';
-      else if (s === 'error') actEl.textContent = `✕ ${det}`;
-      else actEl.textContent = '';
+    const last = activity.length ? activity[activity.length - 1] : null;
+    if (last && last.stage && last.stage !== 'idle') {
+      if (!_lastActLine) {
+        _lastActLine = document.createElement('div');
+        _lastActLine.className = 'msg activity';
+      }
+      const stg = last.stage;
+      const det = (last.detail || '').substring(0, 80);
+      const tool = last.tool || '';
+      if (stg === 'executing' && tool) _lastActLine.innerHTML = `<span class="act-ok">⚙</span> ${esc(tool)} ${esc(det)}`;
+      else if (stg === 'thinking' || stg === 'deciding') _lastActLine.textContent = '◐ thinking...';
+      else if (stg === 'tool_done') _lastActLine.innerHTML = `<span class="act-ok">✓</span> ${esc(det)}`;
+      else if (stg === 'error') _lastActLine.innerHTML = `<span class="act-err">✕</span> ${esc(det)}`;
+      else _lastActLine.textContent = `${stg} ${det}`;
+      if (!_lastActLine.parentNode) el.appendChild(_lastActLine);
+    } else if (_lastActLine && _lastActLine.parentNode) {
+      _lastActLine.remove();
     }
   }
 
-  // ── Update processing state for typing indicator ──
+  el.scrollTop = el.scrollHeight;
+
+  // ── Processing state for TTS gating ──
   if (activity.length > 0) {
     const lastAct = activity[activity.length - 1];
-    const isProcessing = lastAct && lastAct.stage && !['idle', 'error'].includes(lastAct.stage);
-    evaProcessing = isProcessing;
+    evaProcessing = lastAct && lastAct.stage && !['idle', 'error'].includes(lastAct.stage);
   }
 }
 
