@@ -53,14 +53,21 @@ def set_self_audit(audit):
 # ── Idle score helpers ──
 
 def compute_system_idle_score(snapshot: dict) -> float:
-    """System load dimension (0.0-1.0)."""
+    """System load dimension (0.0-1.0).
+
+    Only throttle when system is truly overloaded (> 90% CPU or > 95% MEM).
+    Normal usage like games at 30-60% CPU should not block Eva's work.
+    """
     cpu = snapshot.get("cpu_percent", 50)
     mem = snapshot.get("memory_percent", 50)
-    if cpu > 80 or mem > 90:
+    if cpu > 90 or mem > 95:
         return 0.0
+    if cpu > 80:
+        return 0.2
+    # Normal range: linear scale, generous
     cpu_idle = max(0, 1.0 - cpu / 100.0)
     mem_idle = max(0, 1.0 - mem / 100.0)
-    return round(0.7 * cpu_idle + 0.3 * mem_idle, 3)
+    return round(0.6 * cpu_idle + 0.4 * mem_idle, 3)
 
 
 def compute_queue_idle_score(event_queue: EventQueue) -> float:
@@ -89,12 +96,14 @@ class IdleDetector:
         self._user_activity = user_activity
         self._event_queue = event_queue
         w = weights or {}
-        self._w_user = w.get("user_activity", 0.5)
-        self._w_system = w.get("system_load", 0.3)
+        # Weights: message idle is primary (is user talking to Eva?)
+        # System load is secondary (only matters when truly overloaded)
+        self._w_user = w.get("user_activity", 0.6)
+        self._w_system = w.get("system_load", 0.2)
         self._w_queue = w.get("queue_depth", 0.2)
         self._idle_score: float = 0.0
         self._idle_history: list[float] = []
-        self._alpha = 0.3  # EMA smoothing factor
+        self._alpha = 0.4  # EMA smoothing — respond faster to state changes
 
     def update(self, system_snapshot: dict) -> float:
         """Called every script heartbeat tick. Returns smoothed idle_score."""
@@ -131,12 +140,19 @@ class IdleDetector:
 
     @property
     def level(self) -> str:
+        """Idle level — lowered thresholds so Eva works more actively.
+
+        busy     < 0.15  (only when user is actively chatting right now)
+        light    < 0.35  (user chatted recently, do lightweight tasks)
+        moderate < 0.55  (user away a few min, proposals ok)
+        deep     >= 0.55 (user doing other things, full autonomy)
+        """
         s = self._idle_score
-        if s < 0.3:
+        if s < 0.15:
             return "busy"
-        elif s < 0.6:
+        elif s < 0.35:
             return "light"
-        elif s < 0.8:
+        elif s < 0.55:
             return "moderate"
         return "deep"
 
@@ -315,7 +331,7 @@ def _default_task_pool() -> list[IdleTask]:
 # ── Idle Scheduler (core) ──
 
 _LEVEL_ORDER = ["light", "moderate", "deep"]
-_LEVEL_THRESHOLDS = {"busy": 0.0, "light": 0.3, "moderate": 0.6, "deep": 0.8}
+_LEVEL_THRESHOLDS = {"busy": 0.0, "light": 0.15, "moderate": 0.35, "deep": 0.55}
 
 
 class IdleScheduler:

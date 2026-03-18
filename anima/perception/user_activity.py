@@ -81,25 +81,32 @@ class UserActivityDetector:
         return time.time() - self._last_message_time
 
     def compute_user_idle_score(self) -> float:
-        """User activity dimension idle score (0.0-1.0).
+        """User idle score (0.0-1.0) — measures how free Eva is to work.
 
-        Combines system-level input idle and ANIMA message idle.
-        - Active (< 60s) → 0.0
-        - Short absence (1-5min) → 0.1-0.5
-        - Long absence (5-30min) → 0.5-0.8
-        - Sleeping (> 30min) → 0.8-1.0
+        Primary signal: time since last message to Eva (msg_idle).
+        The user playing games / browsing / coding is NOT "busy with Eva".
+        Eva should only hold back when the user is actively chatting with her.
+
+        System input idle is only used as a small bonus: if BOTH the user
+        isn't talking AND not touching keyboard, Eva is even more free.
+
+        Scale:
+        - Just chatted (< 2 min)    → 0.0-0.2 (respond mode, hold back)
+        - Stepped away (2-10 min)   → 0.3-0.7 (light/moderate tasks ok)
+        - Doing other things (> 10) → 0.8-1.0 (full autonomy)
         """
-        sys_idle = self.get_system_idle_seconds()
         msg_idle = self.get_message_idle_seconds()
 
-        # Use the more conservative (shorter) idle signal
-        effective_idle = min(sys_idle, msg_idle)
+        if msg_idle < 120:           # < 2 min — user is chatting
+            score = 0.1 * (msg_idle / 120)
+        elif msg_idle < 600:         # 2-10 min — user stepped away
+            score = 0.3 + 0.4 * ((msg_idle - 120) / 480)
+        else:                        # > 10 min — user doing their thing
+            score = min(1.0, 0.8 + 0.2 * ((msg_idle - 600) / 1800))
 
-        if effective_idle < 60:
-            return 0.0
-        elif effective_idle < 300:       # 1-5 min
-            return 0.1 + 0.4 * ((effective_idle - 60) / 240)
-        elif effective_idle < 1800:      # 5-30 min
-            return 0.5 + 0.3 * ((effective_idle - 300) / 1500)
-        else:                            # > 30 min
-            return min(1.0, 0.8 + 0.2 * ((effective_idle - 1800) / 3600))
+        # Bonus: if system input is also idle (AFK), boost confidence slightly
+        sys_idle = self.get_system_idle_seconds()
+        if sys_idle > 300:  # 5+ min no keyboard/mouse
+            score = min(1.0, score + 0.1)
+
+        return round(score, 3)
