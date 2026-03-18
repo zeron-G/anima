@@ -20,6 +20,7 @@ Model prefix routing:
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import re
@@ -195,9 +196,6 @@ class LocalServerManager:
 
 
 # Singleton
-import asyncio as _asyncio
-import time as _time
-
 _local_server = LocalServerManager()
 
 
