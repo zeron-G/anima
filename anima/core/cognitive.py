@@ -218,6 +218,7 @@ class AgenticLoop:
         is_self = event.type in (
             EventType.STARTUP, EventType.SELF_THINKING, EventType.FOLLOW_UP,
             EventType.FILE_CHANGE, EventType.SYSTEM_ALERT, EventType.SCHEDULED_TASK,
+            EventType.IDLE_TASK,
         )
         # TASK_DELEGATE is from another node — response goes back via gossip, not terminal
         is_delegation = event.type == EventType.TASK_DELEGATE
