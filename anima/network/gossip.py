@@ -49,13 +49,19 @@ class PhiAccrualDetector:
             elapsed = time.time() - self._last_seen[node_id]
             return elapsed / 5.0
         mean = sum(history) / len(history)
-        variance = sum((x - mean) ** 2 for x in history) / len(history)
-        stddev = max(math.sqrt(variance), 0.1)
+        n = len(history)
+        denom = n - 1 if n >= 2 else n
+        variance = sum((x - mean) ** 2 for x in history) / denom
+        stddev = max(math.sqrt(variance), 0.5)
         elapsed = time.time() - self._last_seen[node_id]
         if elapsed <= mean:
             return 0.0
         y = (elapsed - mean) / stddev
-        return max(0, y * y / 2.0)
+        p = 0.5 * math.erfc(y / math.sqrt(2))
+        if p <= 0:
+            return 99.0  # node is definitely dead
+        phi = -math.log10(p)
+        return max(0.0, phi)
 
 
 class GossipMesh:
@@ -65,6 +71,7 @@ class GossipMesh:
     SUSPECT_PHI = 8.0
     DEAD_PHI = 16.0
     STARTUP_GRACE = 30.0  # seconds after start before marking never-seen nodes as dead
+    RECONNECT_INTERVAL = 30.0  # seconds between reconnect attempts for dead/suspect peers
 
     def __init__(
         self,
@@ -204,6 +211,15 @@ class GossipMesh:
         with self._lock:
             return dict(self._peers)
 
+    def get_peer_state(self, node_id: str) -> "NodeState | None":
+        """Return a shallow copy of a single peer's state, or None if unknown."""
+        with self._lock:
+            state = self._peers.get(node_id)
+            if state is None:
+                return None
+            import copy
+            return copy.copy(state)
+
     def get_alive_peers(self) -> dict[str, NodeState]:
         with self._lock:
             return {nid: s for nid, s in self._peers.items() if s.status == "alive"}
@@ -270,6 +286,7 @@ class GossipMesh:
 
         connected_peers: set[str] = set(self._peer_addresses)
         last_gossip_time: float = 0.0
+        last_reconnect_time: float = 0.0
 
         while self._running:
             # Clear before computing wait to avoid missing a concurrent set().
@@ -385,6 +402,9 @@ class GossipMesh:
                 # 5. Check failures (only on gossip ticks — phi needs real intervals)
                 if do_gossip:
                     self._check_failures()
+                    if (now - last_reconnect_time) >= self.RECONNECT_INTERVAL:
+                        last_reconnect_time = now
+                        self._reconnect_dead_peers(sub, connected_peers)
 
             except Exception as e:
                 log.error("Gossip thread error: %s", e)
@@ -586,6 +606,8 @@ class GossipMesh:
         )
 
     def _check_failures(self) -> None:
+        pending_callbacks: list[tuple] = []
+
         with self._lock:
             for nid, state in list(self._peers.items()):
                 if state.status in ("dead", "isolated"):
@@ -594,11 +616,11 @@ class GossipMesh:
                 if phi >= self.DEAD_PHI and state.status != "dead":
                     state.status = "dead"
                     self._identity.update_node_status(nid, "dead")
-                    self._safe_callback(self._on_node_dead, nid, state)
+                    pending_callbacks.append((self._on_node_dead, nid, state))
                     log.warning("Node DEAD: %s (phi=%.1f)", nid, phi)
                 elif phi >= self.SUSPECT_PHI and state.status == "alive":
                     state.status = "suspect"
-                    self._safe_callback(self._on_node_suspect, nid, state)
+                    pending_callbacks.append((self._on_node_suspect, nid, state))
                     log.warning("Node SUSPECT: %s (phi=%.1f)", nid, phi)
 
             # Mark registered nodes as dead if they never appeared in gossip
@@ -614,6 +636,37 @@ class GossipMesh:
                     if grace_passed:
                         # Never seen in gossip this session — mark dead
                         self._identity.update_node_status(rid, "dead")
-                        self._safe_callback(self._on_node_dead, rid, None)
+                        pending_callbacks.append((self._on_node_dead, rid, None))
                         log.warning("Node DEAD (never seen in gossip): %s", rid)
                     # else: still within startup grace period — wait for first heartbeat
+
+        # Fire callbacks outside the lock to prevent deadlock when sync
+        # callbacks (e.g. on_node_dead → session_router) acquire other locks.
+        for cb, *args in pending_callbacks:
+            self._safe_callback(cb, *args)
+
+    def _reconnect_dead_peers(self, sub_socket, connected: set) -> None:
+        """Refresh TCP connections for dead/suspect peers by disconnect+connect.
+
+        Called every RECONNECT_INTERVAL seconds (from _gossip_thread on gossip
+        ticks).  Does not change peer state — status is managed by phi detector.
+        """
+        with self._lock:
+            peers_snapshot = list(self._peers.items())
+        for nid, state in peers_snapshot:
+            if state.status not in ("dead", "suspect"):
+                continue
+            ip = getattr(state, "ip", "")
+            port = getattr(state, "port", 0)
+            if not ip or not port:
+                continue
+            addr = f"{ip}:{port}"
+            try:
+                if addr in connected:
+                    sub_socket.disconnect(f"tcp://{addr}")
+                    connected.discard(addr)
+                sub_socket.connect(f"tcp://{addr}")
+                connected.add(addr)
+                log.debug("Reconnected to %s peer %s at %s", state.status, nid, addr)
+            except zmq.ZMQError as e:
+                log.debug("Reconnect failed for %s at %s: %s", nid, addr, e)

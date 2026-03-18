@@ -100,7 +100,7 @@ async def _init_core(config: dict) -> dict:
         p = Path(d)
         if p.exists():
             skill_loader.add_skill_dir(p)
-    skills = skill_loader.discover()
+    skill_loader.discover()
     for tool in skill_loader.generate_tools():
         tool_registry.register(tool)
     for cron_job in skill_loader.get_cron_jobs():
@@ -309,6 +309,8 @@ async def _init_network(config: dict, core: dict, llm: dict, heartbeat_deps: dic
     active_channels: dict[str, Any] = {}
     # Futures for gossip-delegated task results: source_tag → Future
     gossip_task_futures: dict[str, asyncio.Future] = {}
+    # Output buffers for multi-segment gossip task responses: source_tag → [segments]
+    gossip_task_buffers: dict[str, list[str]] = {}
 
     event_queue = core["event_queue"]
     evolution_engine = heartbeat_deps["evolution_engine"]
@@ -320,6 +322,7 @@ async def _init_network(config: dict, core: dict, llm: dict, heartbeat_deps: dic
             "gossip_mesh": None,
             "active_channels": active_channels,
             "gossip_task_futures": gossip_task_futures,
+            "gossip_task_buffers": gossip_task_buffers,
             "channels": [],
         }
 
@@ -512,6 +515,7 @@ async def _init_network(config: dict, core: dict, llm: dict, heartbeat_deps: dic
         loop = asyncio.get_running_loop()
         fut: asyncio.Future = loop.create_future()
         gossip_task_futures[source_tag] = fut
+        gossip_task_buffers[source_tag] = []
 
         await event_queue.put(Event(
             type=EventType.USER_MESSAGE,
@@ -521,12 +525,18 @@ async def _init_network(config: dict, core: dict, llm: dict, heartbeat_deps: dic
         ))
 
         try:
-            result_text = await asyncio.wait_for(asyncio.shield(fut), timeout=task.timeout)
+            await asyncio.wait_for(asyncio.shield(fut), timeout=task.timeout)
+            segments = gossip_task_buffers.get(source_tag, [])
+            result_text = "\n\n".join(segments) if segments else fut.result()
             return {"result": result_text}
         except asyncio.TimeoutError:
+            segments = gossip_task_buffers.get(source_tag, [])
+            if segments:
+                return {"result": "\n\n".join(segments)}
             return {"error": f"Task timed out after {task.timeout}s"}
         finally:
             gossip_task_futures.pop(source_tag, None)
+            gossip_task_buffers.pop(source_tag, None)
 
     task_delegate.register_handler("eva_task", _eva_task_handler)
     gossip_mesh.attach_task_delegate(task_delegate)
@@ -631,6 +641,7 @@ async def _init_network(config: dict, core: dict, llm: dict, heartbeat_deps: dic
         "split_brain": split_brain,
         "active_channels": active_channels,
         "gossip_task_futures": gossip_task_futures,
+        "gossip_task_buffers": gossip_task_buffers,
         "_cognitive_ref": _cognitive_ref,
     }
 
@@ -681,7 +692,6 @@ async def _init_cognitive(config: dict, core: dict, llm: dict, heartbeat_deps: d
 
     # Also check for evolution checkpoint (has extra state like emotion)
     checkpoint = ReloadManager.load_checkpoint()
-    is_restart = checkpoint is not None
     if checkpoint:
         cognitive.restore_from_checkpoint(checkpoint)
         heartbeat_deps["heartbeat"].mark_as_restart(
@@ -738,6 +748,7 @@ def _wire_callbacks(cognitive, terminal, dashboard_hub, agent_manager, heartbeat
     """Wire output/status/tick callbacks between subsystems."""
     active_channels = network.get("active_channels", {})
     gossip_task_futures = network.get("gossip_task_futures", {})
+    gossip_task_buffers = network.get("gossip_task_buffers", {})
 
     # Wire output callback: cognitive → terminal + dashboard + channels
     def on_agent_output(text: str, source: str = "") -> None:
@@ -749,11 +760,10 @@ def _wire_callbacks(cognitive, terminal, dashboard_hub, agent_manager, heartbeat
 
         dashboard_hub.add_chat_message("agent", text)
 
-        # Route response back to a gossip-delegated task
+        # Route response back to a gossip-delegated task (accumulate all segments)
         if source and source.startswith("gossip_task:"):
-            fut = gossip_task_futures.get(source)
-            if fut and not fut.done():
-                fut.set_result(text)
+            if source in gossip_task_buffers:
+                gossip_task_buffers[source].append(text)
 
         # Route response back to the originating channel
         if source and source.startswith("discord:"):
@@ -776,6 +786,13 @@ def _wire_callbacks(cognitive, terminal, dashboard_hub, agent_manager, heartbeat
         # Show key stages in terminal
         if stage in ("deciding", "executing"):
             terminal.display_system(f"[{stage}] {detail}")
+        # Resolve gossip_task futures when event processing completes
+        if stage == "idle":
+            for source_tag, buf in list(gossip_task_buffers.items()):
+                if buf:
+                    fut = gossip_task_futures.get(source_tag)
+                    if fut and not fut.done():
+                        fut.set_result("\n\n".join(buf))
 
     cognitive.set_status_callback(on_status)
     agent_manager.set_status_callback(on_status)

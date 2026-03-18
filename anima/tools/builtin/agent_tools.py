@@ -12,6 +12,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from anima.models.tool_spec import ToolSpec, RiskLevel
+from anima.tools.builtin import agent_tracker
 
 if TYPE_CHECKING:
     from anima.core.agents import AgentManager
@@ -46,6 +47,7 @@ async def _spawn_agent(
         )
     else:
         session = await _agent_manager.spawn_shell_task(command=prompt, timeout=timeout)
+    agent_tracker.register(session.id, prompt)
     return {"session_id": session.id, "type": session.type, "status": session.status}
 
 
@@ -56,7 +58,10 @@ async def _check_agent(session_id: str) -> dict:
     session = _agent_manager.get_session(session_id)
     if session is None:
         raise ValueError(f"No agent found with id '{session_id}'")
-    return session.to_dict()
+    result = session.to_dict()
+    if result.get("status") in ("done", "error", "timeout"):
+        agent_tracker.remove(session_id)
+    return result
 
 
 async def _wait_agent(session_id: str, timeout: int = 300) -> dict:
@@ -67,6 +72,7 @@ async def _wait_agent(session_id: str, timeout: int = 300) -> dict:
     if session is None:
         raise ValueError(f"No agent found with id '{session_id}'")
     session = await _agent_manager.wait_for(session_id, timeout=float(timeout))
+    agent_tracker.remove(session_id)
     return session.to_dict()
 
 

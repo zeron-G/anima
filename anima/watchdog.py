@@ -67,9 +67,9 @@ def _read_recent_errors(lines: int = 200) -> list[str]:
         all_lines = text.splitlines()
         recent = all_lines[-lines:]
         errors = [
-            l for l in recent
-            if "[ERROR]" in l or "[CRITICAL]" in l or "Traceback" in l
-            or "Error:" in l or "Exception:" in l
+            line for line in recent
+            if "[ERROR]" in line or "[CRITICAL]" in line or "Traceback" in line
+            or "Error:" in line or "Exception:" in line
         ]
         return errors
     except Exception:
@@ -179,7 +179,7 @@ def _invoke_claude_code(prompt: str, max_budget: float = 2.0) -> tuple[bool, str
         _log("Skipping Claude Code (not available) — restart only")
         return False, "Claude Code CLI not available"
 
-    _log(f"Invoking Claude Code for repair...")
+    _log("Invoking Claude Code for repair...")
     _log(f"Prompt: {prompt[:200]}...")
 
     cmd = [
@@ -263,12 +263,12 @@ def _post_startup_health_check() -> str | None:
             issues.append("Heartbeat: engine not started")
 
         # Check for startup errors
-        error_lines = [l for l in recent if "[ERROR]" in l or "[CRITICAL]" in l]
+        error_lines = [line for line in recent if "[ERROR]" in line or "[CRITICAL]" in line]
         if error_lines:
             issues.append(f"Startup errors ({len(error_lines)}): {error_lines[0]}")
 
         # Check for import errors
-        import_errors = [l for l in recent if "ModuleNotFoundError" in l or "ImportError" in l]
+        import_errors = [line for line in recent if "ModuleNotFoundError" in line or "ImportError" in line]
         if import_errors:
             issues.append(f"Missing module: {import_errors[0]}")
 

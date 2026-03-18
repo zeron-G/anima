@@ -96,13 +96,26 @@ class IssueTracker:
         files: list[str] | None = None,
         reporter: str = "eva",
     ) -> Issue:
+        # Dedup: return existing open issue with same title+files instead of creating a duplicate
+        files_list = files or []
+        for existing in self._cache.values():
+            if (
+                existing.status == IssueStatus.OPEN
+                and existing.title == title
+                and existing.files == files_list
+            ):
+                existing.updated_at = time.time()
+                self._save(existing)
+                log.debug("Issue dedup: skipping duplicate of %s", existing.id)
+                return existing
+
         issue = Issue(
             id=gen_id("iss"),
             title=title,
             description=description,
             priority=IssuePriority(priority),
             labels=labels or [],
-            files=files or [],
+            files=files_list,
             reporter=reporter,
         )
         self._cache[issue.id] = issue

@@ -261,8 +261,11 @@ class TaskDelegate:
         Args:
             timeout:           Overall deadline in seconds.
             heartbeat_timeout: If >0, raise NetworkTimeoutError when no
-                               heartbeat (or initial response) is received
-                               within this many seconds.  Defaults to 45 s.
+                               liveness signal is received within this many
+                               seconds.  A "liveness signal" is any of:
+                               ACCEPTED status update (resets the timer from
+                               acceptance time), a task_heartbeat message, or
+                               task completion.  Defaults to 45 s.
 
         Returns result dict on success.
         Raises TimeoutError on overall deadline, NetworkTimeoutError on
@@ -308,6 +311,12 @@ class TaskDelegate:
                     pass  # No result yet — check heartbeat below
 
                 if heartbeat_timeout > 0:
+                    # While task is still ACCEPTED (queued, not yet running),
+                    # heartbeats are not expected.  Keep the reference current
+                    # so the timeout window only starts once the task is
+                    # executing and expected to send heartbeats.
+                    if task.status == TaskStatus.ACCEPTED:
+                        self._heartbeat_times[task_id] = time.time()
                     last_hb = self._heartbeat_times.get(task_id, task.created_at)
                     since_hb = time.time() - last_hb
                     if since_hb > heartbeat_timeout:
@@ -647,6 +656,18 @@ class TaskDelegate:
         if status in (TaskStatus.DONE, TaskStatus.FAILED, TaskStatus.TIMEOUT):
             task.completed_at = msg.get("completed_at", time.time())
 
+        if status == TaskStatus.ACCEPTED:
+            # Track acceptance time on the outbound task so diagnostics and
+            # wait_result can distinguish queue-wait time from execution time.
+            task.accepted_at = time.time()
+            # Refresh heartbeat timer from acceptance time so heartbeat_timeout
+            # is measured from when the remote node accepted the task, not from
+            # task creation.  This prevents false NetworkTimeoutError when the
+            # task is queued behind other tasks on the executor (max_concurrent).
+            self._heartbeat_times[task_id] = task.accepted_at
+            log.debug("Task %s accepted by remote node, refreshing heartbeat timer", task_id)
+            return  # ACCEPTED does not resolve the Future — keep waiting
+
         log.info("Task %s result received: status=%s", task_id, status)
 
         # Resolve the waiting Future if any
@@ -667,13 +688,19 @@ class TaskDelegate:
         """Remove completed tasks older than TASK_TTL. Returns count removed."""
         now = time.time()
         removed = 0
+        expired_ids: list[str] = []
         for store in (self._outbound, self._inbound):
             for tid in list(store):
                 t = store[tid]
                 if t.status in (TaskStatus.DONE, TaskStatus.FAILED, TaskStatus.TIMEOUT):
                     if now - t.completed_at > self.TASK_TTL:
                         del store[tid]
+                        expired_ids.append(tid)
                         removed += 1
+
+        # Clean up heartbeat timestamps for expired tasks (prevents memory leak)
+        for tid in expired_ids:
+            self._heartbeat_times.pop(tid, None)
 
         # Rebuild the priority queue to drop entries for tasks that no longer exist
         self._task_queue = [

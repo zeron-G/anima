@@ -1,0 +1,19 @@
+{
+  "id": "iss_1a3ccedf8a6b",
+  "title": "[audit-t1] F541: f-string without any placeholders",
+  "description": "{\n  \"tool\": \"ruff\",\n  \"severity\": \"error\",\n  \"message\": \"F541: f-string without any placeholders\",\n  \"file\": \"D:\\\\data\\\\code\\\\github\\\\anima\\\\anima\\\\evolution\\\\sandbox.py\",\n  \"line\": 207,\n  \"files\": [\n    \"D:\\\\data\\\\code\\\\github\\\\anima\\\\anima\\\\evolution\\\\sandbox.py\"\n  ]\n}",
+  "status": "open",
+  "priority": "medium",
+  "labels": [
+    "audit",
+    "tier-1"
+  ],
+  "files": [
+    "D:\\data\\code\\github\\anima\\anima\\evolution\\sandbox.py"
+  ],
+  "reporter": "self_audit",
+  "assignee": "",
+  "created_at": 1773807098.6600482,
+  "updated_at": 1773807098.6600482,
+  "resolution": ""
+}

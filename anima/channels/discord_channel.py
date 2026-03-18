@@ -49,9 +49,8 @@ class DiscordChannel(BaseChannel):
             log.warning("Discord token not configured, skipping")
             return
 
-        try:
-            import discord
-        except ImportError:
+        import importlib.util
+        if importlib.util.find_spec("discord") is None:
             log.warning("discord.py not installed. Run: pip install discord.py")
             return
 

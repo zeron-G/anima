@@ -34,7 +34,6 @@ from anima.tools.registry import ToolRegistry
 from anima.tools.executor import ToolExecutor
 from anima.core.rule_engine import RuleEngine
 from anima.llm.router import LLMRouter
-from anima.llm.prompts import PromptBuilder
 from anima.core.heartbeat import HeartbeatEngine
 from anima.core.cognitive import AgenticLoop
 from anima.core.agents import AgentManager
@@ -68,15 +67,14 @@ async def full_system(tmp_path):
     lr = LLMRouter("claude-opus-4-6", "claude-sonnet-4-6", daily_budget=10.0)
     ut = UsageTracker(ms)
     lr.set_usage_tracker(ut)
-    pb = PromptBuilder()
     am.wire_llm(lr, te, tr)
 
-    hb = HeartbeatEngine(eq, sc, de, em, wm, lr, pb, config)
+    hb = HeartbeatEngine(eq, sc, de, em, wm, lr, config)
     hb.set_scheduler(scheduler)
 
     loop = AgenticLoop(
         event_queue=eq, snapshot_cache=sc, memory_store=ms,
-        emotion_state=em, llm_router=lr, prompt_builder=pb,
+        emotion_state=em, llm_router=lr,
         tool_executor=te, tool_registry=tr, config=config,
     )
 
@@ -90,7 +88,7 @@ async def full_system(tmp_path):
 
     yield {
         "eq": eq, "sc": sc, "ms": ms, "em": em, "tr": tr, "te": te,
-        "lr": lr, "pb": pb, "hb": hb, "loop": loop, "am": am,
+        "lr": lr, "hb": hb, "loop": loop, "am": am,
         "scheduler": scheduler, "ut": ut, "outputs": outputs,
         "statuses": statuses, "config": config,
     }

@@ -83,7 +83,6 @@ class ToolRegistry:
                     log.error("Failed to reload %s: %s", mod_name, e)
 
         # Re-register all tools (overwrites old references)
-        old_count = len(self._tools)
         self._load_and_register()
         new_count = len(self._tools)
 

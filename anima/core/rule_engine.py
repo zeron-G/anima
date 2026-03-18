@@ -28,7 +28,6 @@ class RuleEngine:
         """
         event_type = context.get("event_type", "")
         payload = context.get("event_payload", {})
-        state_diff = context.get("state_diff")
         system_state = context.get("system_state", {})
 
         # Rule: file change → NOOP (changes are already logged; save_note created too much noise)

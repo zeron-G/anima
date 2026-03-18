@@ -23,9 +23,17 @@ async def _read_file(
         raise FileNotFoundError(f"File not found: {path}")
     if not p.is_file():
         raise ValueError(f"Not a file: {path}")
+    offset = int(offset) if offset is not None else 0
+    limit = int(limit) if limit is not None else None
+    max_lines = int(max_lines)
+
     text = p.read_text(encoding="utf-8", errors="replace")
     lines = text.splitlines()
     total_lines = len(lines)
+
+    # Negative offset means "from end": -80 → last 80 lines
+    if offset < 0:
+        offset = max(0, total_lines + offset)
 
     # If caller explicitly requested a slice, return structured result
     if offset > 0 or limit is not None:
