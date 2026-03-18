@@ -209,11 +209,16 @@ async def _anthropic_completion(
         payload["tools"] = tools
         payload["tool_choice"] = {"type": "auto"}
 
+    # Serialize JSON as UTF-8 bytes explicitly (Windows GBK locale safety)
+    body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    if "Content-Type" not in headers:
+        headers["Content-Type"] = "application/json; charset=utf-8"
+
     async with httpx.AsyncClient(timeout=120.0) as client:
         resp = await client.post(
             f"{ANTHROPIC_API_BASE}/v1/messages",
             headers=headers,
-            json=payload,
+            content=body,
         )
 
     if resp.status_code != 200:
@@ -285,17 +290,20 @@ async def _openai_completion(
         payload["tools"] = openai_tools
         payload["tool_choice"] = "auto"
 
-    headers: dict[str, str] = {"Content-Type": "application/json"}
+    headers: dict[str, str] = {"Content-Type": "application/json; charset=utf-8"}
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
 
     log.debug("OpenAI-compat call: %s (model=%s)", base_url, model_id or "default")
 
+    # Serialize JSON as UTF-8 bytes explicitly (Windows GBK locale safety)
+    body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+
     async with httpx.AsyncClient(timeout=300.0) as client:
         resp = await client.post(
             f"{base_url}/v1/chat/completions",
             headers=headers,
-            json=payload,
+            content=body,
         )
 
     if resp.status_code != 200:
