@@ -343,6 +343,35 @@ def _parse_openai_response(data: dict, model_name: str) -> dict:
     }
 
 
+def _flatten_content(content) -> str:
+    """Normalize message content to plain string.
+
+    Anthropic uses list-of-blocks: [{"type":"text","text":"..."}, {"type":"tool_result",...}]
+    OpenAI expects plain strings. Convert any format to a flat string.
+    """
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts = []
+        for block in content:
+            if isinstance(block, str):
+                parts.append(block)
+            elif isinstance(block, dict):
+                if block.get("type") == "text":
+                    parts.append(block.get("text", ""))
+                elif block.get("type") == "tool_use":
+                    parts.append(f"[Tool call: {block.get('name', '?')}({json.dumps(block.get('input', {}))})]")
+                elif block.get("type") == "tool_result":
+                    inner = block.get("content", "")
+                    if isinstance(inner, list):
+                        inner = " ".join(b.get("text", "") for b in inner if isinstance(b, dict))
+                    parts.append(f"[Tool result: {inner}]")
+                else:
+                    parts.append(str(block))
+        return "\n".join(parts)
+    return str(content) if content else ""
+
+
 async def _local_completion(
     model: str,
     messages: list[dict],
@@ -357,15 +386,32 @@ async def _local_completion(
     base_url = _get_local_base_url()
     model_name = model.removeprefix("local/").strip() or None
 
-    # Merge system messages into the first user message (many local models
-    # don't support system role well)
+    # Normalize all message content to plain strings (Anthropic → OpenAI format)
+    # Also skip tool_use/tool_result role messages that local models can't handle
     api_messages = []
     system_parts = []
     for msg in messages:
-        if msg["role"] == "system":
-            system_parts.append(msg["content"])
+        role = msg.get("role", "user")
+        content = _flatten_content(msg.get("content", ""))
+        if not content.strip():
+            continue
+        if role == "system":
+            system_parts.append(content)
+        elif role == "tool":
+            # Convert tool results to assistant context
+            api_messages.append({"role": "user", "content": f"[Tool Result] {content}"})
         else:
-            api_messages.append(dict(msg))
+            api_messages.append({"role": role, "content": content})
+
+    # Ensure message alternation (user/assistant/user/assistant)
+    # Merge consecutive same-role messages
+    merged = []
+    for msg in api_messages:
+        if merged and merged[-1]["role"] == msg["role"]:
+            merged[-1]["content"] += "\n\n" + msg["content"]
+        else:
+            merged.append(msg)
+    api_messages = merged
 
     if system_parts and api_messages:
         system_text = "\n\n".join(system_parts)
@@ -373,7 +419,6 @@ async def _local_completion(
             api_messages[0]["content"] = f"[System Instructions]\n{system_text}\n\n[User Message]\n{api_messages[0]['content']}"
         else:
             api_messages.insert(0, {"role": "user", "content": f"[System Instructions]\n{system_text}"})
-            # Ensure alternation
             if len(api_messages) > 1 and api_messages[1]["role"] == "user":
                 api_messages[1]["content"] = api_messages[0]["content"] + "\n\n" + api_messages[1]["content"]
                 api_messages.pop(0)
