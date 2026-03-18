@@ -36,7 +36,7 @@ perception:
 # ── LLM ──
 llm:
   tier1: { model: "claude-opus-4-6", max_tokens: 8192, max_context: 200000 }
-  tier2: { model: "claude-sonnet-4-6", max_tokens: 4096, max_context: 200000 }
+  tier2: { model: "claude-opus-4-6", max_tokens: 8192, max_context: 200000 }
   budget: { daily_limit_usd: 10.0 }
 
 decision:

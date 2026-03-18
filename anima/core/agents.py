@@ -325,7 +325,7 @@ class AgentManager:
                      "--output-format", "text",
                      "--allowedTools", "Read,Edit,Bash,Grep,Glob,Write",
                      "--max-turns", "25",
-                     "--model", "sonnet"],
+                     "--model", "opus"],
                     capture_output=True, text=True,
                     stdin=subprocess.DEVNULL,
                     encoding="utf-8", errors="replace",

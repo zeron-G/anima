@@ -161,9 +161,9 @@ async def _init_llm(config: dict, tool_registry, tool_executor, memory_store) ->
 
     llm_router = LLMRouter(
         tier1_model=get("llm.tier1.model", "claude-opus-4-6"),
-        tier2_model=get("llm.tier2.model", "claude-sonnet-4-6"),
+        tier2_model=get("llm.tier2.model", "claude-opus-4-6"),
         tier1_max_tokens=get("llm.tier1.max_tokens", 8192),
-        tier2_max_tokens=get("llm.tier2.max_tokens", 4096),
+        tier2_max_tokens=get("llm.tier2.max_tokens", 8192),
         daily_budget=get("llm.budget.daily_limit_usd", 5.0),
     )
     # ── v3: PromptCompiler (6-layer compilation) ──
