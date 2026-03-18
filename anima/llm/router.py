@@ -122,18 +122,18 @@ class LLMRouter:
                 self._on_success()
                 return resp
             except _aio.TimeoutError:
-                log.warning("%s timeout (%ds)", model, timeout)
+                log.warning("%s timeout (%ds), trying next", model, timeout)
                 self._on_failure()
+                continue  # try Sonnet fallback
             except Exception as e:
                 err = str(e)
-                if "529" in err or "overloaded" in err.lower():
-                    log.warning("%s overloaded (529), falling back", model)
-                    self._on_failure()
-                    await _aio.sleep(2)  # brief pause before fallback
-                    continue
-                log.error("%s failed: %s", model, e)
+                is_overload = "529" in err or "overloaded" in err.lower()
+                is_transient = is_overload or "500" in err or "502" in err or "503" in err
+                log.warning("%s %s: %s", model, "overloaded" if is_overload else "failed", err[:200])
                 self._on_failure()
-                return None
+                if is_transient:
+                    await _aio.sleep(2)
+                continue  # always try next model in cascade
 
         log.error("All models exhausted (primary + Sonnet fallback)")
         self._on_failure()
