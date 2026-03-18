@@ -10,7 +10,6 @@ from anima.emotion.state import EmotionState
 from anima.tools.registry import ToolRegistry
 from anima.tools.executor import ToolExecutor
 from anima.llm.router import LLMRouter
-from anima.llm.prompts import PromptBuilder
 from anima.core.cognitive import AgenticLoop
 from anima.core.agents import AgentManager
 from anima.core.scheduler import Scheduler
@@ -36,10 +35,9 @@ async def main():
     te = ToolExecutor(tr, max_risk=3)
     lr = LLMRouter('claude-haiku-4-5-20251001','claude-haiku-4-5-20251001', daily_budget=5.0)
     ut = UsageTracker(ms); lr.set_usage_tracker(ut)
-    pb = PromptBuilder()
     am.wire_llm(lr, te, tr)
     loop = AgenticLoop(event_queue=eq, snapshot_cache=sc, memory_store=ms,
-        emotion_state=em, llm_router=lr, prompt_builder=pb,
+        emotion_state=em, llm_router=lr,
         tool_executor=te, tool_registry=tr, config=config)
     outputs = []; statuses = []
     loop.set_output_callback(lambda t, **kw: outputs.append(t))
@@ -133,4 +131,5 @@ async def main():
 
     await ms.close()
 
-asyncio.run(main())
+if __name__ == '__main__':
+    asyncio.run(main())

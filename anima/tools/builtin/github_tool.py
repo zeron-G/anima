@@ -9,7 +9,9 @@ from anima.models.tool_spec import ToolSpec, RiskLevel
 
 def _gh_sync(command: str, timeout: int = 30) -> dict:
     """Run a gh CLI command."""
-    import subprocess, os, sys
+    import subprocess
+    import os
+    import sys
     env = os.environ.copy()
     env["PATH"] = os.path.dirname(sys.executable) + os.pathsep + env.get("PATH", "")
 

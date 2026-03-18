@@ -14,6 +14,8 @@ LLM cost control:
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from anima.utils.logging import get_logger
@@ -43,6 +45,7 @@ class ConversationSummarizer:
         llm_router: LLMRouter,
         summary_interval: int = 20,
         keep_recent: int = 10,
+        save_path: Path | str | None = None,
     ) -> None:
         self._llm = llm_router
         self._summary: str = ""
@@ -50,6 +53,7 @@ class ConversationSummarizer:
         self._interval = summary_interval
         self._keep_recent = keep_recent
         self._counter = 0
+        self._save_path: Path | None = Path(save_path) if save_path else None
 
     # ------------------------------------------------------------------ #
     #  Public API                                                          #
@@ -110,6 +114,26 @@ class ConversationSummarizer:
         messages.extend(self._raw_buffer)
         return messages
 
+    def set_save_path(self, path: Path | str) -> None:
+        """Set the file path for persisting the summary."""
+        self._save_path = Path(path)
+
+    def restore_from_file(self) -> None:
+        """Load summary and recent buffer from disk on startup."""
+        if not self._save_path or not self._save_path.exists():
+            return
+        try:
+            data = json.loads(self._save_path.read_text(encoding="utf-8"))
+            self._summary = data.get("summary", "")
+            raw = data.get("raw_buffer", [])
+            self._raw_buffer = raw[-self._keep_recent:]
+            log.info(
+                "Loaded conversation summary from %s: %d chars, %d msgs",
+                self._save_path, len(self._summary), len(self._raw_buffer),
+            )
+        except Exception as e:
+            log.warning("Failed to load summary from %s: %s", self._save_path, e)
+
     def restore_from_db(self, recent_memories: list[dict]) -> None:
         """Restore buffer from SQLite chat memories on startup.
 
@@ -143,6 +167,20 @@ class ConversationSummarizer:
     # ------------------------------------------------------------------ #
     #  Internal helpers                                                    #
     # ------------------------------------------------------------------ #
+
+    def _save_to_file(self) -> None:
+        """Persist current summary and buffer to disk."""
+        if not self._save_path:
+            return
+        try:
+            self._save_path.parent.mkdir(parents=True, exist_ok=True)
+            data = {"summary": self._summary, "raw_buffer": self._raw_buffer}
+            self._save_path.write_text(
+                json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
+            log.debug("Summary saved to %s", self._save_path)
+        except Exception as e:
+            log.warning("Failed to save summary to %s: %s", self._save_path, e)
 
     async def _compress(self, force_keep: int | None = None) -> None:
         """Core compression logic.
@@ -178,6 +216,7 @@ class ConversationSummarizer:
             "Compression done: summary=%d chars, buffer=%d msgs",
             len(self._summary), len(self._raw_buffer),
         )
+        self._save_to_file()
 
     async def _llm_summarize(self, messages: list[dict]) -> str | None:
         """Use Tier 2 LLM to produce a recursive summary.

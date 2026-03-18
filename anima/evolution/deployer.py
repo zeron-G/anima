@@ -7,6 +7,7 @@ triggers hot-reload via ReloadManager, and auto-rollbacks on failure.
 from __future__ import annotations
 
 import asyncio
+import re
 import subprocess
 
 from anima.config import project_root
@@ -17,6 +18,21 @@ from anima.utils.logging import get_logger
 log = get_logger("evolution.deployer")
 
 VERIFY_TIMEOUT_S = 30
+
+# Persistent background errors unrelated to deployments — never trigger rollback.
+KNOWN_NOISE_ERRORS = [
+    re.compile(r, re.IGNORECASE) for r in [
+        r"AUTHENTICATIONFAILED",          # Gmail / IMAP auth
+        r"torch.*not.*installed",         # TTS optional dep
+        r"tts.*torch",                    # TTS torch missing
+        r"discord\.py.*not.*installed",   # optional Discord dep
+        r"No module named 'torch'",       # torch import error
+    ]
+]
+
+
+def _is_noise(line: str) -> bool:
+    return any(p.search(line) for p in KNOWN_NOISE_ERRORS)
 
 
 class Deployer:
@@ -96,7 +112,8 @@ class Deployer:
         try:
             text = log_file.read_text(encoding="utf-8", errors="replace")
             recent = text.splitlines()[-20:]
-            errors = [l for l in recent if "[ERROR]" in l or "[CRITICAL]" in l]
+            errors = [line for line in recent if "[ERROR]" in line or "[CRITICAL]" in line]
+            errors = [line for line in errors if not _is_noise(line)]
             if errors:
                 return False, f"Post-deploy errors: {errors[0]}"
             return True, "OK"

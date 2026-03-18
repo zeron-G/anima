@@ -1,0 +1,19 @@
+{
+  "id": "iss_7f506a6b988a",
+  "title": "[audit-t1] F841: Local variable `state_diff` is assigned to but never used",
+  "description": "{\n  \"tool\": \"ruff\",\n  \"severity\": \"error\",\n  \"message\": \"F841: Local variable `state_diff` is assigned to but never used\",\n  \"file\": \"D:\\\\data\\\\code\\\\github\\\\anima\\\\anima\\\\core\\\\rule_engine.py\",\n  \"line\": 31,\n  \"files\": [\n    \"D:\\\\data\\\\code\\\\github\\\\anima\\\\anima\\\\core\\\\rule_engine.py\"\n  ]\n}",
+  "status": "closed",
+  "priority": "medium",
+  "labels": [
+    "audit",
+    "tier-1"
+  ],
+  "files": [
+    "D:\\data\\code\\github\\anima\\anima\\core\\rule_engine.py"
+  ],
+  "reporter": "self_audit",
+  "assignee": "",
+  "created_at": 1773804841.9042912,
+  "updated_at": 1773807880.083685,
+  "resolution": "Duplicate of iss_4f18cc1622fb"
+}

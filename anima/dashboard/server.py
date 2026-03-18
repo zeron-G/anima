@@ -257,7 +257,8 @@ class DashboardServer:
 
         if action == "restart":
             # Restart the ANIMA process by re-exec'ing Python
-            import os, sys
+            import os
+            import sys
             log.info("Restart requested from dashboard")
             # Give response time to send, then restart
             asyncio.get_event_loop().call_later(1.0, lambda: os.execv(sys.executable, [sys.executable, "-m", "anima"]))

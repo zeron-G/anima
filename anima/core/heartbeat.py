@@ -369,20 +369,18 @@ class HeartbeatEngine:
         recent_sigs = [f"{s:.2f}" for s in self._recent_significance_scores[-5:]]
         wm_summary = self._working_memory.get_summary()
 
-        # Check for running agents that need user notification (running > 15s)
+        # Check tracker for agents running >90s that haven't been notified yet
+        from anima.tools.builtin import agent_tracker
+        stale = agent_tracker.get_stale_unnotified()
         running_agents = []
-        if self._agent_manager:
-            now = time.time()
-            for session in self._agent_manager._sessions.values():
-                if session.status == "running":
-                    runtime = now - session.created_at
-                    if runtime > 15:
-                        running_agents.append({
-                            "id": session.id,
-                            "type": session.type,
-                            "prompt": session.prompt[:80],
-                            "runtime_s": int(runtime),
-                        })
+        for entry in stale:
+            running_agents.append({
+                "id": entry["session_id"],
+                "type": "agent",
+                "prompt": entry["task_summary"],
+                "runtime_s": entry["runtime_s"],
+            })
+            agent_tracker.mark_notified(entry["session_id"])
 
         payload: dict = {
             "reason": "periodic proactive thinking",
@@ -394,7 +392,7 @@ class HeartbeatEngine:
         if running_agents:
             payload["running_agents"] = running_agents
             payload["notify_user"] = True
-            log.info("LLM heartbeat: %d running agent(s) > 15s — will notify user",
+            log.info("LLM heartbeat: %d agent(s) >90s unnotified — will notify user",
                      len(running_agents))
 
         await self._event_queue.put(Event(

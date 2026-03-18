@@ -327,9 +327,20 @@ class AgenticLoop:
 
         messages: list[dict] = [{"role": "system", "content": system_prompt}]
         if event_type_name == "USER_MESSAGE":
-            messages.extend(
-                _clean_msg(m) for m in self._conversation[-self._max_conversation_turns:]
-            )
+            if self._summarizer:
+                # Use compressed context: summary injected into system, recent msgs from buffer
+                for ctx_msg in self._summarizer.get_context():
+                    role = ctx_msg.get("role", "user")
+                    content = ctx_msg.get("content", "")
+                    if role == "system":
+                        # Append history summary to system prompt (avoids dual system msgs)
+                        messages[0]["content"] += f"\n\n{content}"
+                    elif role in ("user", "assistant") and content.strip():
+                        messages.append({"role": role, "content": content})
+            else:
+                messages.extend(
+                    _clean_msg(m) for m in self._conversation[-self._max_conversation_turns:]
+                )
         messages.append({"role": "user", "content": user_message})
 
         tools = self._get_tool_schemas() if needs_tools else []
