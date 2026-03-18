@@ -44,16 +44,20 @@ if sys.platform == "win32":
     asyncio.Runner.close = _runner_close_fast
 
 
-def pytest_sessionfinish(session, exitstatus):
-    """Force-exit on Windows after tests to avoid cleanup hangs.
+_exit_code = 0
 
-    Only fire for successful runs — failed runs need full pytest output.
-    Flush stdout/stderr before exit to preserve captured output.
-    """
-    if sys.platform == "win32" and session.testscollected > 0:
+
+def pytest_sessionfinish(session, exitstatus):
+    global _exit_code
+    _exit_code = exitstatus
+
+
+def pytest_unconfigure(config):
+    """Force-exit on Windows AFTER terminal summary is printed."""
+    if sys.platform == "win32":
         sys.stdout.flush()
         sys.stderr.flush()
-        os._exit(exitstatus)
+        os._exit(_exit_code)
 
 
 @pytest.fixture

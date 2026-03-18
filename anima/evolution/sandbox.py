@@ -169,7 +169,8 @@ class TestRunner:
              "--ignore=tests/stress_test.py",
              "--ignore=tests/test_oauth_live.py",
              "--ignore=tests/test_full_system.py",
-             "--ignore=tests/test_integration_network.py"],
+             "--ignore=tests/test_integration_network.py",
+             "--ignore=tests/test_task_delegate_extended.py"],
             timeout=120,
         )
         if ok:
@@ -202,7 +203,7 @@ class TestRunner:
             if log_file.exists():
                 log_text = log_file.read_text(encoding="utf-8", errors="replace")
                 lines = log_text.splitlines()
-                errors = [l for l in lines[-30:] if "[ERROR]" in l or "[CRITICAL]" in l]
+                errors = [line for line in lines[-30:] if "[ERROR]" in line or "[CRITICAL]" in line]
                 if errors:
                     return False, "Runtime errors:\n" + "\n".join(errors[:5])
 

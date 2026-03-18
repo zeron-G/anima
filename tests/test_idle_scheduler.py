@@ -31,10 +31,13 @@ class FakeEventQueue:
 # ── Tests: system idle score ──
 
 def test_system_idle_high_cpu():
-    assert compute_system_idle_score({"cpu_percent": 90, "memory_percent": 50}) == 0.0
+    # CPU > 90 → 0.0, CPU 80-90 → 0.2 (lenient: games shouldn't block Eva)
+    assert compute_system_idle_score({"cpu_percent": 95, "memory_percent": 50}) == 0.0
+    assert compute_system_idle_score({"cpu_percent": 85, "memory_percent": 50}) == 0.2
 
 def test_system_idle_high_mem():
-    assert compute_system_idle_score({"cpu_percent": 50, "memory_percent": 95}) == 0.0
+    # MEM > 95 → 0.0 (raised from 90)
+    assert compute_system_idle_score({"cpu_percent": 50, "memory_percent": 96}) == 0.0
 
 def test_system_idle_low_usage():
     score = compute_system_idle_score({"cpu_percent": 10, "memory_percent": 30})
@@ -91,12 +94,12 @@ def test_idle_detector_level():
     ua = UserActivityDetector(use_system_api=False)
     q = FakeEventQueue(0)
     detector = IdleDetector(ua, q)
-    # Force a high idle score
-    detector._idle_score = 0.85
+    # Force idle scores — thresholds: busy<0.15, light<0.35, moderate<0.55, deep>=0.55
+    detector._idle_score = 0.6
     assert detector.level == "deep"
-    detector._idle_score = 0.65
+    detector._idle_score = 0.45
     assert detector.level == "moderate"
-    detector._idle_score = 0.4
+    detector._idle_score = 0.25
     assert detector.level == "light"
     detector._idle_score = 0.1
     assert detector.level == "busy"
@@ -120,20 +123,21 @@ def test_idle_detector_trend():
 @pytest.mark.asyncio
 async def test_scheduler_busy_skips():
     ua = UserActivityDetector(use_system_api=False)
-    ua.record_user_message()
-    q = FakeEventQueue(0)
+    ua.record_user_message()  # just chatted → user_idle ≈ 0
+    q = FakeEventQueue(10)    # full queue → queue_idle = 0
     detector = IdleDetector(ua, q)
-    detector._idle_score = 0.1  # busy
+    detector._idle_score = 0.0
+    detector._alpha = 0  # disable EMA smoothing so tick doesn't change score
     scheduler = IdleScheduler(detector, q)
-    await scheduler.tick({"cpu_percent": 10, "memory_percent": 30})
-    assert len(q._events) == 0
+    await scheduler.tick({"cpu_percent": 90, "memory_percent": 90})  # high load
+    assert len(q._events) == 0  # busy → no tasks dispatched
 
 @pytest.mark.asyncio
 async def test_scheduler_dispatches_light():
     ua = UserActivityDetector(use_system_api=False)
     q = FakeEventQueue(0)
     detector = IdleDetector(ua, q)
-    detector._idle_score = 0.45  # light
+    detector._idle_score = 0.25  # light (0.15-0.35)
     scheduler = IdleScheduler(detector, q)
     # Force detector to return light level
     detector._alpha = 0  # disable smoothing so update doesn't change score
@@ -173,7 +177,7 @@ def test_llm_heartbeat_interval_busy():
     ua = UserActivityDetector(use_system_api=False)
     q = FakeEventQueue(0)
     detector = IdleDetector(ua, q)
-    detector._idle_score = 0.1
+    detector._idle_score = 0.05  # busy (< 0.15)
     scheduler = IdleScheduler(detector, q)
     interval = scheduler.get_llm_heartbeat_interval(600)
     assert interval > 90000  # skip
@@ -182,7 +186,7 @@ def test_llm_heartbeat_interval_deep():
     ua = UserActivityDetector(use_system_api=False)
     q = FakeEventQueue(0)
     detector = IdleDetector(ua, q)
-    detector._idle_score = 0.9
+    detector._idle_score = 0.6  # deep (>= 0.55)
     scheduler = IdleScheduler(detector, q)
     interval = scheduler.get_llm_heartbeat_interval(600)
     assert interval == 180
@@ -191,7 +195,7 @@ def test_major_heartbeat_interval_light():
     ua = UserActivityDetector(use_system_api=False)
     q = FakeEventQueue(0)
     detector = IdleDetector(ua, q)
-    detector._idle_score = 0.4
+    detector._idle_score = 0.25  # light (0.15-0.35) → skip major
     scheduler = IdleScheduler(detector, q)
     interval = scheduler.get_major_heartbeat_interval(1800)
     assert interval > 90000  # skip
@@ -200,7 +204,7 @@ def test_major_heartbeat_interval_deep():
     ua = UserActivityDetector(use_system_api=False)
     q = FakeEventQueue(0)
     detector = IdleDetector(ua, q)
-    detector._idle_score = 0.9
+    detector._idle_score = 0.6  # deep (>= 0.55)
     scheduler = IdleScheduler(detector, q)
     interval = scheduler.get_major_heartbeat_interval(1800)
     assert interval == 900  # halved
