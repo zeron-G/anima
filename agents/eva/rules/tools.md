@@ -7,6 +7,10 @@
   - 系统信息: `system_info`，不要 `shell(systeminfo)`
   - 时间: `get_datetime`，不要 python
   - 网页: `web_fetch`，不要 `shell(curl)`
+  - 找文件: `env_search`，不要 `shell(find/dir /s)` — 从数据库秒查
+  - 环境信息: `env_search` 或 `env_stats`，不要手动扫描
+  - 记情感: `update_feelings`，主动写，不要等被提醒
+  - 记用户: `update_user_profile`，学到新信息就记
   - 观察笔记: `save_note`
   - `shell` 仅用于真正需要执行的命令（python, git, pip 等）
 
