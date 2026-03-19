@@ -287,10 +287,14 @@ class AgenticLoop:
                     query=user_message[:500] if user_message else "",
                     event_type=event_type_name,
                     recent_messages=self._conversation[-4:],
-                    max_tokens=2000,
+                    max_tokens=4000,
                 )
+                if memory_context:
+                    log.info("Memory retrieved: core=%d tok, static=%d, episodic=%d (event=%s)",
+                             memory_context.core_tokens, len(memory_context.static),
+                             len(memory_context.episodic), event_type_name)
             except Exception as e:
-                log.warning("MemoryRetriever failed, falling back: %s", e)
+                log.warning("MemoryRetriever failed: %s", e)
 
         # v3: Compaction Flush check — compress conversation if approaching budget
         if self._summarizer and self._token_budget:

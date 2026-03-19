@@ -389,31 +389,38 @@ class MemoryRetriever:
     def _load_core_memory() -> str:
         """Load Tier 0: ``identity/core.md`` + ``user_profile.md`` + ``feelings.md``.
 
-        Falls back to ``identity/soul.md`` when ``core.md`` is missing,
-        ensuring backward compatibility during migration.
+        Feelings is capped to the last ~500 tokens to avoid starving
+        other memory tiers of their token budget.
         """
         from anima.config import agent_dir, data_dir
+        from anima.llm.token_budget import truncate_to_tokens
+
+        _FEELINGS_MAX_TOKENS = 500  # cap feelings to leave room for Tier 1-3
 
         agent = agent_dir()
         data = data_dir()
 
-        # Prefer core.md; fall back to soul.md for older setups.
         identity_path = agent / "identity" / "core.md"
         if not identity_path.exists():
             identity_path = agent / "identity" / "soul.md"
 
-        candidates: list[Path] = [
-            identity_path,
-            data / "user_profile.md",
-            agent / "memory" / "feelings.md",
+        candidates: list[tuple[Path, int]] = [
+            (identity_path, 0),              # no cap
+            (data / "user_profile.md", 0),   # no cap
+            (agent / "memory" / "feelings.md", _FEELINGS_MAX_TOKENS),
         ]
 
         parts: list[str] = []
-        for path in candidates:
+        for path, max_tok in candidates:
             try:
                 if path.exists():
                     content = path.read_text(encoding="utf-8").strip()
                     if content:
+                        if max_tok > 0:
+                            # Take the TAIL (most recent feelings)
+                            lines = content.split("\n")
+                            tail = "\n".join(lines[-40:])  # last ~40 lines
+                            content = truncate_to_tokens(tail, max_tok)
                         parts.append(content)
             except OSError as exc:
                 log.debug("Could not read %s: %s", path, exc)

@@ -231,6 +231,7 @@ async def _init_llm(config: dict, tool_registry, tool_executor, memory_store) ->
     static_store = StaticKnowledgeStore(memory_store, node_id=node_id_str)
 
     # Populate Tier 1 static knowledge from environment.md (if exists)
+    from anima.config import data_dir
     _env_md_path = data_dir() / "environment.md"
     if _env_md_path.exists():
         try:
