@@ -123,6 +123,20 @@ class LocalServerManager:
             self._last_used = time.time()
             return True
 
+        # Check if server is already running externally (e.g. started by evolution/user)
+        base = os.environ.get("LOCAL_LLM_BASE_URL", _LOCAL_LLM_BASE)
+        try:
+            async with httpx.AsyncClient(timeout=2) as c:
+                r = await c.get(f"{base}/health")
+                if r.status_code == 200:
+                    self._last_used = time.time()
+                    self._externally_managed = True
+                    log.info("Local LLM server already running externally")
+                    return True
+        except Exception:
+            pass
+        self._externally_managed = False
+
         if self._starting:
             # Another call is starting it — wait
             for _ in range(int(timeout * 2)):
@@ -183,13 +197,46 @@ class LocalServerManager:
             self._process = None
 
     def check_idle_shutdown(self):
-        """Stop server if idle for too long. Called periodically."""
-        if not self.is_running:
-            return
+        """Stop server if idle for too long. Called periodically.
+
+        Handles both self-started and externally-started servers.
+        """
+        if self._last_used == 0:
+            return  # never used
+
         idle_timeout = int(os.environ.get("LOCAL_LLM_IDLE_TIMEOUT", "300"))
-        if time.time() - self._last_used > idle_timeout:
+        if time.time() - self._last_used <= idle_timeout:
+            return  # still within active window
+
+        # Self-started: terminate process
+        if self.is_running:
             log.info("Local LLM idle for %ds — shutting down", idle_timeout)
             self.stop()
+            return
+
+        # Externally-started: kill by port if still running
+        if getattr(self, "_externally_managed", False):
+            try:
+                import subprocess
+                base = os.environ.get("LOCAL_LLM_BASE_URL", _LOCAL_LLM_BASE)
+                async_check = httpx.Client(timeout=2)
+                r = async_check.get(f"{base}/health")
+                async_check.close()
+                if r.status_code == 200:
+                    # Find and kill the process on our port
+                    result = subprocess.run(
+                        ["netstat", "-ano"], capture_output=True, text=True, timeout=5
+                    )
+                    for line in result.stdout.split("\n"):
+                        if f":{self._port}" in line and "LISTENING" in line:
+                            pid = line.strip().split()[-1]
+                            subprocess.run(["taskkill", "/F", "/PID", pid],
+                                           capture_output=True, timeout=5)
+                            log.info("Killed externally-managed llama-server PID %s (idle %ds)", pid, idle_timeout)
+                            self._externally_managed = False
+                            break
+            except Exception as e:
+                log.debug("External server idle check: %s", e)
 
     def mark_used(self):
         self._last_used = time.time()
