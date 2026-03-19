@@ -55,6 +55,10 @@ async def _init_core(config: dict) -> dict:
     agent_manager = AgentManager(max_concurrent=5)
     set_agent_manager(agent_manager)
 
+    # Clean stale agent tracker entries from previous runs
+    from anima.tools.builtin.agent_tracker import cleanup_stale
+    cleanup_stale(max_age_s=1800)  # remove agents older than 30min
+
     event_queue = EventQueue()
     snapshot_cache = SnapshotCache(
         history_size=get("perception.snapshot_history_size", 10)

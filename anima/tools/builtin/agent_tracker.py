@@ -84,3 +84,17 @@ def get_overdue_agents() -> list[dict]:
             continue
         overdue.append({**entry, "runtime_s": int(runtime)})
     return overdue
+
+
+def cleanup_stale(max_age_s: int = 3600) -> int:
+    """Remove agents older than max_age_s. Called on startup to prevent
+    zombie agents from persisting across restarts and causing check loops."""
+    now = time.time()
+    data = _load()
+    stale = [sid for sid, e in data.items() if now - e.get("started_at", now) > max_age_s]
+    for sid in stale:
+        del data[sid]
+    if stale:
+        _save(data)
+        log.info("Cleaned up %d stale agent tracker entries", len(stale))
+    return len(stale)
