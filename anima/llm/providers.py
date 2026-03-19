@@ -364,7 +364,10 @@ async def _anthropic_completion(
     if "Content-Type" not in headers:
         headers["Content-Type"] = "application/json; charset=utf-8"
 
-    async with httpx.AsyncClient(timeout=120.0) as client:
+    # Granular timeouts: connect=10s, read=90s (kills half-open hung connections),
+    # write=30s, pool=10s. Total budget ~90s, not 120s of silent hang.
+    _anthropic_timeout = httpx.Timeout(connect=10.0, read=90.0, write=30.0, pool=10.0)
+    async with httpx.AsyncClient(timeout=_anthropic_timeout) as client:
         resp = await client.post(
             f"{ANTHROPIC_API_BASE}/v1/messages",
             headers=headers,
@@ -454,7 +457,10 @@ async def _openai_completion(
     # Serialize JSON as UTF-8 bytes explicitly (Windows GBK locale safety)
     body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
 
-    async with httpx.AsyncClient(timeout=300.0) as client:
+    # Local models can be slow (large prompt processing) but should never hang silently.
+    # read=180s is generous for local generation; connect should be instant.
+    _openai_timeout = httpx.Timeout(connect=10.0, read=180.0, write=30.0, pool=10.0)
+    async with httpx.AsyncClient(timeout=_openai_timeout) as client:
         resp = await client.post(
             f"{base_url}/v1/chat/completions",
             headers=headers,
