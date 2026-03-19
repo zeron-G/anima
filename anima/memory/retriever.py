@@ -227,6 +227,13 @@ class MemoryRetriever:
 
         ctx.all_ids = [c["id"] for c in ctx.episodic if c.get("id")]
         ctx.total_tokens = ctx.core_tokens + ctx.static_tokens + used
+
+        log.info(
+            "Retrieved: core=%d tok, static=%d entries, episodic=%d entries, "
+            "lorebook=%d hits, total=%d tok (event=%s)",
+            ctx.core_tokens, len(ctx.static), len(ctx.episodic),
+            len(lorebook_hit_ids), ctx.total_tokens, event_type,
+        )
         return ctx
 
     # ------------------------------------------------------------------ #
@@ -418,37 +425,14 @@ class MemoryRetriever:
     # ------------------------------------------------------------------ #
 
     def _touch(self, ids: list[str]) -> None:
-        """Update ``access_count`` and ``last_accessed`` for retrieved memories.
-
-        Delegates to ``MemoryStore.touch_memories`` if available; otherwise
-        falls back to individual SQL updates.
-        """
+        """Update ``access_count`` and ``last_accessed`` for retrieved memories."""
         if self._store is None or not ids:
             return
-
-        if hasattr(self._store, "touch_memories"):
-            try:
-                self._store.touch_memories(ids)  # type: ignore[union-attr]
-                return
-            except Exception as exc:
-                log.debug("touch_memories failed, trying fallback: %s", exc)
-
-        # Fallback: manual UPDATE via the raw connection (if accessible).
-        conn = getattr(self._store, "_conn", None)
-        if conn is None:
-            return
-        now = _time.time()
         try:
-            placeholders = ",".join("?" * len(ids))
-            conn.execute(
-                f"UPDATE episodic_memories "
-                f"SET access_count = access_count + 1, last_accessed = ? "
-                f"WHERE id IN ({placeholders})",
-                [now, *ids],
-            )
-            conn.commit()
+            self._store.touch_memories(ids)
+            log.debug("Touched %d memories (access_count++)", len(ids))
         except Exception as exc:
-            log.debug("Fallback touch failed: %s", exc)
+            log.warning("touch_memories failed: %s", exc)
 
 
 # ------------------------------------------------------------------ #

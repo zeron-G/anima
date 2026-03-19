@@ -195,12 +195,12 @@ def _default_task_pool() -> list[IdleTask]:
             handler="env_scanner.incremental",
         ),
         IdleTask(
-            id="memory_consolidation",
-            name="记忆整理",
-            description="Review and consolidate working memory — archive low-importance items",
+            id="memory_decay_update",
+            name="记忆衰减更新",
+            description="Recompute decay scores for all memories (no LLM cost, pure math)",
             weight=TaskWeight.LIGHT, min_idle_level="light",
-            cooldown_s=1800, max_duration_s=30, priority=5,
-            handler="memory.consolidate",
+            cooldown_s=900, max_duration_s=30, priority=6,
+            handler="memory.decay_update",
         ),
         IdleTask(
             id="log_cleanup",
@@ -509,9 +509,12 @@ class IdleScheduler:
             task.name, self.level, self.score, task.handler,
         )
 
-        # Direct execution for memory consolidation (no LLM event needed)
+        # Direct execution for memory tasks (no LLM event needed)
         if task.handler == "memory.deep_consolidation":
             asyncio.ensure_future(self._run_memory_consolidation(task.id))
+            return
+        if task.handler == "memory.decay_update":
+            asyncio.ensure_future(self._run_decay_update(task.id))
             return
 
         # Direct execution for audit tiers 1-3 (no LLM needed)
@@ -535,23 +538,42 @@ class IdleScheduler:
             source="idle_scheduler",
         ))
 
-    async def _run_memory_consolidation(self, task_id: str) -> None:
-        """Execute deep memory consolidation via MemoryDecay.consolidate().
+    async def _run_decay_update(self, task_id: str) -> None:
+        """Recompute decay scores for all memories. No LLM cost — pure math."""
+        try:
+            if not _memory_decay or not _memory_store:
+                return
+            updated = await _memory_decay.update_all_scores(_memory_store)
+            if updated > 0:
+                log.info("Decay scores updated: %d memories", updated)
+        except Exception as e:
+            log.warning("Decay update failed: %s", e)
+        finally:
+            self.mark_task_done(task_id)
 
-        Uses the module-level _memory_decay, _llm_router, and _memory_store
-        set from main.py via set_memory_decay().
+    async def _run_memory_consolidation(self, task_id: str) -> None:
+        """Execute decay score update + deep memory consolidation.
+
+        Step 1: Recompute decay_score for all memories (time-weighted importance).
+        Step 2: Consolidate stale memories (decay_score < threshold) into archives.
         """
         try:
             if not _memory_decay or not _llm_router or not _memory_store:
                 log.debug("Memory consolidation skipped — MemoryDecay/LLMRouter/MemoryStore not wired")
                 return
+
+            # Step 1: Update all decay scores (MUST run before consolidation)
+            updated = await _memory_decay.update_all_scores(_memory_store)
+            log.info("Decay scores updated: %d memories recomputed", updated)
+
+            # Step 2: Consolidate stale memories
             budget_ok = _llm_router.check_budget(estimated_cost=0.005)
             if not budget_ok:
-                log.debug("Memory consolidation skipped — LLM budget exceeded")
+                log.info("Memory consolidation skipped — LLM budget exceeded (decay scores still updated)")
                 return
-            log.info("Running deep memory consolidation (MemoryDecay.consolidate)")
-            await _memory_decay.consolidate(_memory_store, _llm_router, budget_ok)
-            log.info("Deep memory consolidation completed")
+            log.info("Running deep memory consolidation")
+            consolidated = await _memory_decay.consolidate(_memory_store, _llm_router, budget_ok)
+            log.info("Memory consolidation completed: %d memories archived", consolidated or 0)
         except Exception as e:
             log.warning("Deep memory consolidation failed: %s", e)
         finally:

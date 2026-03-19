@@ -230,6 +230,32 @@ async def _init_llm(config: dict, tool_registry, tool_executor, memory_store) ->
         node_id_str = _ni.node_id
     static_store = StaticKnowledgeStore(memory_store, node_id=node_id_str)
 
+    # Populate Tier 1 static knowledge from environment.md (if exists)
+    _env_md_path = data_dir() / "environment.md"
+    if _env_md_path.exists():
+        try:
+            import re as _re
+            _env_text = _env_md_path.read_text(encoding="utf-8")
+            _env_data = {}
+            _current_section = "general"
+            for line in _env_text.split("\n"):
+                line = line.strip()
+                if line.startswith("## "):
+                    _current_section = line[3:].strip().lower().replace(" ", "_")
+                    _env_data.setdefault(_current_section, {})
+                elif line.startswith("- ") and ":" in line:
+                    k, _, v = line[2:].partition(":")
+                    _env_data.setdefault(_current_section, {})[k.strip()] = v.strip()
+                elif "|" in line and not line.startswith("|--"):
+                    parts = [p.strip() for p in line.split("|") if p.strip()]
+                    if len(parts) >= 2 and parts[0] != "Path":
+                        _env_data.setdefault(_current_section, {})[parts[0]] = parts[1]
+            _populated = static_store.populate_from_environment(_env_data)
+            if _populated:
+                log.info("Tier 1 static knowledge populated: %d entries from environment.md", _populated)
+        except Exception as e:
+            log.debug("Could not populate static knowledge: %s", e)
+
     # ── v3: Memory Decay Engine ──
     memory_decay = MemoryDecay()
 
