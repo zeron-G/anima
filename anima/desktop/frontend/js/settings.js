@@ -12,6 +12,8 @@ let _saveIndicators = {};   // key -> timeout id
 const MODEL_OPTIONS = [
   'claude-opus-4-6',
   'claude-sonnet-4-6',
+  'openai/gpt-4.1',
+  'openai/o4-mini',
   'local/',
 ];
 
