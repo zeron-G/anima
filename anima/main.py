@@ -235,7 +235,6 @@ async def _init_llm(config: dict, tool_registry, tool_executor, memory_store) ->
     _env_md_path = data_dir() / "environment.md"
     if _env_md_path.exists():
         try:
-            import re as _re
             _env_text = _env_md_path.read_text(encoding="utf-8")
             _env_data = {}
             _current_section = "general"

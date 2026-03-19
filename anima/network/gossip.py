@@ -30,30 +30,35 @@ class PhiAccrualDetector:
         self._intervals: dict[str, list[float]] = defaultdict(list)
         self._last_seen: dict[str, float] = {}
         self._window = window_size
+        self._lock = threading.Lock()
 
     def report_heartbeat(self, node_id: str) -> None:
         now = time.time()
-        if node_id in self._last_seen:
-            interval = now - self._last_seen[node_id]
-            history = self._intervals[node_id]
-            history.append(interval)
-            if len(history) > self._window:
-                history.pop(0)
-        self._last_seen[node_id] = now
+        with self._lock:
+            if node_id in self._last_seen:
+                interval = now - self._last_seen[node_id]
+                history = self._intervals[node_id]
+                history.append(interval)
+                if len(history) > self._window:
+                    history.pop(0)
+            self._last_seen[node_id] = now
 
     def phi(self, node_id: str) -> float:
-        if node_id not in self._last_seen:
-            return 0.0
-        history = self._intervals.get(node_id, [])
+        with self._lock:
+            if node_id not in self._last_seen:
+                return 0.0
+            history = list(self._intervals.get(node_id, []))
+            last_seen = self._last_seen[node_id]
+        # Computation outside lock (pure CPU, no shared state)
         if len(history) < 3:
-            elapsed = time.time() - self._last_seen[node_id]
+            elapsed = time.time() - last_seen
             return elapsed / 5.0
         mean = sum(history) / len(history)
         n = len(history)
         denom = n - 1 if n >= 2 else n
         variance = sum((x - mean) ** 2 for x in history) / denom
         stddev = max(math.sqrt(variance), 0.5)
-        elapsed = time.time() - self._last_seen[node_id]
+        elapsed = time.time() - last_seen
         if elapsed <= mean:
             return 0.0
         y = (elapsed - mean) / stddev
@@ -62,6 +67,10 @@ class PhiAccrualDetector:
             return 99.0  # node is definitely dead
         phi = -math.log10(p)
         return max(0.0, phi)
+
+    def get_last_seen(self, node_id: str) -> float:
+        with self._lock:
+            return self._last_seen.get(node_id, 0.0)
 
 
 class GossipMesh:
@@ -115,6 +124,8 @@ class GossipMesh:
         self._send_now = threading.Event()
 
         self._node_addr_map: dict[str, str] = {}  # node_id → currently connected addr
+        self._reconnect_fail_counts: dict[str, int] = {}   # node_id → consecutive reconnect failures
+        self._last_reconnect_per_peer: dict[str, float] = {}  # node_id → last reconnect attempt ts
         self._started_at: float = time.time()
 
         # LRU cache of recently seen message IDs for deduplication (max 1000)
@@ -245,7 +256,7 @@ class GossipMesh:
             peers = []
             for nid, state in self._peers.items():
                 phi = self._detector.phi(nid)
-                last_seen = self._detector._last_seen.get(nid, 0.0)
+                last_seen = self._detector.get_last_seen(nid)
                 peers.append({
                     "node_id": nid,
                     "hostname": getattr(state, "hostname", ""),
@@ -319,6 +330,7 @@ class GossipMesh:
 
             # --- Block 1: Send (isolated — failure won't skip receive) ---
             sent_task_count = 0
+            saved_type = "task_delegate"
             try:
                 if do_gossip:
                     # 2. Broadcast own state
@@ -346,7 +358,9 @@ class GossipMesh:
 
                 # 3b. Send pending task messages (task_delegate / task_result / task_cancel)
                 for task_msg in pending_tasks:
-                    msg_type = task_msg.pop("_msg_type", "task_delegate")
+                    saved_type = task_msg.get("_msg_type", "task_delegate")
+                    task_msg.pop("_msg_type", None)
+                    msg_type = saved_type
                     # Resolve target node: check nested task dict first, then
                     # top-level target_node (used by status query/reply and cancel).
                     target = (
@@ -373,7 +387,7 @@ class GossipMesh:
                     # Restore _msg_type on the message that failed mid-send
                     # (already popped but send didn't complete)
                     if "_msg_type" not in unsent[0]:
-                        unsent[0]["_msg_type"] = msg_type
+                        unsent[0]["_msg_type"] = saved_type
                     with self._lock:
                         self._outbound_task_msgs[:0] = unsent
 
@@ -427,9 +441,11 @@ class GossipMesh:
                 # 5. Check failures (only on gossip ticks — phi needs real intervals)
                 if do_gossip:
                     self._check_failures()
+                    # Per-peer backoff is handled inside _reconnect_dead_peers,
+                    # so call on every gossip tick instead of gating globally.
+                    self._reconnect_dead_peers(sub, connected_peers)
                     if (now - last_reconnect_time) >= self.RECONNECT_INTERVAL:
                         last_reconnect_time = now
-                        self._reconnect_dead_peers(sub, connected_peers)
                         self._identity.unregister_stale_nodes(max_dead_hours=1.0)
             except Exception as e:
                 log.error("Gossip receive/check error: %s", e)
@@ -491,7 +507,9 @@ class GossipMesh:
             self._safe_callback(self._on_node_alive, nid, remote)
             log.info("Node discovered: %s (%s)", nid, remote.hostname)
         elif old_status in ("suspect", "dead"):
-            # Recovery from failure
+            # Recovery from failure — clear reconnect backoff
+            self._reconnect_fail_counts.pop(nid, None)
+            self._last_reconnect_per_peer.pop(nid, None)
             self._safe_callback(self._on_node_alive, nid, remote)
             log.info("Node recovered: %s (%s)", nid, remote.hostname)
 
@@ -633,6 +651,7 @@ class GossipMesh:
 
     def _check_failures(self) -> None:
         pending_callbacks: list[tuple] = []
+        pending_status_updates: list[tuple[str, str]] = []
 
         with self._lock:
             for nid, state in list(self._peers.items()):
@@ -641,12 +660,12 @@ class GossipMesh:
                 phi = self._detector.phi(nid)
                 if phi >= self.DEAD_PHI and state.status != "dead":
                     state.status = "dead"
-                    self._identity.update_node_status(nid, "dead")
+                    pending_status_updates.append((nid, "dead"))
                     pending_callbacks.append((self._on_node_dead, nid, state))
                     log.warning("Node DEAD: %s (phi=%.1f)", nid, phi)
                 elif phi >= self.SUSPECT_PHI and state.status == "alive":
                     state.status = "suspect"
-                    self._identity.update_node_status(nid, "suspect")
+                    pending_status_updates.append((nid, "suspect"))
                     pending_callbacks.append((self._on_node_suspect, nid, state))
                     log.warning("Node SUSPECT: %s (phi=%.1f)", nid, phi)
 
@@ -662,10 +681,14 @@ class GossipMesh:
                 if reg_node.get("status") == "alive" and rid not in known_peer_ids:
                     if grace_passed:
                         # Never seen in gossip this session — mark dead
-                        self._identity.update_node_status(rid, "dead")
-                        pending_callbacks.append((self._on_node_dead, rid, None))
+                        pending_status_updates.append((rid, "dead"))
+                        pending_callbacks.append((self._on_node_dead, rid, NodeState(node_id=rid)))
                         log.warning("Node DEAD (never seen in gossip): %s", rid)
                     # else: still within startup grace period — wait for first heartbeat
+
+        # Apply status updates outside the lock (update_node_status writes to disk)
+        for node_id, status in pending_status_updates:
+            self._identity.update_node_status(node_id, status)
 
         # Fire callbacks outside the lock to prevent deadlock when sync
         # callbacks (e.g. on_node_dead → session_router) acquire other locks.
@@ -673,11 +696,13 @@ class GossipMesh:
             self._safe_callback(cb, *args)
 
     def _reconnect_dead_peers(self, sub_socket, connected: set) -> None:
-        """Ensure TCP connections exist for dead/suspect peers (connect-only, no disconnect).
+        """Ensure TCP connections exist for dead/suspect peers with exponential backoff.
 
         Called every RECONNECT_INTERVAL seconds (from _gossip_thread on gossip
         ticks).  Does not change peer state — status is managed by phi detector.
+        Backoff: min(RECONNECT_INTERVAL * 2^fail_count, 300) seconds between attempts.
         """
+        now = time.time()
         with self._lock:
             peers_snapshot = list(self._peers.items())
         for nid, state in peers_snapshot:
@@ -687,6 +712,15 @@ class GossipMesh:
             port = getattr(state, "port", 0)
             if not ip or not port:
                 continue
+
+            # Exponential backoff check
+            fail_count = self._reconnect_fail_counts.get(nid, 0)
+            backoff = min(self.RECONNECT_INTERVAL * (2 ** fail_count), 300.0)
+            last_attempt = self._last_reconnect_per_peer.get(nid, 0.0)
+            if (now - last_attempt) < backoff:
+                continue
+
+            self._last_reconnect_per_peer[nid] = now
             addr = f"{ip}:{port}"
             try:
                 old_addr = self._node_addr_map.get(nid)
@@ -700,9 +734,14 @@ class GossipMesh:
                 if addr not in connected:
                     sub_socket.connect(f"tcp://{addr}")
                     connected.add(addr)
-                    log.debug("Re-connected to %s peer %s at %s", state.status, nid, addr)
+                    log.debug("Re-connected to %s peer %s at %s (backoff=%.0fs)", state.status, nid, addr, backoff)
                 else:
                     log.debug("Skip reconnect for %s peer %s at %s (already connected)", state.status, nid, addr)
                 self._node_addr_map[nid] = addr
+                # Connection succeeded — reset fail count
+                self._reconnect_fail_counts.pop(nid, None)
             except zmq.ZMQError as e:
-                log.debug("Reconnect failed for %s at %s: %s", nid, addr, e)
+                self._reconnect_fail_counts[nid] = fail_count + 1
+                log.debug("Reconnect failed for %s at %s (fail_count=%d, next_backoff=%.0fs): %s",
+                          nid, addr, fail_count + 1,
+                          min(self.RECONNECT_INTERVAL * (2 ** (fail_count + 1)), 300.0), e)
