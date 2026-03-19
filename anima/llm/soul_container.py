@@ -94,6 +94,14 @@ class SoulContainer:
             data = yaml.safe_load(rules_file.read_text(encoding="utf-8"))
             if isinstance(data, dict):
                 self._rules = data.get("rules", [])
+            # Pre-compile regex patterns for tone_particle rules (L-19)
+            for rule in self._rules:
+                if rule.get("type") == "tone_particle" and rule.get("patterns"):
+                    for p in rule["patterns"]:
+                        try:
+                            p["_compiled"] = re.compile(p["match"])
+                        except re.error:
+                            p["_compiled"] = None
             log.info(
                 "Loaded %d style rules from %s",
                 len(self._rules), rules_file,
@@ -187,11 +195,13 @@ class SoulContainer:
             if not match_pattern or not candidates:
                 continue
 
-            try:
-                compiled = re.compile(match_pattern)
-            except re.error as exc:
-                log.debug("Bad tone regex %r: %s", match_pattern, exc)
-                continue
+            compiled = pattern_def.get("_compiled")
+            if compiled is None:
+                try:
+                    compiled = re.compile(match_pattern)
+                except re.error as exc:
+                    log.debug("Bad tone regex %r: %s", match_pattern, exc)
+                    continue
 
             m = compiled.search(text)
             if m is None:
@@ -222,13 +232,15 @@ class SoulContainer:
         if not matches:
             return text
 
-        text_len = max(len(text), 1)
-        current_density = len(matches) / text_len
+        # M-36 fix: exclude emoji from denominator
+        emoji_chars = sum(m.end() - m.start() for m in matches)
+        non_emoji_len = max(len(text) - emoji_chars, 1)
+        current_density = len(matches) / non_emoji_len
 
         if current_density <= max_density or not strip_if_over:
             return text
 
-        target_count = max(1, int(text_len * max_density))
+        target_count = max(1, int(non_emoji_len * max_density))
 
         # Work on a list of characters for efficient random removal.
         # We remove entire match spans chosen at random until we hit
@@ -269,7 +281,7 @@ class SoulContainer:
         best_idx = -1
         for sep in _SENTENCE_ENDS:
             idx = truncated.rfind(sep)
-            if idx > max_chars // 2 and idx > best_idx:
+            if idx >= max_chars // 2 and idx > best_idx:
                 best_idx = idx
 
         if best_idx > 0:
@@ -294,7 +306,9 @@ class SoulContainer:
         if not phrases or n < 1:
             return text
 
-        if self._message_counter % n != 0:
+        if self._message_counter < n:
+            return text  # Not enough messages yet
+        if (self._message_counter % n) != 0:
             return text
 
         # Short outputs (e.g. tool confirmations) are not worth checking.

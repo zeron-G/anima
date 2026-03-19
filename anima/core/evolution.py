@@ -52,7 +52,7 @@ class EvolutionState:
                 self.history = d.get("history", [])
                 self.last_loop_at = d.get("last_loop_at", 0)
             except Exception as e:
-                log.debug("_load: %s", e)
+                log.warning("Evolution state JSON corrupted: %s", e)
 
     def save(self):
         self._path.parent.mkdir(parents=True, exist_ok=True)
@@ -60,7 +60,7 @@ class EvolutionState:
             "loop_count": self.loop_count,
             "status": self.status,
             "current_loop": self.current_loop,
-            "history": self.history[-30:],
+            "history": self.history[-100:],
             "last_loop_at": self.last_loop_at,
         }, indent=2, ensure_ascii=False), encoding="utf-8")
 

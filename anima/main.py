@@ -6,6 +6,7 @@ import asyncio
 import os
 import signal
 import sys
+import threading
 from typing import Any
 from pathlib import Path
 
@@ -29,6 +30,7 @@ log = get_logger("main")
 
 # Module-level mutable state for cross-function references (e.g. degradation callback → dashboard hub)
 _module_state: dict = {}
+_module_state_lock = threading.Lock()
 
 
 async def _init_core(config: dict) -> dict:
@@ -201,7 +203,8 @@ async def _init_llm(config: dict, tool_registry, tool_executor, memory_store) ->
             msg = f"✅ 模型恢复: {from_model} → {to_model}"
             log.info(msg)
         try:
-            hub = _module_state.get("dashboard_hub")
+            with _module_state_lock:
+                hub = _module_state.get("dashboard_hub")
             if hub and hasattr(hub, "add_activity"):
                 hub.add_activity("llm", msg)
         except Exception:
@@ -380,6 +383,7 @@ async def _init_network(config: dict, core: dict, llm: dict, heartbeat_deps: dic
     gossip_task_futures: dict[str, asyncio.Future] = {}
     # Output buffers for multi-segment gossip task responses: source_tag → [segments]
     gossip_task_buffers: dict[str, list[str]] = {}
+    _task_lock = threading.Lock()
 
     event_queue = core["event_queue"]
     evolution_engine = heartbeat_deps["evolution_engine"]
@@ -445,6 +449,7 @@ async def _init_network(config: dict, core: dict, llm: dict, heartbeat_deps: dic
     # it via the network dict's "cognitive_ref" which is set later in _init_cognitive.
     # We use a mutable container so the closure captures the dict, not the value.
     _cognitive_ref: dict[str, Any] = {"cognitive": None}
+    _cognitive_lock = threading.Lock()
 
     def on_network_event_with_sessions(event_data):
         # Handle session lock/release events from other nodes
@@ -501,7 +506,8 @@ async def _init_network(config: dict, core: dict, llm: dict, heartbeat_deps: dic
                 # Check if .py files changed — trigger reload
                 diff = _sp.run(["git", "diff", "HEAD~1", "--name-only"], cwd=str(project_root()), capture_output=True, text=True)
                 if diff.stdout and any(f.endswith(".py") for f in diff.stdout.strip().split("\n")):
-                    _cog = _cognitive_ref.get("cognitive")
+                    with _cognitive_lock:
+                        _cog = _cognitive_ref.get("cognitive")
                     if _cog:
                         _cog.reload_manager._restart_requested = True
                         _cog.reload_manager._restart_reason = f"Synced evolution: {title}"
@@ -583,8 +589,9 @@ async def _init_network(config: dict, core: dict, llm: dict, heartbeat_deps: dic
         source_tag = f"gossip_task:{task.task_id}"
         loop = asyncio.get_running_loop()
         fut: asyncio.Future = loop.create_future()
-        gossip_task_futures[source_tag] = fut
-        gossip_task_buffers[source_tag] = []
+        with _task_lock:
+            gossip_task_futures[source_tag] = fut
+            gossip_task_buffers[source_tag] = []
 
         await event_queue.put(Event(
             type=EventType.USER_MESSAGE,
@@ -595,17 +602,20 @@ async def _init_network(config: dict, core: dict, llm: dict, heartbeat_deps: dic
 
         try:
             await asyncio.wait_for(asyncio.shield(fut), timeout=task.timeout)
-            segments = gossip_task_buffers.get(source_tag, [])
+            with _task_lock:
+                segments = list(gossip_task_buffers.get(source_tag, []))
             result_text = "\n\n".join(segments) if segments else fut.result()
             return {"result": result_text}
         except asyncio.TimeoutError:
-            segments = gossip_task_buffers.get(source_tag, [])
+            with _task_lock:
+                segments = list(gossip_task_buffers.get(source_tag, []))
             if segments:
                 return {"result": "\n\n".join(segments)}
             return {"error": f"Task timed out after {task.timeout}s"}
         finally:
-            gossip_task_futures.pop(source_tag, None)
-            gossip_task_buffers.pop(source_tag, None)
+            with _task_lock:
+                gossip_task_futures.pop(source_tag, None)
+                gossip_task_buffers.pop(source_tag, None)
 
     task_delegate.register_handler("eva_task", _eva_task_handler)
     gossip_mesh.attach_task_delegate(task_delegate)
@@ -711,7 +721,9 @@ async def _init_network(config: dict, core: dict, llm: dict, heartbeat_deps: dic
         "active_channels": active_channels,
         "gossip_task_futures": gossip_task_futures,
         "gossip_task_buffers": gossip_task_buffers,
+        "_task_lock": _task_lock,
         "_cognitive_ref": _cognitive_ref,
+        "_cognitive_lock": _cognitive_lock,
     }
 
 
@@ -752,7 +764,12 @@ async def _init_cognitive(config: dict, core: dict, llm: dict, heartbeat_deps: d
 
     # Allow network callbacks to reference cognitive (for evolution_deployed handler)
     if "_cognitive_ref" in network:
-        network["_cognitive_ref"]["cognitive"] = cognitive
+        _cog_lock = network.get("_cognitive_lock")
+        if _cog_lock:
+            with _cog_lock:
+                network["_cognitive_ref"]["cognitive"] = cognitive
+        else:
+            network["_cognitive_ref"]["cognitive"] = cognitive
 
     # ── Restore conversation context ──
     # Always load recent conversation from DB — works for ANY restart type
@@ -796,7 +813,8 @@ def _init_dashboard(core: dict, llm: dict, heartbeat_deps: dict, cognitive_deps:
     dashboard_hub.tool_registry = core["tool_registry"]
     usage_tracker = UsageTracker(core["memory_store"])
     llm["llm_router"].set_usage_tracker(usage_tracker)
-    _module_state["dashboard_hub"] = dashboard_hub  # wire for model change notifications
+    with _module_state_lock:
+        _module_state["dashboard_hub"] = dashboard_hub  # wire for model change notifications
     dashboard_hub.usage_tracker = usage_tracker
     dashboard_hub.agent_manager = core["agent_manager"]
     dashboard_hub.scheduler = core["scheduler"]
@@ -820,6 +838,7 @@ def _wire_callbacks(cognitive, terminal, dashboard_hub, agent_manager, heartbeat
     active_channels = network.get("active_channels", {})
     gossip_task_futures = network.get("gossip_task_futures", {})
     gossip_task_buffers = network.get("gossip_task_buffers", {})
+    _task_lock = network.get("_task_lock")  # may be None if network disabled
 
     # Wire output callback: cognitive → terminal + dashboard + channels
     def on_agent_output(text: str, source: str = "") -> None:
@@ -832,9 +851,10 @@ def _wire_callbacks(cognitive, terminal, dashboard_hub, agent_manager, heartbeat
         dashboard_hub.add_chat_message("agent", text)
 
         # Route response back to a gossip-delegated task (accumulate all segments)
-        if source and source.startswith("gossip_task:"):
-            if source in gossip_task_buffers:
-                gossip_task_buffers[source].append(text)
+        if source and source.startswith("gossip_task:") and _task_lock:
+            with _task_lock:
+                if source in gossip_task_buffers:
+                    gossip_task_buffers[source].append(text)
 
         # Route response back to the originating channel
         if source and source.startswith("discord:"):
@@ -849,21 +869,42 @@ def _wire_callbacks(cognitive, terminal, dashboard_hub, agent_manager, heartbeat
 
     cognitive.set_output_callback(on_agent_output)
 
+    # H-03: Wire streaming callback for real-time text output
+    def on_stream_chunk(chunk: str, event_type: str = "text") -> None:
+        try:
+            terminal.display_chunk(chunk, event_type)
+        except Exception:
+            pass
+        try:
+            dashboard_hub.push_stream_chunk(chunk, event_type)
+        except Exception:
+            pass
+
+    cognitive.set_stream_callback(on_stream_chunk)
+
     # Wire status callback: cognitive → dashboard activity feed + terminal status
     def on_status(status: dict) -> None:
         stage = status.get("stage", "")
         detail = status.get("detail", "")
-        dashboard_hub.add_activity(stage, detail, **{k: v for k, v in status.items() if k not in ("stage", "detail")})
-        # Show key stages in terminal
+        try:
+            dashboard_hub.add_activity(stage, detail, **{k: v for k, v in status.items() if k not in ("stage", "detail")})
+        except Exception:
+            pass
+        # Show key stages in terminal (protected against encoding errors)
         if stage in ("deciding", "executing"):
-            terminal.display_system(f"[{stage}] {detail}")
+            try:
+                terminal.display_system(f"[{stage}] {detail}")
+            except Exception:
+                pass  # Terminal encoding errors must never crash cognitive loop
         # Resolve gossip_task futures when event processing completes
-        if stage == "idle":
-            for source_tag, buf in list(gossip_task_buffers.items()):
-                if buf:
+        if stage == "idle" and _task_lock:
+            with _task_lock:
+                items = [(tag, list(buf)) for tag, buf in gossip_task_buffers.items() if buf]
+            for source_tag, segments in items:
+                with _task_lock:
                     fut = gossip_task_futures.get(source_tag)
-                    if fut and not fut.done():
-                        fut.set_result("\n\n".join(buf))
+                if fut and not fut.done():
+                    fut.set_result("\n\n".join(segments))
 
     cognitive.set_status_callback(on_status)
     agent_manager.set_status_callback(on_status)

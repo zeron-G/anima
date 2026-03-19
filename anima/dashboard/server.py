@@ -43,6 +43,8 @@ class DashboardServer:
         self._app.router.add_post("/api/tts", self._handle_tts)
         self._app.router.add_post("/api/stt", self._handle_stt)
         self._app.router.add_get("/api/voice/{filename}", self._handle_voice_file)
+        # Trace endpoint — returns recent cognitive loop traces for debugging
+        self._app.router.add_get("/api/traces", self._handle_traces)
         # Static files for Live2D model + SDK
         static_dir = Path(__file__).parent / "static"
         if static_dir.exists():
@@ -256,12 +258,10 @@ class DashboardServer:
             return web.json_response({"ok": True, "action": "cleared"})
 
         if action == "restart":
-            # Restart the ANIMA process by re-exec'ing Python
-            import os
             import sys
             log.info("Restart requested from dashboard")
-            # Give response time to send, then restart
-            asyncio.get_event_loop().call_later(1.0, lambda: os.execv(sys.executable, [sys.executable, "-m", "anima"]))
+            # M-11 fix: use sys.exit instead of os.execv (which skips all cleanup)
+            asyncio.get_event_loop().call_later(1.0, lambda: sys.exit(42))  # 42 = restart exit code
             return web.json_response({"ok": True, "action": "restarting"})
 
         return web.json_response({"error": f"unknown action: {action}"}, status=400)
@@ -429,6 +429,29 @@ class DashboardServer:
             return web.Response(status=404)
         ct = "audio/wav" if path.suffix == ".wav" else "audio/mpeg"
         return web.FileResponse(path, headers={"Content-Type": ct})
+
+    # ── Traces ──
+
+    async def _handle_traces(self, request: web.Request) -> web.Response:
+        """Return recent cognitive loop traces for debugging.
+
+        Query params:
+          - limit: max number of traces (default 50)
+          - since: unix timestamp to filter from (optional)
+
+        Reads from hub.get_traces() if available, otherwise returns
+        an empty list.  This endpoint is intended for the dashboard
+        to display tool-use timelines, LLM call latencies, and
+        event processing history.
+        """
+        limit = int(request.query.get("limit", "50"))
+        since = float(request.query.get("since", "0"))
+
+        traces: list[dict] = []
+        if hasattr(self._hub, "get_traces"):
+            traces = self._hub.get_traces(limit=limit, since=since)
+
+        return web.json_response({"traces": traces, "count": len(traces)})
 
     # ── WebSocket push loop ──
 

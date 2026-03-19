@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 
 from anima.models.tool_spec import ToolSpec, RiskLevel
 from anima.utils.logging import get_logger
@@ -56,7 +57,9 @@ def _exec_sync(node: str, command: str, timeout: int = 30) -> dict:
     """Execute command on remote node. Uses PowerShell wrapper."""
     try:
         ssh = _get_ssh(node)
-        wrapped = f'powershell -NoProfile -Command "& {{{command}}}"'
+        ps_bytes = command.encode("utf-16-le")
+        encoded_cmd = base64.b64encode(ps_bytes).decode("ascii")
+        wrapped = f"powershell -NoProfile -EncodedCommand {encoded_cmd}"
         stdin, stdout, stderr = ssh.exec_command(wrapped, timeout=timeout)
         exit_code = stdout.channel.recv_exit_status()
         out = stdout.read().decode("utf-8", errors="replace").strip()
@@ -151,10 +154,13 @@ async def _delegate_task(node: str, task: str, timeout: int = 120) -> dict:
             if peer_host == node.lower() or peer_agent == node.lower():
                 target_node_id = peer_id
                 break
-            # 3. node_id contains the node name
-            if node.lower() in peer_id.lower():
-                target_node_id = peer_id
-                break
+        if target_node_id is None:
+            # 3. Prefix match on node_id with ambiguity check
+            prefix_matches = [pid for pid in alive if pid.lower().startswith(node.lower())]
+            if len(prefix_matches) == 1:
+                target_node_id = prefix_matches[0]
+            elif len(prefix_matches) > 1:
+                log.warning("Ambiguous node '%s' matches %d peers: %s", node, len(prefix_matches), prefix_matches)
 
         if target_node_id is None:
             # 4. Look up in remote_nodes config → match by IP or hostname
@@ -174,7 +180,7 @@ async def _delegate_task(node: str, task: str, timeout: int = 120) -> dict:
                         break
                     # Try hostname match from config name
                     for hname, pid in hostname_to_peer.items():
-                        if node.lower() in hname or hname in node.lower():
+                        if node.lower() == hname:
                             target_node_id = pid
                             log.info("Resolved '%s' via hostname fuzzy match → %s", node, pid)
                             break

@@ -76,9 +76,6 @@ class PhiAccrualDetector:
 class GossipMesh:
     """Unified gossip mesh. Runs in a background thread for Windows compat."""
 
-    GOSSIP_INTERVAL = 5.0
-    SUSPECT_PHI = 8.0
-    DEAD_PHI = 16.0
     STARTUP_GRACE = 30.0  # seconds after start before marking never-seen nodes as dead
     RECONNECT_INTERVAL = 30.0  # seconds between reconnect attempts for dead/suspect peers
 
@@ -88,11 +85,19 @@ class GossipMesh:
         local_state: NodeState,
         network_secret: str = "",
         listen_port: int = 9420,
+        gossip_interval: float = 5.0,
+        suspect_phi: float = 8.0,
+        dead_phi: float = 16.0,
     ):
         self._identity = identity
         self._local_state = local_state
         self._secret = network_secret
         self._port = listen_port
+
+        # L-24: configurable gossip params (were class constants)
+        self.GOSSIP_INTERVAL = gossip_interval
+        self.SUSPECT_PHI = suspect_phi
+        self.DEAD_PHI = dead_phi
 
         self._peers: dict[str, NodeState] = {}
         self._peer_addresses: set[str] = set()
@@ -140,8 +145,9 @@ class GossipMesh:
         self._task_delegate_ref: Any | None = None
 
     def set_callbacks(self, **kwargs: Any) -> None:
-        for k, v in kwargs.items():
-            setattr(self, f"_{k}", v)
+        with self._lock:
+            for k, v in kwargs.items():
+                setattr(self, f"_{k}", v)
 
     def add_peer(self, address: str) -> None:
         self._peer_addresses.add(address)
@@ -304,12 +310,14 @@ class GossipMesh:
         sub.setsockopt(zmq.RCVTIMEO, 100)
         sub.setsockopt(zmq.LINGER, 0)
 
-        # Connect to all known peers
-        for addr in self._peer_addresses:
+        # Connect to all known peers (snapshot under lock to avoid races)
+        with self._lock:
+            addrs = list(self._peer_addresses)
+        for addr in addrs:
             sub.connect(f"tcp://{addr}")
             log.info("Connected to peer: %s", addr)
 
-        connected_peers: set[str] = set(self._peer_addresses)
+        connected_peers: set[str] = set(addrs)
         last_gossip_time: float = 0.0
         last_reconnect_time: float = 0.0
 
@@ -694,14 +702,15 @@ class GossipMesh:
                         log.warning("Node DEAD (never seen in gossip): %s", rid)
                     # else: still within startup grace period — wait for first heartbeat
 
-        # Apply status updates outside the lock (update_node_status writes to disk)
-        for node_id, status in pending_status_updates:
-            self._identity.update_node_status(node_id, status)
-
-        # Fire callbacks outside the lock to prevent deadlock when sync
-        # callbacks (e.g. on_node_dead → session_router) acquire other locks.
+        # Fire callbacks FIRST (session cleanup, etc.) outside the lock to
+        # prevent deadlock when sync callbacks acquire other locks.  If a
+        # callback crashes, the stale status won't be permanently recorded.
         for cb, *args in pending_callbacks:
             self._safe_callback(cb, *args)
+
+        # Then persist status (only after callbacks succeeded)
+        for node_id, status in pending_status_updates:
+            self._identity.update_node_status(node_id, status)
 
     def _reconnect_dead_peers(self, sub_socket, connected: set) -> None:
         """Ensure TCP connections exist for dead/suspect peers with exponential backoff.

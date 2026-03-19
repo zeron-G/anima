@@ -69,9 +69,17 @@ def launch_desktop(*, headless: bool = False, experimental: bool = False) -> Non
 
     webview.start(gui="edgechromium", debug=False)
 
-    # Window closed — kill everything
+    # Window closed — trigger graceful shutdown instead of hard exit
+    import signal
     release_lock()
-    os._exit(0)
+    try:
+        os.kill(os.getpid(), signal.SIGTERM)
+    except Exception:
+        pass
+    # Give subsystems 3 seconds to clean up before forcing exit
+    import time
+    time.sleep(3)
+    sys.exit(0)
 
 
 def _run_backend_loop(ready_event: threading.Event) -> None:

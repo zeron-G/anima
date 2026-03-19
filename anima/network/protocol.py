@@ -33,6 +33,9 @@ class NetworkMessage:
     def unpack(cls, data: bytes) -> "NetworkMessage":
         """Deserialize from msgpack bytes."""
         d = msgpack.unpackb(data, raw=False)
+        # L-26: validate required fields
+        if not isinstance(d, dict) or "type" not in d:
+            raise ValueError("Invalid network message: missing 'type' field")
         return cls(**{k: v for k, v in d.items() if k in cls.__dataclass_fields__})
 
     def sign(self, secret: str) -> str:

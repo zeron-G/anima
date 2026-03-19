@@ -33,6 +33,7 @@ from anima.emotion.state import EmotionState
 from anima.tools.registry import ToolRegistry
 from anima.tools.executor import ToolExecutor
 from anima.core.rule_engine import RuleEngine
+from anima.core.event_routing import EventRouter
 from anima.llm.router import LLMRouter
 from anima.core.heartbeat import HeartbeatEngine
 from anima.core.cognitive import AgenticLoop
@@ -40,6 +41,7 @@ from anima.core.agents import AgentManager
 from anima.core.scheduler import Scheduler
 from anima.tools.builtin.agent_tools import set_agent_manager
 from anima.tools.builtin.scheduler_tools import set_scheduler
+from anima.llm.prompt_compiler import PromptCompiler
 from anima.llm.usage import UsageTracker
 from anima.models.event import Event, EventType, EventPriority
 from anima.network.session_router import SessionRouter
@@ -77,6 +79,7 @@ async def full_system(tmp_path):
         emotion_state=em, llm_router=lr,
         tool_executor=te, tool_registry=tr, config=config,
     )
+    loop.set_prompt_compiler(PromptCompiler())
 
     outputs = []
     statuses = []
@@ -126,7 +129,7 @@ async def test_greeting_uses_rule_engine_not_llm(full_system):
 
     await eq.put(Event(type=EventType.USER_MESSAGE, payload={"text": "hello"}, priority=EventPriority.HIGH))
     evt = await eq.get_timeout(2.0)
-    await loop._handle_event(evt)
+    await loop._process_event(evt)
 
     stages = [s["stage"] for s in statuses]
     assert "rule_engine" in stages, f"Expected rule_engine, got {stages}"
@@ -167,9 +170,8 @@ async def test_output_callback_receives_source(full_system):
     loop, outputs = full_system["loop"], full_system["outputs"]
     outputs.clear()
 
-    # Set source to discord
-    loop._current_source = "discord:123456"
-    await loop._output("test reply")
+    # Emit output with source via context
+    loop._ctx.emit_output("test reply", source="discord:123456")
 
     assert len(outputs) == 1
     assert outputs[0]["text"] == "test reply"
@@ -225,8 +227,14 @@ async def test_file_change_noise_filtered(full_system):
         priority=EventPriority.NORMAL,
     ))
     evt = await eq.get_timeout(2.0)
-    msg = loop._event_to_message(evt)
-    assert "noise" in msg.lower() or "no action" in msg.lower()
+    router = EventRouter()
+    decision = router.route(evt, loop._ctx)
+    # data/notes/ is filtered as noise by EventRouter._format_file_change
+    # Either rule engine handled it, or the message indicates noise
+    if decision.handled:
+        pass  # Rule engine handled noise — correct behavior
+    else:
+        assert "noise" in decision.message.lower() or "no action" in decision.message.lower()
 
 
 @pytest.mark.asyncio

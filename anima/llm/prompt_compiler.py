@@ -180,10 +180,14 @@ def _load_examples(examples_dir: Path) -> list[dict]:
             if not body:
                 continue
 
+            try:
+                weight = float(meta.get("weight", 0.5))
+            except (ValueError, TypeError):
+                weight = 0.5
             examples.append({
                 "trigger": meta.get("trigger", "USER_MESSAGE"),
                 "keywords": meta.get("keywords", []),
-                "weight": float(meta.get("weight", 0.5)),
+                "weight": weight,
                 "body": body,
                 "file": md_file.name,
             })
@@ -261,6 +265,8 @@ class PromptCompiler:
         self._rules_cache: str | None = None
         self._feelings_cache: str | None = None
         self._examples: list[dict] = []
+        self._identity_mtime: float = 0
+        self._rules_mtime: float = 0
 
         # -- Sub-components -------------------------------------------
         pp_dir = self._agent_dir / "post_processing"
@@ -344,15 +350,33 @@ class PromptCompiler:
     # ------------------------------------------------------------------ #
 
     def _build_identity_layer(self) -> str:
-        """Layer 1: identity (core + extended personality)."""
-        if self._identity_cache is None:
+        """Layer 1: identity (core + extended personality).
+
+        Checks file mtime to invalidate cache when source files change.
+        """
+        identity_dir = self._agent_dir / "identity"
+        core_path = identity_dir / "core.md"
+        current_mtime = core_path.stat().st_mtime if core_path.exists() else 0
+        if self._identity_cache is None or current_mtime != self._identity_mtime:
             self._load_identity()
+            self._identity_mtime = current_mtime
         return self._identity_cache or ""
 
     def _build_rules_layer(self) -> str:
-        """Layer 2: behavioral rules."""
-        if self._rules_cache is None:
+        """Layer 2: behavioral rules.
+
+        Checks max mtime across all rules/*.md files to invalidate cache.
+        """
+        rules_dir = self._agent_dir / "rules"
+        current_mtime: float = 0
+        if rules_dir.is_dir():
+            for md_file in rules_dir.glob("*.md"):
+                mt = md_file.stat().st_mtime
+                if mt > current_mtime:
+                    current_mtime = mt
+        if self._rules_cache is None or current_mtime != self._rules_mtime:
             self._load_rules()
+            self._rules_mtime = current_mtime
         return self._rules_cache or ""
 
     def _build_context_layer(
@@ -389,9 +413,10 @@ class PromptCompiler:
             if system_state:
                 parts.append(self._build_system_state_section(system_state))
 
-            # Feelings (expensive ~800 tokens, only for user messages)
-            if event_type == "USER_MESSAGE" and self._feelings_cache:
-                parts.append(self._feelings_cache)
+            # M-01 fix: Feelings are now loaded by MemoryRetriever Tier 0
+            # (in _load_core_memory) and injected via the memory layer.
+            # Do NOT load them again here — that caused double injection
+            # wasting ~500 tokens per USER_MESSAGE call.
 
         elif event_type == "SELF_THINKING":
             if system_state:
@@ -657,7 +682,11 @@ class PromptCompiler:
         emotion_state: dict | None = None,
         working_memory_summary: str = "",
     ) -> tuple[str, list[dict]]:
-        """Build (system_prompt, messages) for a conversational LLM call."""
+        """Build (system_prompt, messages) for a conversational LLM call.
+
+        Note: recent_chats is expected in REVERSE chronological order
+        (newest first). The method reverses them internally.
+        """
         system_prompt = self.build_for_event(
             "USER_MESSAGE",
             tools_description=tools_description,

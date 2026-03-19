@@ -113,19 +113,66 @@ def _assess_segment(segment: str) -> RiskLevel:
     }
     try:
         parts = shlex.split(segment)
-        if parts and parts[0] in read_only:
-            # Some commands are safe only without certain flags
-            # git is safe for read ops like status, log, diff, show
-            if parts[0] == "git" and len(parts) > 1:
-                git_safe = {"status", "log", "diff", "show", "branch",
-                            "tag", "remote", "stash", "ls-files", "blame",
-                            "shortlog", "describe", "rev-parse", "config"}
-                if parts[1] in git_safe:
-                    return RiskLevel.SAFE
-                # git push/reset etc. are handled by MEDIUM patterns above
-                return RiskLevel.LOW
+        if not parts:
+            return RiskLevel.SAFE
+        executable = _extract_executable(parts[0])
+        if executable in read_only:
+            if executable == "git":
+                return _check_git_safety(parts)
             return RiskLevel.SAFE
     except ValueError as e:
-        log.debug("safety: %s", e)
+        log.debug("safety: shlex parse failed (treating as HIGH): %s", e)
+        return RiskLevel.HIGH
+
+    return RiskLevel.LOW
+
+
+# ── Enhanced structural analysis (v2) ──
+
+_GIT_SAFE_SUBCMDS: frozenset[str] = frozenset({
+    "status", "log", "diff", "show", "branch", "tag", "remote",
+    "stash", "ls-files", "blame", "shortlog", "describe", "rev-parse",
+    "config",  # config is safe for READ, but dangerous flags checked below
+})
+
+_GIT_DANGEROUS_FLAGS: frozenset[str] = frozenset({
+    "--exec", "--upload-pack", "--receive-pack",
+    "core.pager", "core.editor", "core.fsmonitor",
+    "alias.", "credential.", "http.proxy",
+})
+
+
+def _extract_executable(token: str) -> str:
+    """Extract bare executable name from a possibly absolute path.
+
+    '/bin/rm' -> 'rm', 'C:\\Windows\\system32\\cmd.exe' -> 'cmd.exe'
+    """
+    # Handle both Unix and Windows path separators
+    name = token.rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
+    # Remove .exe extension on Windows
+    if name.lower().endswith(".exe"):
+        name = name[:-4]
+    return name.lower()
+
+
+def _check_git_safety(tokens: list[str]) -> RiskLevel:
+    """Fine-grained git safety check: subcommand + flag analysis."""
+    if len(tokens) < 2:
+        return RiskLevel.SAFE  # bare 'git' is safe
+
+    subcmd = tokens[1]
+
+    # Check for dangerous flags across ALL arguments
+    for token in tokens[2:]:
+        for flag in _GIT_DANGEROUS_FLAGS:
+            if flag in token.lower():
+                log.debug("Git dangerous flag detected: %s in %s", flag, token)
+                return RiskLevel.HIGH
+
+    if subcmd in _GIT_SAFE_SUBCMDS:
+        return RiskLevel.SAFE
+
+    if subcmd in ("push", "reset", "checkout", "clean", "rebase"):
+        return RiskLevel.MEDIUM
 
     return RiskLevel.LOW

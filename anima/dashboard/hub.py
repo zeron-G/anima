@@ -174,6 +174,20 @@ class DashboardHub:
 
         return snapshot
 
+    def push_stream_chunk(self, chunk: str, event_type: str = "text") -> None:
+        """Push a streaming text chunk to all connected dashboard clients.
+
+        Used for real-time streaming display in the web dashboard.
+        """
+        if not chunk:
+            return
+        msg = {"type": "stream_chunk", "chunk": chunk, "event_type": event_type}
+        for queue in list(self._streams.values()):
+            try:
+                queue.put_nowait(msg)
+            except Exception:
+                pass  # Queue full or client disconnected
+
     def add_chat_message(self, role: str, content: str) -> None:
         entry = {
             "role": role,

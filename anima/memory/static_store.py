@@ -39,12 +39,23 @@ class StaticKnowledgeStore:
         if not include_other_nodes:
             scopes = ["global", self._my_scope]
 
-        return self._store.query_static_knowledge(
+        results = self._store.query_static_knowledge(
             categories=categories,
             keywords=keywords,
             scopes=scopes,
             limit=limit,
         )
+
+        # M-19: Auto-deserialize JSON values
+        for entry in results:
+            val = entry.get("value", "")
+            if isinstance(val, str) and val and val[0] in ('{', '['):
+                try:
+                    entry["value"] = json.loads(val)
+                except (json.JSONDecodeError, TypeError):
+                    pass  # Keep as string
+
+        return results
 
     def upsert(
         self,

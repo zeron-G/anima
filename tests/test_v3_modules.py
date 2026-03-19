@@ -65,7 +65,7 @@ class TestImportanceScorer:
         from anima.memory.importance import ImportanceScorer
         scorer = ImportanceScorer()
         score = scorer.score("帮我记住下周三出差", "chat_user")
-        assert score >= 0.85  # Base 0.7 + instruction 0.2
+        assert score >= 0.80  # M-05: multiplicative: base 0.7 * (1 + bonus)
 
     def test_score_clamped(self):
         from anima.memory.importance import ImportanceScorer

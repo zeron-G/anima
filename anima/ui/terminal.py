@@ -83,6 +83,34 @@ class TerminalUI:
                 sys.stdout.write(_PROMPT)
                 sys.stdout.flush()
 
+    def display_chunk(self, chunk: str, event_type: str = "text") -> None:
+        """Display a streaming text chunk without newline.
+
+        Called by the cognitive loop's stream callback for real-time output.
+
+        Args:
+            chunk: Text fragment to display.
+            event_type: 'text' for content, 'status' for tool/system messages.
+        """
+        if not chunk:
+            return
+        try:
+            if event_type == "status":
+                sys.stdout.write(f"\033[90m{chunk}\033[0m")
+            else:
+                sys.stdout.write(chunk)
+            sys.stdout.flush()
+        except UnicodeEncodeError:
+            # Windows GBK terminal — strip non-encodable chars
+            safe = chunk.encode("ascii", errors="replace").decode("ascii")
+            try:
+                sys.stdout.write(safe)
+                sys.stdout.flush()
+            except Exception:
+                pass
+        except Exception:
+            pass  # Terminal might be closed
+
     def display_system(self, text: str) -> None:
         """Display a system message (not from agent)."""
         with self._lock:
@@ -90,7 +118,25 @@ class TerminalUI:
                 sys.stdout.write("\r\033[K")
                 sys.stdout.flush()
 
-            self._console.print(f"[dim]{text}[/dim]")
+            # Pre-sanitize text: if terminal encoding can't handle it, replace bad chars
+            # This prevents UnicodeEncodeError bubbling from Rich's internal buffer flush
+            encoding = getattr(sys.stdout, "encoding", "utf-8") or "utf-8"
+            try:
+                text.encode(encoding)
+            except (UnicodeEncodeError, LookupError):
+                text = text.encode(encoding, errors="replace").decode(encoding)
+
+            try:
+                self._console.print(f"[dim]{text}[/dim]")
+            except UnicodeEncodeError:
+                # Fallback: strip to ASCII
+                safe = text.encode("ascii", errors="replace").decode("ascii")
+                try:
+                    self._console.print(f"[dim]{safe}[/dim]")
+                except Exception:
+                    pass  # Swallow — system messages are non-critical
+            except Exception:
+                pass
 
             if self._waiting_for_input:
                 sys.stdout.write(_PROMPT)

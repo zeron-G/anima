@@ -18,6 +18,7 @@ from pathlib import Path
 
 from anima.config import project_root
 from anima.utils.logging import get_logger
+from anima.utils.path_safety import validate_path_within
 
 log = get_logger("evolution.sandbox")
 
@@ -142,6 +143,12 @@ class TestRunner:
                 continue
             # Resolve relative path — try as-is, then with anima/ prefix
             fpath = Path(self._cwd) / f
+            # Validate path is within project root (prevent traversal)
+            try:
+                validate_path_within(fpath, project_root())
+            except Exception:
+                log.warning("Path traversal blocked in sandbox: %s", f)
+                continue
             if not fpath.exists():
                 fpath = Path(self._cwd) / "anima" / f
             if not fpath.exists():

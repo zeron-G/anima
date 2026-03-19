@@ -14,6 +14,7 @@ Pipeline
 
 from __future__ import annotations
 
+import json
 import time as _time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -136,6 +137,13 @@ class MemoryRetriever:
         self._static = static_store
         self._lorebook = lorebook
         self._decay = decay
+
+        # M-20: configurable RRF channel weights
+        self._rrf_weights = {
+            "lorebook": 1.5,
+            "recent": 1.0,
+            "knowledge": 0.8,
+        }
 
     # ------------------------------------------------------------------ #
     #  Public API                                                          #
@@ -286,13 +294,26 @@ class MemoryRetriever:
 
         scored: list[dict[str, Any]] = []
         for mem in recent_mems:
-            # Skip already-consolidated memories.
-            if mem.get("consolidated"):
+            # Check consolidated status from metadata_json
+            meta_raw = mem.get("metadata_json", "{}")
+            if isinstance(meta_raw, str):
+                try:
+                    meta = json.loads(meta_raw)
+                except (json.JSONDecodeError, TypeError):
+                    meta = {}
+            else:
+                meta = meta_raw or {}
+            if meta.get("consolidated"):
                 continue
-            try:
-                eff = self._decay.compute_effective_score(mem, now)
-            except Exception:
-                continue
+            # If decay_score is already computed, use it directly
+            decay_score = mem.get("decay_score")
+            if decay_score is not None:
+                eff = float(decay_score)
+            else:
+                try:
+                    eff = self._decay.compute_effective_score(mem, now)
+                except Exception:
+                    continue
             if eff >= 0.2:
                 mem["_eff"] = eff
                 scored.append(mem)
@@ -357,26 +378,26 @@ class MemoryRetriever:
     #  RRF scoring                                                         #
     # ------------------------------------------------------------------ #
 
-    @staticmethod
-    def _score_rrf(candidates: list[dict[str, Any]]) -> None:
+    def _score_rrf(self, candidates: list[dict[str, Any]]) -> None:
         """Compute Reciprocal Rank Fusion score and sort in-place.
 
-        Channel weights:
+        Channel weights (configurable via ``self._rrf_weights``):
           * lorebook  — 1.5x (curated content is high-signal)
           * recent    — 1.0x (time-weighted recall)
           * knowledge — 0.8x (broad semantic similarity)
         """
+        w = self._rrf_weights
         for cand in candidates:
             score = 0.0
             rank_lore = cand.get("rank_lorebook")
             if rank_lore is not None:
-                score += 1.5 / (_RRF_K + rank_lore + 1)
+                score += w["lorebook"] / (_RRF_K + rank_lore + 1)
             rank_recent = cand.get("rank_recent")
             if rank_recent is not None:
-                score += 1.0 / (_RRF_K + rank_recent + 1)
+                score += w["recent"] / (_RRF_K + rank_recent + 1)
             rank_know = cand.get("rank_knowledge")
             if rank_know is not None:
-                score += 0.8 / (_RRF_K + rank_know + 1)
+                score += w["knowledge"] / (_RRF_K + rank_know + 1)
             cand["rrf_score"] = score
 
         candidates.sort(key=lambda x: x.get("rrf_score", 0.0), reverse=True)

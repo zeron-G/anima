@@ -17,13 +17,16 @@ class RuleEngine:
     about the source.
     """
 
+    CPU_ALERT_THRESHOLD = 90
+    DISK_ALERT_THRESHOLD = 95
+
     def evaluate(self, context: dict) -> Decision:
         """Evaluate context and return a Decision.
 
         Built-in rules:
         - File change → save_note (record change)
-        - CPU > 90% for sustained period → respond (notify user)
-        - Disk > 95% → respond (warning)
+        - CPU > CPU_ALERT_THRESHOLD for sustained period → respond (notify user)
+        - Disk > DISK_ALERT_THRESHOLD → respond (warning)
         - User greeting → respond (direct reply)
         """
         event_type = context.get("event_type", "")
@@ -43,7 +46,7 @@ class RuleEngine:
             cpu = system_state.get("cpu_percent", 0)
             disk = system_state.get("disk_percent", 0)
 
-            if disk >= 95:
+            if disk >= self.DISK_ALERT_THRESHOLD:
                 return Decision(
                     action=ActionType.RESPOND,
                     reasoning="Disk usage critically high",
@@ -51,7 +54,7 @@ class RuleEngine:
                     source="rule_engine",
                 )
 
-            if cpu >= 90:
+            if cpu >= self.CPU_ALERT_THRESHOLD:
                 return Decision(
                     action=ActionType.RESPOND,
                     reasoning="CPU usage critically high",
@@ -63,7 +66,7 @@ class RuleEngine:
         if event_type == EventType.USER_MESSAGE.name or event_type == "USER_MESSAGE":
             text = payload.get("text", "").strip().lower()
             greetings = {"hi", "hello", "hey", "你好", "嗨", "早", "晚上好", "早上好"}
-            if text in greetings:
+            if text.strip() in greetings:
                 name = agent_name()
                 return Decision(
                     action=ActionType.RESPOND,

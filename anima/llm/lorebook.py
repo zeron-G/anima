@@ -16,6 +16,7 @@ import yaml
 
 from anima.llm.token_budget import count_tokens, truncate_to_tokens
 from anima.utils.logging import get_logger
+from anima.utils.path_safety import validate_path_within
 
 log = get_logger("lorebook")
 
@@ -210,6 +211,12 @@ class LorebookEngine:
             return self._cache[filename]
 
         filepath = self._dir / filename
+        try:
+            validate_path_within(filepath, self._dir)
+        except Exception:
+            log.warning("Lorebook path traversal blocked: %s", filename)
+            self._cache[filename] = ""
+            return ""
         if not filepath.exists():
             log.warning("Lorebook file not found: %s", filepath)
             self._cache[filename] = ""

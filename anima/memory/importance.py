@@ -82,8 +82,9 @@ class ImportanceScorer:
         """
         base = self.BASE_SCORES.get(type, 0.5)
         signals = self._detect_signals(content, context or {})
-        bonus = sum(self.SIGNAL_WEIGHTS[s] for s in signals)
-        final = min(max(base + bonus, 0.0), 1.0)
+        # M-05 fix: multiplicative scoring prevents all-important-messages-score-1.0
+        bonus = min(sum(self.SIGNAL_WEIGHTS[s] for s in signals), 0.5)  # cap bonus at 50% increase
+        final = min(base * (1.0 + bonus), 1.0)
 
         if signals:
             log.debug(

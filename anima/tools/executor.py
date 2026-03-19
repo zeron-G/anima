@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
 import inspect
 
 from anima.tools.registry import ToolRegistry
+from anima.tools.safe_subprocess import get_tool_timeout
 from anima.tools.safety import assess_command_risk
 from anima.models.tool_spec import RiskLevel
 from anima.utils.logging import get_logger
@@ -60,7 +62,16 @@ class ToolExecutor:
                 from anima.mcp.manager import get_mcp_manager
                 mgr = get_mcp_manager()
                 if mgr:
-                    return await mgr.call_tool(tool_name, args)
+                    # H-10 fix: MCP tools get parameter validation and timeout
+                    if spec.parameters:
+                        required = spec.parameters.get("required", [])
+                        missing = [r for r in required if r not in args]
+                        if missing:
+                            return {"success": False, "error": f"MCP tool missing required args: {missing}"}
+                    try:
+                        return await asyncio.wait_for(mgr.call_tool(tool_name, args), timeout=45)
+                    except asyncio.TimeoutError:
+                        return {"success": False, "error": f"MCP tool {tool_name} timed out after 45s"}
                 return {"success": False, "error": f"MCP manager not initialized for tool {tool_name}"}
             return {"success": False, "error": f"Tool {tool_name} has no handler"}
 
@@ -93,7 +104,13 @@ class ToolExecutor:
                 except (ValueError, TypeError) as e:
                     log.debug("executor: %s", e)
 
-            result = await spec.handler(**filtered_args)
+            # H-09 fix: per-tool timeout prevents single tool from blocking entire loop
+            tool_timeout = get_tool_timeout(tool_name)
+            try:
+                result = await asyncio.wait_for(spec.handler(**filtered_args), timeout=tool_timeout)
+            except asyncio.TimeoutError:
+                log.warning("Tool %s timed out after %ds", tool_name, tool_timeout)
+                return {"success": False, "error": f"Tool {tool_name} timed out after {tool_timeout}s"}
             # For shell commands, check returncode
             if isinstance(result, dict) and "returncode" in result and result["returncode"] != 0:
                 log.debug("Tool %s exited with code %d", tool_name, result["returncode"])

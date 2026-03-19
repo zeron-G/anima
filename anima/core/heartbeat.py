@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import threading
 import time
 
 from anima.config import get
@@ -64,6 +65,7 @@ class HeartbeatEngine:
         self._running = False
         self._tasks: list[asyncio.Task] = []
         self._tick_count = 0
+        self._tick_lock = threading.Lock()  # M-22: atomicity for tick count
         self._tick_callback = None  # Dashboard heartbeat visualization
         self._tick_history: list[dict] = []  # Last 30 tick records
         self._scheduler: Scheduler | None = None
@@ -79,6 +81,8 @@ class HeartbeatEngine:
         watch_paths = get("perception.watch_paths", ["."])
         watch_exts = get("perception.watch_extensions", None)
         self._file_watcher = FileWatcher(watch_paths, watch_exts)
+        # M-24: Initialize baseline mtime scan so first tick detects real changes
+        self._file_watcher.detect_changes()
 
     def mark_as_restart(self, reason: str, tick_count: int = 0) -> None:
         """Mark this startup as an evolution restart."""
@@ -159,7 +163,8 @@ class HeartbeatEngine:
 
     async def _on_script_tick(self) -> None:
         """Script heartbeat handler — four independent operations."""
-        self._tick_count += 1
+        with self._tick_lock:
+            self._tick_count += 1
 
         # Four independent methods
         snapshot = await self._sample_system()
@@ -192,17 +197,20 @@ class HeartbeatEngine:
                 self._recent_significance_scores.pop(0)
 
         # Alert cooldown: same alert type at most once per 5 minutes
-        if diff.has_alerts and (time.time() - getattr(self, '_last_alert_time', 0)) > 300:
-            self._last_alert_time = time.time()
-            await self._event_queue.put(Event(
-                type=EventType.SYSTEM_ALERT,
-                payload={"diff": {
-                    k: {"old": v.old_value, "new": v.new_value, "delta": v.delta}
-                    for k, v in diff.field_diffs.items() if v.significant
-                }, "system_state": snapshot},
-                priority=EventPriority.HIGH,
-                source="heartbeat",
-            ))
+        if diff.has_alerts:
+            now = time.time()
+            last = getattr(self, '_last_alert_time', 0)
+            if (now - last) > 300:
+                await self._event_queue.put(Event(
+                    type=EventType.SYSTEM_ALERT,
+                    payload={"diff": {
+                        k: {"old": v.old_value, "new": v.new_value, "delta": v.delta}
+                        for k, v in diff.field_diffs.items() if v.significant
+                    }, "system_state": snapshot},
+                    priority=EventPriority.HIGH,
+                    source="heartbeat",
+                ))
+            self._last_alert_time = now  # Always update, whether sent or not
 
         # Filter noise BEFORE pushing to queue — don't waste LLM calls on cache/log changes
         if changes:

@@ -42,9 +42,15 @@ class MemoryDecay:
     # Default for unknown types
     _DEFAULT_LAMBDA = 0.04
 
-    # Consolidation: group memories within this time window (seconds)
-    _CLUSTER_WINDOW_HOURS = 6.0
-    _CLUSTER_WINDOW_SECS = _CLUSTER_WINDOW_HOURS * 3600.0
+    def __init__(
+        self,
+        cluster_window_hours: float = 6.0,
+        consolidation_threshold: float = 0.1,
+    ):
+        # L-07/L-08: configurable decay threshold and cluster window
+        self.cluster_window_hours = cluster_window_hours
+        self.cluster_window_secs = cluster_window_hours * 3600.0
+        self.consolidation_threshold = consolidation_threshold
 
     # ------------------------------------------------------------------ #
     #  Effective score                                                      #
@@ -109,7 +115,7 @@ class MemoryDecay:
         now = time.time()
         rows = store._conn.execute(
             "SELECT id, type, importance, created_at, access_count, "
-            "metadata_json FROM episodic_memories"
+            "decay_score, metadata_json FROM episodic_memories"
         ).fetchall()
 
         count = 0
@@ -122,12 +128,12 @@ class MemoryDecay:
             effective = self.compute_effective_score(row_dict, now)
 
             # Only write if the score actually changed
-            old = float(row_dict.get("importance", 0))
+            old = float(row_dict.get("decay_score") or row_dict.get("importance", 0))
             if abs(effective - old) < 1e-6:
                 continue
 
             store._conn.execute(
-                "UPDATE episodic_memories SET importance = ? WHERE id = ?",
+                "UPDATE episodic_memories SET decay_score = ? WHERE id = ?",
                 (effective, row_dict["id"]),
             )
             count += 1
@@ -191,7 +197,17 @@ class MemoryDecay:
 
         for cluster in clusters:
             if len(cluster) < 2:
-                # Don't consolidate singletons — just let them decay
+                # L-06: Clean up very old singletons (effective_score < 0.05)
+                for mem in cluster:
+                    eff = self.compute_effective_score(mem, now)
+                    if eff < 0.05:
+                        meta = mem.get("_meta", {})
+                        meta["consolidated"] = True
+                        meta["singleton_cleaned"] = True
+                        store._conn.execute(
+                            "UPDATE episodic_memories SET metadata_json = ? WHERE id = ?",
+                            (json.dumps(meta), mem["id"]),
+                        )
                 continue
 
             summary = await self._summarise_cluster(
@@ -208,18 +224,24 @@ class MemoryDecay:
                 tags=["consolidated", mem_type],
             )
 
-            # Mark originals as consolidated
-            for mem in cluster:
-                meta = mem.get("_meta", {})
-                meta["consolidated"] = True
-                store._conn.execute(
-                    "UPDATE episodic_memories SET metadata_json = ? WHERE id = ?",
-                    (json.dumps(meta), mem["id"]),
-                )
+            # C-07 fix: use explicit transaction for consolidation
+            store._conn.execute("BEGIN IMMEDIATE")
+            try:
+                # Mark originals as consolidated
+                for mem in cluster:
+                    meta = mem.get("_meta", {})
+                    meta["consolidated"] = True
+                    store._conn.execute(
+                        "UPDATE episodic_memories SET metadata_json = ? WHERE id = ?",
+                        (json.dumps(meta), mem["id"]),
+                    )
+                store._conn.commit()
+            except Exception:
+                store._conn.rollback()
+                raise
             total_consolidated += len(cluster)
 
         if total_consolidated:
-            store._conn.commit()
             log.info(
                 "Consolidated %d memories into %d summaries",
                 total_consolidated,
@@ -241,7 +263,7 @@ class MemoryDecay:
 
         Algorithm: iterate sorted memories.  For each one, if it shares
         the same ``type`` as the current cluster's head AND falls within
-        ``_CLUSTER_WINDOW_SECS`` of the cluster's first entry, append
+        ``cluster_window_secs`` of the cluster's first entry, append
         it.  Otherwise start a new cluster.
         """
         if not memories:
@@ -257,7 +279,7 @@ class MemoryDecay:
             head = current[0]
             same_type = mem.get("type") == head.get("type")
             dt = float(mem.get("created_at", 0)) - float(head.get("created_at", 0))
-            within_window = dt <= self._CLUSTER_WINDOW_SECS
+            within_window = dt <= self.cluster_window_secs
 
             if same_type and within_window:
                 current.append(mem)

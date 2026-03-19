@@ -11,6 +11,7 @@ import asyncio
 import hashlib
 import json
 import sqlite3
+import threading
 import time
 from pathlib import Path
 from typing import Any
@@ -113,6 +114,9 @@ CREATE INDEX IF NOT EXISTS idx_env_category ON env_catalog(category);
 CREATE INDEX IF NOT EXISTS idx_env_type ON env_catalog(type);
 CREATE INDEX IF NOT EXISTS idx_env_important ON env_catalog(is_important);
 CREATE INDEX IF NOT EXISTS idx_env_layer ON env_catalog(scan_layer);
+CREATE INDEX IF NOT EXISTS idx_env_important_category ON env_catalog(is_important, category);
+CREATE INDEX IF NOT EXISTS idx_env_deleted ON env_catalog(is_deleted);
+CREATE INDEX IF NOT EXISTS idx_episodic_type_created ON episodic_memories(type, created_at);
 
 -- Tier 1: Static knowledge with node partition
 CREATE TABLE IF NOT EXISTS static_knowledge (
@@ -142,6 +146,14 @@ CREATE TABLE IF NOT EXISTS env_scan_progress (
     completed_at REAL DEFAULT 0,
     updated_at REAL DEFAULT 0
 );
+
+-- Local embedding vectors (fallback when ChromaDB unavailable)
+CREATE TABLE IF NOT EXISTS memory_embeddings (
+    mem_id TEXT PRIMARY KEY REFERENCES episodic_memories(id) ON DELETE CASCADE,
+    vector BLOB NOT NULL,
+    model TEXT DEFAULT 'paraphrase-multilingual-MiniLM-L12-v2',
+    created_at REAL DEFAULT 0
+);
 """
 
 
@@ -156,6 +168,7 @@ class MemoryStore:
         self._db_path = str(resolved)
         self._conn: sqlite3.Connection | None = None
         self._chroma_collection = None
+        self._write_lock = threading.Lock()
 
     # ------------------------------------------------------------------ #
     #  Factory                                                             #
@@ -169,6 +182,11 @@ class MemoryStore:
         def _init_db() -> None:
             store._conn = sqlite3.connect(store._db_path, check_same_thread=False)
             store._conn.row_factory = sqlite3.Row
+            # C-06 fix: WAL mode for safe concurrent reads + busy timeout
+            store._conn.execute("PRAGMA journal_mode = WAL")
+            store._conn.execute("PRAGMA synchronous = NORMAL")
+            store._conn.execute("PRAGMA busy_timeout = 5000")
+            store._conn.execute("PRAGMA foreign_keys = ON")
             store._conn.executescript(_SCHEMA)
             # Migrate: add columns that may not exist in older DBs
             for col, default in [("sync_seq", "0"), ("content_hash", "''"), ("decay_score", "NULL")]:
@@ -199,6 +217,22 @@ class MemoryStore:
 
                 store._chroma_collection = await asyncio.to_thread(_init_chroma)
                 log.info("ChromaDB initialized for vector search")
+                # M-15: Backfill ChromaDB from SQLite if collection is empty
+                try:
+                    chroma_count = store._chroma_collection.count()
+                    if chroma_count == 0:
+                        recent = store._conn.execute(
+                            "SELECT id, content, type, importance FROM episodic_memories "
+                            "ORDER BY created_at DESC LIMIT 200"
+                        ).fetchall()
+                        if recent:
+                            ids = [r["id"] for r in recent]
+                            docs = [r["content"] for r in recent]
+                            metas = [{"type": r["type"], "importance": r["importance"]} for r in recent]
+                            store._chroma_collection.add(ids=ids, documents=docs, metadatas=metas)
+                            log.info("Backfilled %d memories into ChromaDB", len(recent))
+                except Exception as e:
+                    log.debug("ChromaDB backfill skipped: %s", e)
             except Exception as e:
                 log.warning("ChromaDB init failed, falling back to SQLite: %s", e)
 
@@ -208,7 +242,10 @@ class MemoryStore:
     #  Internal helpers (pure computation — stay sync)                     #
     # ------------------------------------------------------------------ #
 
-    # Lamport clock for sync_seq
+    # L-04: sync_seq is used by network/sync.py for memory replication.
+    # The counter is process-local and resets on restart; watermarks in
+    # sync.py handle the coordination. Thread safety is not critical
+    # because sync_seq monotonicity is not a correctness requirement.
     _sync_seq_counter: int = 0
 
     def _next_sync_seq(self) -> int:
@@ -271,8 +308,28 @@ class MemoryStore:
                     metadatas=[{"type": type, "importance": importance}],
                 )
             except Exception as e:
-                log.debug("ChromaDB add failed: %s", e)
+                log.warning("ChromaDB add failed: %s", e)  # M-14: WARNING
+        # H-08: Store local embedding (sync path)
+        self._save_embedding_sync(mid, content)
         return mid
+
+    def _save_embedding_sync(self, mem_id: str, content: str) -> None:
+        """Store embedding for sync save_memory path."""
+        from anima.memory.embedder import embed, vector_to_bytes, is_available
+        if not is_available():
+            return
+        try:
+            vec = embed(content)
+            if vec is not None:
+                blob = vector_to_bytes(vec)
+                self._conn.execute(
+                    "INSERT OR REPLACE INTO memory_embeddings (mem_id, vector, created_at) "
+                    "VALUES (?, ?, ?)",
+                    (mem_id, blob, time.time()),
+                )
+                self._conn.commit()
+        except Exception as e:
+            log.debug("Embedding save failed: %s", e)
 
     async def save_memory_async(
         self,
@@ -297,9 +354,35 @@ class MemoryStore:
                     metadatas=[{"type": type, "importance": importance}],
                 )
             except Exception as e:
-                log.debug("ChromaDB add failed: %s", e)
+                log.warning("ChromaDB add failed: %s", e)  # M-14: WARNING not debug
+
+        # H-08: Compute and store local embedding for semantic search fallback
+        await self._save_embedding_async(mid, content)
 
         return mid
+
+    async def _save_embedding_async(self, mem_id: str, content: str) -> None:
+        """Compute and store embedding vector for a memory.
+
+        Part of the H-08 3-tier semantic search fallback:
+        ChromaDB → local embedder → LIKE.
+        """
+        from anima.memory.embedder import embed, vector_to_bytes, is_available
+        if not is_available():
+            return
+        try:
+            vec = await asyncio.to_thread(embed, content)
+            if vec is not None:
+                blob = vector_to_bytes(vec)
+                now = time.time()
+                self._conn.execute(
+                    "INSERT OR REPLACE INTO memory_embeddings (mem_id, vector, created_at) "
+                    "VALUES (?, ?, ?)",
+                    (mem_id, blob, now),
+                )
+                self._conn.commit()
+        except Exception as e:
+            log.debug("Embedding save failed for %s: %s", mem_id, e)
 
     def _search_memories_sync(
         self,
@@ -307,8 +390,14 @@ class MemoryStore:
         type: str | None,
         limit: int,
     ) -> list[dict]:
-        """Sync inner — runs in thread."""
-        # Try vector search first
+        """Sync inner — runs in thread.
+
+        H-08: 3-tier semantic search fallback:
+          1. ChromaDB vector search (if installed)
+          2. Local embedder cosine similarity (if sentence-transformers installed)
+          3. SQLite LIKE (last resort — logs warning)
+        """
+        # ── Tier 1: ChromaDB vector search ──
         if query and self._chroma_collection is not None:
             try:
                 results = self._chroma_collection.query(
@@ -323,9 +412,17 @@ class MemoryStore:
                     ).fetchall()
                     return [dict(r) for r in rows]
             except Exception as e:
-                log.debug("store: %s", e)
+                log.warning("ChromaDB search failed, trying local embedder: %s", e)
 
-        # Fallback: SQLite
+        # ── Tier 2: Local embedder cosine similarity ──
+        if query:
+            local_results = self._local_vector_search_sync(query, type, limit)
+            if local_results is not None:
+                return local_results
+
+        # ── Tier 3: SQLite LIKE (last resort) ──
+        if query:
+            log.debug("Semantic search unavailable — falling back to SQL LIKE for: %s", query[:50])
         conditions = []
         params: list[Any] = []
         if type:
@@ -341,6 +438,71 @@ class MemoryStore:
             [*params, limit],
         ).fetchall()
         return [dict(r) for r in rows]
+
+    def _local_vector_search_sync(
+        self,
+        query: str,
+        type: str | None,
+        limit: int,
+    ) -> list[dict] | None:
+        """Search using local embedder — returns None if unavailable.
+
+        Computes query embedding, then finds the closest stored embeddings
+        via cosine similarity.
+        """
+        from anima.memory.embedder import embed, bytes_to_vector, cosine_similarity, is_available
+        if not is_available():
+            return None
+
+        # Compute query embedding
+        query_vec = embed(query)
+        if query_vec is None:
+            return None
+
+        # Fetch all stored embeddings
+        rows = self._conn.execute(
+            "SELECT e.mem_id, e.vector FROM memory_embeddings e "
+            "JOIN episodic_memories m ON e.mem_id = m.id "
+            + ("WHERE m.type = ? " if type else "")
+            + "ORDER BY m.created_at DESC LIMIT 500",  # Cap scan size
+            (type,) if type else (),
+        ).fetchall()
+
+        if not rows:
+            return None
+
+        # Score by cosine similarity
+        scored: list[tuple[float, str]] = []
+        for row in rows:
+            try:
+                stored_vec = bytes_to_vector(row["vector"])
+                sim = cosine_similarity(query_vec, stored_vec)
+                scored.append((sim, row["mem_id"]))
+            except Exception:
+                continue
+
+        if not scored:
+            return None
+
+        # Sort by similarity (descending) and take top N
+        scored.sort(key=lambda x: x[0], reverse=True)
+        top_ids = [mid for _, mid in scored[:limit]]
+
+        if not top_ids:
+            return None
+
+        # Fetch full memory records
+        placeholders = ",".join("?" * len(top_ids))
+        mem_rows = self._conn.execute(
+            f"SELECT * FROM episodic_memories WHERE id IN ({placeholders})",
+            top_ids,
+        ).fetchall()
+
+        # Preserve similarity ordering
+        id_order = {mid: i for i, mid in enumerate(top_ids)}
+        result = [dict(r) for r in mem_rows]
+        result.sort(key=lambda r: id_order.get(r.get("id", ""), 999))
+        return result
 
     def search_memories(
         self,
@@ -922,12 +1084,17 @@ class MemoryStore:
         if not ids:
             return
         now = time.time()
-        for mid in ids:
-            self._conn.execute(
-                "UPDATE episodic_memories SET access_count = access_count + 1, last_accessed = ? WHERE id = ?",
-                (now, mid),
-            )
-        self._conn.commit()
+        self._conn.execute("BEGIN IMMEDIATE")
+        try:
+            for mid in ids:
+                self._conn.execute(
+                    "UPDATE episodic_memories SET access_count = access_count + 1, last_accessed = ? WHERE id = ?",
+                    (now, mid),
+                )
+            self._conn.commit()
+        except Exception:
+            self._conn.rollback()
+            raise
 
     # Keep backward-compat sync name — retriever calls this from sync code
     def touch_memories(self, ids: list[str]) -> None:

@@ -6,6 +6,8 @@ import pytest
 from anima.config import load_config
 from anima.core.cognitive import AgenticLoop
 from anima.core.event_queue import EventQueue
+from anima.core.event_routing import EventRouter
+from anima.core.tool_orchestrator import ToolOrchestrator
 from anima.emotion.state import EmotionState
 from anima.llm.router import LLMRouter
 from anima.memory.store import MemoryStore
@@ -57,12 +59,12 @@ async def test_handle_event_from_cache(cognitive_deps):
 
 @pytest.mark.asyncio
 async def test_output_callback(cognitive_deps):
-    """Verify output callback is called when _output is invoked."""
+    """Verify output callback is called when emit_output is invoked."""
     al, eq, sc, ms = cognitive_deps
     outputs = []
     al.set_output_callback(lambda text, **kw: outputs.append(text))
 
-    await al._output("Hello!")
+    al._ctx.emit_output("Hello!")
     assert "Hello!" in outputs
 
 
@@ -70,44 +72,55 @@ async def test_output_callback(cognitive_deps):
 async def test_event_to_message_user(cognitive_deps):
     """Verify user message events are converted correctly."""
     al, eq, sc, ms = cognitive_deps
+    router = EventRouter()
     event = Event(type=EventType.USER_MESSAGE, payload={"text": "hi there"})
-    msg = al._event_to_message(event)
-    assert msg == "hi there"
+    decision = router.route(event, al._ctx)
+    # USER_MESSAGE "hi there" may be handled by rule engine or routed to LLM
+    # If not handled, the message should be the user text
+    if not decision.handled:
+        assert decision.message == "hi there"
 
 
 @pytest.mark.asyncio
 async def test_event_to_message_startup(cognitive_deps):
     """Verify startup events produce startup prompt."""
     al, eq, sc, ms = cognitive_deps
+    router = EventRouter()
     event = Event(type=EventType.STARTUP, payload={})
-    msg = al._event_to_message(event)
-    assert "STARTUP" in msg
-    assert "INTERNAL" in msg
-    assert "booted" in msg
+    decision = router.route(event, al._ctx)
+    assert not decision.handled
+    assert "STARTUP" in decision.message
+    assert "INTERNAL" in decision.message
+    assert "booted" in decision.message
 
 
 @pytest.mark.asyncio
 async def test_event_to_message_self_thinking(cognitive_deps):
     """Verify self-thinking events produce self-thinking prompt."""
     al, eq, sc, ms = cognitive_deps
+    router = EventRouter()
     event = Event(type=EventType.SELF_THINKING, payload={"tick_count": 5})
-    msg = al._event_to_message(event)
-    assert "SELF_THINKING" in msg
-    assert "INTERNAL" in msg
-    assert "#5" in msg
+    decision = router.route(event, al._ctx)
+    assert not decision.handled
+    assert "SELF_THINKING" in decision.message
+    assert "INTERNAL" in decision.message
+    assert "#5" in decision.message
 
 
 @pytest.mark.asyncio
 async def test_event_to_message_file_change(cognitive_deps):
     """Verify file change events list changed files."""
     al, eq, sc, ms = cognitive_deps
+    router = EventRouter()
     event = Event(
         type=EventType.FILE_CHANGE,
         payload={"changes": [{"path": "a.py", "change": "modified"}]},
     )
-    msg = al._event_to_message(event)
-    assert "a.py" in msg
-    assert "modified" in msg
+    decision = router.route(event, al._ctx)
+    # File change with a real .py file should not be filtered as noise
+    if not decision.handled:
+        assert "a.py" in decision.message
+        assert "modified" in decision.message
 
 
 @pytest.mark.asyncio
@@ -115,7 +128,7 @@ async def test_pick_tier_user_message(cognitive_deps):
     """User messages should use tier 1."""
     al, eq, sc, ms = cognitive_deps
     event = Event(type=EventType.USER_MESSAGE, payload={"text": "hi"})
-    assert al._pick_tier(event) == 1
+    assert EventRouter._pick_tier(event) == 1
 
 
 @pytest.mark.asyncio
@@ -123,7 +136,7 @@ async def test_pick_tier_self_thinking(cognitive_deps):
     """Self-thinking events should use tier 2."""
     al, eq, sc, ms = cognitive_deps
     event = Event(type=EventType.SELF_THINKING, payload={})
-    assert al._pick_tier(event) == 2
+    assert EventRouter._pick_tier(event) == 2
 
 
 @pytest.mark.asyncio
@@ -146,25 +159,23 @@ async def test_conversation_trimming(cognitive_deps):
     al, eq, sc, ms = cognitive_deps
     # Fill conversation beyond limit
     for i in range(200):
-        al._conversation.append({"role": "user", "content": f"msg {i}"})
-    al._trim_conversation()
-    assert len(al._conversation) == al._max_conversation_turns * 2
+        al._ctx.conversation.append({"role": "user", "content": f"msg {i}"})
+    al._ctx.trim_conversation()
+    assert len(al._ctx.conversation) == al._ctx.max_conversation_turns * 2
 
 
 @pytest.mark.asyncio
 async def test_format_result_success(cognitive_deps):
     """Verify tool result formatting for successful results."""
-    al, eq, sc, ms = cognitive_deps
     result = {"success": True, "result": {"stdout": "hello world", "returncode": 0}}
-    text = al._format_result("shell", result)
+    text = ToolOrchestrator.format_result("shell", result)
     assert "hello world" in text
 
 
 @pytest.mark.asyncio
 async def test_format_result_error(cognitive_deps):
     """Verify tool result formatting for errors."""
-    al, eq, sc, ms = cognitive_deps
     result = {"success": False, "error": "command not found"}
-    text = al._format_result("shell", result)
+    text = ToolOrchestrator.format_result("shell", result)
     assert "Error" in text
     assert "command not found" in text

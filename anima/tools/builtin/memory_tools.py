@@ -14,6 +14,7 @@ from typing import Any
 from anima.config import agent_dir, data_dir
 from anima.models.tool_spec import ToolSpec, RiskLevel
 from anima.utils.logging import get_logger
+from anima.utils.path_safety import validate_path_within
 
 log = get_logger("memory_tools")
 
@@ -127,6 +128,11 @@ async def _update_feelings(content: str, action: str = "append") -> dict:
         feelings_path = agent / "feelings.md"
 
     try:
+        validate_path_within(feelings_path, agent)
+    except Exception:
+        return {"success": False, "error": f"Path validation failed for {feelings_path}"}
+
+    try:
         # Ensure parent directory exists
         feelings_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -205,6 +211,11 @@ async def _update_user_profile(
     ``{"success": bool, "message": str, "backup": str}``
     """
     profile_path = data_dir() / "user_profile.md"
+
+    try:
+        validate_path_within(profile_path, data_dir())
+    except Exception:
+        return {"success": False, "error": f"Path validation failed for {profile_path}"}
 
     try:
         # Ensure the file exists (create from example if available)

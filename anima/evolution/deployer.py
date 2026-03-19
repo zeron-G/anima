@@ -86,15 +86,23 @@ class Deployer:
             return False
 
     def rollback(self, proposal: Proposal, reason: str) -> bool:
-        """Revert the last commit."""
+        """Revert the last commit.
+
+        M-10 fix: returns False if push fails (revert is local-only).
+        """
         try:
             self._git("revert", "HEAD", "--no-edit")
-            self._git("push", "origin", "private", check=False)
+            # Check if push succeeds — local revert without push is incomplete
+            push_result = self._git("push", "origin", "private", check=False)
+            push_ok = push_result.returncode == 0 if hasattr(push_result, 'returncode') else True
             proposal.status = ProposalStatus.ROLLED_BACK
             self._memory.record_failure(
                 proposal.id, proposal.type.value, proposal.title,
                 f"Rolled back: {reason}", f"Deploy verification failed: {reason}",
             )
+            if not push_ok:
+                log.warning("Rollback revert applied locally but push to origin failed for %s", proposal.id)
+                return False
             log.warning("Rolled back %s: %s", proposal.id, reason)
             return True
         except Exception as e:

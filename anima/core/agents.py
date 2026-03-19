@@ -224,8 +224,11 @@ class AgentManager:
             safe_tools = {"shell", "read_file", "write_file", "edit_file", "list_directory",
                          "glob_search", "grep_search", "system_info", "get_datetime",
                          "web_fetch", "save_note"}
+            # Prevent infinite recursion: sub-agents cannot spawn other agents
+            _FORBIDDEN_IN_SUBAGENT = {"spawn_agent", "spawn_internal", "spawn_claude_code",
+                                      "spawn_shell_task", "check_agent", "wait_agent"}
             for spec in self._tool_registry.list_tools():
-                if spec.name in safe_tools:
+                if spec.name in safe_tools and spec.name not in _FORBIDDEN_IN_SUBAGENT:
                     tool_schemas.append({
                         "name": spec.name,
                         "description": spec.description,

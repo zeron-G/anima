@@ -205,6 +205,10 @@ class MCPServerConnection:
                     log.info("Attempting to restart MCP server '%s'...", self.name)
                     self._retry_count += 1
                     await self._cleanup()
+                    # M-46: Exponential backoff before restart
+                    import asyncio
+                    backoff = min(2 ** self._retry_count, 30)  # 1, 2, 4, 8, 16, 30 seconds
+                    await asyncio.sleep(backoff)
                     await self.start()
             return {"success": False, "error": str(e)}
 

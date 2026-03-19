@@ -85,14 +85,17 @@ class SelfAudit:
             critical = [f for f in result.findings
                         if f.get("severity") in ("error", "high", "critical")]
             for finding in critical[:3]:
-                self._issue_tracker.create(
-                    title=f"[audit-t{tier}] {finding.get('message', 'Audit finding')[:80]}",
-                    description=json.dumps(finding, indent=2),
-                    priority="high" if finding.get("severity") == "critical" else "medium",
-                    labels=["audit", f"tier-{tier}"],
-                    files=finding.get("files", []),
-                    reporter="self_audit",
-                )
+                try:
+                    self._issue_tracker.create(
+                        title=f"[audit-t{tier}] {finding.get('message', 'Audit finding')[:80]}",
+                        description=json.dumps(finding, indent=2),
+                        priority="high" if finding.get("severity") == "critical" else "medium",
+                        labels=["audit", f"tier-{tier}"],
+                        files=finding.get("files", []),
+                        reporter="self_audit",
+                    )
+                except Exception as e:
+                    log.warning("Failed to create issue for finding: %s", e)
 
         return result
 
@@ -140,8 +143,8 @@ class SelfAudit:
                             "line": issue.get("location", {}).get("row", 0),
                             "files": [issue.get("filename", "")],
                         })
-                except json.JSONDecodeError:
-                    pass
+                except json.JSONDecodeError as e:
+                    log.warning("JSON decode failed in audit: %s", e)
         except (subprocess.TimeoutExpired, FileNotFoundError) as e:
             log.warning("Ruff check failed: %s", e)
 
@@ -163,8 +166,8 @@ class SelfAudit:
                             "line": issue.get("line_number", 0),
                             "files": [issue.get("filename", "")],
                         })
-                except json.JSONDecodeError:
-                    pass
+                except json.JSONDecodeError as e:
+                    log.warning("JSON decode failed in audit: %s", e)
         except (subprocess.TimeoutExpired, FileNotFoundError) as e:
             log.debug("Bandit not available: %s", e)
 
@@ -243,8 +246,8 @@ class SelfAudit:
                                         f"{vuln.get('description', '')[:100]}"),
                             "files": ["pyproject.toml"],
                         })
-                except json.JSONDecodeError:
-                    pass
+                except json.JSONDecodeError as e:
+                    log.warning("JSON decode failed in audit: %s", e)
             passed = result.returncode == 0 and len(findings) == 0
         except (subprocess.TimeoutExpired, FileNotFoundError):
             # pip-audit not installed — pass with note

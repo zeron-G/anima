@@ -85,11 +85,17 @@ class LLMRouter:
         return self._circuit_open
 
     def _on_success(self) -> None:
-        if self._circuit_open:
+        was_open = self._circuit_open
+        if was_open:
+            # Gradual reset: set to 1 (not 0) so one more failure doesn't
+            # immediately re-open the circuit.  Full reset happens after
+            # 2 consecutive successes. (L-30 fix)
+            self._consecutive_failures = 1
+            self._circuit_open = False
             log.info("Circuit CLOSED — API recovered after %.0fs",
                      time.time() - self._circuit_opened_at)
-        self._consecutive_failures = 0
-        self._circuit_open = False
+        else:
+            self._consecutive_failures = max(0, self._consecutive_failures - 1)
 
     def _on_failure(self) -> None:
         self._consecutive_failures += 1
@@ -130,8 +136,9 @@ class LLMRouter:
         import asyncio as _aio
 
         # Build model cascade: primary → Sonnet → local
-        primary_model = self._tier2_model if tier <= 2 else self._tier1_model
-        primary_max = self._tier2_max_tokens if tier <= 2 else self._tier1_max_tokens
+        # H-04 fix: tier==1 (user messages) → Opus, tier>=2 (internal) → Sonnet
+        primary_model = self._tier1_model if tier == 1 else self._tier2_model
+        primary_max = self._tier1_max_tokens if tier == 1 else self._tier2_max_tokens
         models_to_try = [
             (primary_model, primary_max, 120),
         ]
@@ -144,20 +151,24 @@ class LLMRouter:
         primary = models_to_try[0][0]
         failed_models: list[str] = []
 
-        for model, max_tokens, timeout in models_to_try:
+        for model, max_tokens, _cascade_timeout in models_to_try:
             try:
                 kwargs = dict(model=model, messages=messages,
                              max_tokens=max_tokens, temperature=temperature)
                 if tools:
                     kwargs["tools"] = tools
-                resp = await _aio.wait_for(completion(**kwargs), timeout=timeout)
+                # H-20 fix: rely on httpx granular timeouts (connect/read/write/pool)
+                # set in providers.py, not asyncio.wait_for which conflicts.
+                # providers.py already has: Anthropic read=90s, OpenAI read=180s,
+                # Local read=180s — these are more appropriate than a flat timeout.
+                resp = await completion(**kwargs)
                 self._record_usage(resp, tier=tier)
                 self._on_success()
                 # Track degradation/recovery
                 self._notify_model_change(primary, model, failed_models)
                 return resp
             except _aio.TimeoutError:
-                log.warning("%s timeout (%ds), trying next", model, timeout)
+                log.warning("%s timeout, trying next", model)
                 failed_models.append(model)
                 self._on_failure()
                 continue
@@ -170,7 +181,7 @@ class LLMRouter:
                 failed_models.append(model)
                 if not is_local:
                     self._on_failure()
-                if is_transient:
+                if is_transient and not is_local:
                     await _aio.sleep(2)
                 continue
 
@@ -248,15 +259,103 @@ class LLMRouter:
             return None
         return await self._try_call(messages, tier, temperature, tools=tools)
 
+    # ── Streaming (H-03) ──
+
+    async def call_with_tools_stream(self, messages, tools, tier=2, temperature=0.7):
+        """Streaming LLM call with tools. Yields StreamEvent objects.
+
+        Handles circuit breaker, budget check, and model cascade.
+        The caller receives text_delta events in real-time and a final
+        message_complete event with the full response.
+
+        Falls back to non-streaming if streaming fails.
+        """
+        from anima.llm.providers import completion_stream, StreamEvent
+
+        if not self.check_budget():
+            yield StreamEvent(type="error", error="Budget exceeded")
+            return
+        check = self._check_circuit()
+        if check is False:
+            yield StreamEvent(type="error", error="Circuit breaker open")
+            return
+
+
+        # H-04: correct tier selection
+        primary_model = self._tier1_model if tier == 1 else self._tier2_model
+        primary_max = self._tier1_max_tokens if tier == 1 else self._tier2_max_tokens
+
+        models_to_try = [(primary_model, primary_max)]
+        if self.SONNET_FALLBACK not in primary_model:
+            models_to_try.append((self.SONNET_FALLBACK, 4096))
+        if self._local_model:
+            models_to_try.append((self._local_model, self._local_max_tokens))
+
+        for model, max_tokens in models_to_try:
+            try:
+                kwargs = dict(
+                    model=model, messages=messages,
+                    max_tokens=max_tokens, temperature=temperature,
+                )
+                if tools:
+                    kwargs["tools"] = tools
+
+                got_events = False
+                final_event = None
+
+                async for event in completion_stream(**kwargs):
+                    got_events = True
+                    if event.type == "error":
+                        # Try next model
+                        log.warning("Streaming %s failed: %s", model, event.error)
+                        self._on_failure()
+                        break
+                    if event.type == "message_complete":
+                        final_event = event
+                        self._record_usage(
+                            {"content": event.content, "tool_calls": event.tool_calls,
+                             "usage": event.usage, "model": model},
+                            tier=tier,
+                        )
+                        self._on_success()
+                    yield event
+
+                if final_event is not None:
+                    return  # Success — done
+
+                if not got_events:
+                    log.warning("Streaming %s: no events received", model)
+                    self._on_failure()
+                    continue
+
+            except Exception as e:
+                log.warning("Streaming %s failed: %s", model, str(e)[:200])
+                self._on_failure()
+                continue
+
+        # All models exhausted
+        self._on_failure()
+        yield StreamEvent(type="error", error="All models exhausted")
+
     # ── Budget ──
 
-    _PRICING = {
+    # H-05 fix: add local pricing (free) and unknown fallback
+    _PRICING: dict[str, tuple[float, float]] = {
         "haiku": (0.25, 1.25),
         "sonnet": (3.0, 15.0),
         "opus": (15.0, 75.0),
+        "local": (0.0, 0.0),  # local models are free
     }
 
     def check_budget(self, estimated_cost: float = 0) -> bool:
+        """Check whether daily budget allows another call.
+
+        Parameters
+        ----------
+        estimated_cost:
+            Pre-estimated cost of the upcoming call (USD).
+            Added to the running total before comparison.
+        """
         today = self._today()
         if today != self._day_start:
             self._usage.clear()
@@ -266,11 +365,16 @@ class LLMRouter:
             model = u.get("model", "").lower()
             inp = u.get("prompt_tokens", 0)
             out = u.get("completion_tokens", 0)
-            price = self._PRICING.get("sonnet")
+            # Match pricing: try each key as substring
+            price: tuple[float, float] | None = None
             for key, rates in self._PRICING.items():
                 if key in model:
                     price = rates
                     break
+            if price is None:
+                # Unknown model — treat as free but log warning
+                log.debug("Unknown model '%s' for pricing, treating as free", model)
+                price = (0.0, 0.0)
             total_cost += (inp * price[0] + out * price[1]) / 1_000_000
         return (total_cost + estimated_cost) < self._daily_budget
 

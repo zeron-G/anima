@@ -49,6 +49,19 @@ def _send_sync(to: str, subject: str, body: str) -> dict:
     if to in cfg.get("contacts", {}):
         to = cfg["contacts"][to]
 
+    # --- Email header injection prevention ---
+    # Reject addresses containing newlines, carriage returns, or multiple addresses
+    for dangerous in ("\n", "\r", "\0"):
+        if dangerous in to or dangerous in subject:
+            return {"success": False, "error": "Invalid characters in email address or subject"}
+
+    # Basic email format validation
+    from email.utils import parseaddr
+    _, validated_addr = parseaddr(to)
+    if not validated_addr or "@" not in validated_addr:
+        return {"success": False, "error": f"Invalid email address: {to!r}"}
+    to = validated_addr  # Use the cleaned address
+
     try:
         msg = MIMEText(body, "plain", "utf-8")
         msg["From"] = cfg["account"]

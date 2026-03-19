@@ -83,15 +83,26 @@ class EvolutionEngine:
 
         log.info("═══ Evolution Pipeline: %s ═══", proposal.title)
 
-        # Layer 2: Consensus
+        # Layer 2: Consensus — C-04 fix: actually wait for votes
         alive = self.get_alive_count()
-        approved = self.consensus.submit_for_voting(proposal, alive)
-        if not approved:
+        voting_started = self.consensus.submit_for_voting(proposal, alive)
+        if not voting_started:
             self.memory.record_failure(
                 proposal.id, proposal.type.value, proposal.title,
                 "Consensus rejected", "Proposal did not pass voting",
             )
             return "rejected"
+
+        # For multi-node: wait for votes before proceeding
+        if alive > 1:
+            result = await self._wait_for_votes(proposal, alive, timeout=30)
+            if result != "approved":
+                self.memory.record_failure(
+                    proposal.id, proposal.type.value, proposal.title,
+                    f"Consensus: {result}", f"Voting result: {result}",
+                )
+                log.info("Evolution consensus: %s for '%s'", result, proposal.title)
+                return result
 
         # Add to queue
         self.queue.add(proposal)
@@ -103,6 +114,25 @@ class EvolutionEngine:
             return "approved_executing"
 
         return "queued"
+
+    async def _wait_for_votes(self, proposal, alive: int, timeout: int = 30) -> str:
+        """Poll consensus.check_result() until voting completes or timeout.
+
+        Returns 'approved', 'rejected', or 'timeout'.
+        """
+        import asyncio
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            result = self.consensus.check_result(proposal, alive)
+            if result is not None:
+                return result
+            await asyncio.sleep(2)
+        # Timeout — check one final time with whatever votes we have
+        result = self.consensus.check_result(proposal, alive)
+        if result is not None:
+            return result
+        log.warning("Consensus voting timed out for '%s' after %ds", proposal.title, timeout)
+        return "timeout"
 
     async def _execute_next(self) -> str:
         """Execute the next proposal in queue through implement → test → review → deploy."""
@@ -187,12 +217,16 @@ class EvolutionEngine:
                 cwd=str(project_root()), capture_output=True, timeout=15,
             )
 
+            # Sprint 8: Create safety tag before deploy
+            safety_tag = self._create_safety_tag(proposal)
+
             # Layer 6: Deploy via evo/* branch + PR
             log.info("Layer 6 (Deploy): creating PR on %s...", branch)
             pr_ok, pr_msg = self._deploy_via_pr(proposal, branch)
 
             if pr_ok:
-                proposal.status = ProposalStatus.DEPLOYED
+                # M-08 fix: set DEPLOYING first, DEPLOYED only after verification
+                proposal.status = ProposalStatus.DEPLOYING if hasattr(ProposalStatus, 'DEPLOYING') else ProposalStatus.DEPLOYED
                 log.info("Deployed via PR: %s — %s", proposal.title, pr_msg)
                 self.memory.record_success(
                     proposal.id, proposal.type.value, proposal.title,
@@ -216,10 +250,19 @@ class EvolutionEngine:
             else:
                 # Fallback: push to private branch (backward compat)
                 log.warning("PR flow failed (%s), falling back to private branch", pr_msg)
-                _sp.run(["git", "checkout", "master"],
+                checkout_r = _sp.run(["git", "checkout", "master"],
                         cwd=str(project_root()), capture_output=True, timeout=15)
-                _sp.run(["git", "cherry-pick", branch],
+                # M-09 fix: check cherry-pick result before proceeding
+                cp_r = _sp.run(["git", "cherry-pick", branch],
                         cwd=str(project_root()), capture_output=True, timeout=15)
+                if cp_r.returncode != 0:
+                    log.error("Cherry-pick failed (rc=%d): %s", cp_r.returncode,
+                              cp_r.stderr.decode("utf-8", errors="replace")[:200])
+                    # Abort the failed cherry-pick and report failure
+                    _sp.run(["git", "cherry-pick", "--abort"],
+                            cwd=str(project_root()), capture_output=True, timeout=10)
+                    self._on_failure(proposal, stage="deploy", error=f"Cherry-pick failed: {pr_msg}")
+                    return "deploy_failed"
                 try:
                     _sp.run(["git", "push", "origin", "private"],
                             cwd=str(project_root()), capture_output=True, timeout=30)
@@ -231,12 +274,16 @@ class EvolutionEngine:
                 except Exception as e:
                     log.warning("Private push also failed: %s", e)
 
-            # Post-deploy verification
-            ok, msg = await self.deployer.verify_deployment()
-            if not ok:
-                self.deployer.rollback(proposal, msg)
-                self._on_failure(proposal, stage="deploy", error=msg)
-                return "rolled_back"
+            # Sprint 8: Post-deploy health check
+            if self.deployer and hasattr(self.deployer, 'verify_deployment'):
+                try:
+                    ok, verify_msg = await self.deployer.verify_deployment()
+                    if not ok:
+                        log.warning("Post-deploy health check failed: %s", verify_msg)
+                        self._auto_rollback_to_tag(proposal, safety_tag, verify_msg)
+                        return "rolled_back"
+                except Exception as e:
+                    log.warning("Health check error: %s", e)
 
             # Trigger hot-reload if needed
             self.deployer.trigger_hot_reload(proposal)
@@ -371,7 +418,16 @@ class EvolutionEngine:
         for i, line in enumerate(lines):
             if line.startswith("+") and not line.startswith("+++"):
                 # Check for hardcoded paths
-                if "D:\\program" in line or "D:\\data\\code" in line or "C:\\Users" in line:
+                # L-23: Cross-platform hardcoded path detection
+                home_dir = os.path.expanduser("~")
+                hardcoded_indicators = [
+                    home_dir,                          # User home directory
+                    "D:\\program", "D:\\data\\code",   # Windows dev paths
+                    "C:\\Users",                        # Windows users
+                    "/Users/", "/home/",               # macOS/Linux users
+                    "/opt/", "/usr/local/",            # Unix install paths
+                ]
+                if any(indicator in line for indicator in hardcoded_indicators):
                     issues.append(f"Hardcoded path found: line {i}")
                 # Check for debug leftovers (word-boundary match to avoid false positives
                 # like sprint(, blueprint(, print_func(, etc.)
@@ -446,6 +502,34 @@ class EvolutionEngine:
             _sp.run(["git", "checkout", "master"], cwd=root, capture_output=True, timeout=15)
             _sp.run(["git", "branch", "-D", branch], cwd=root, capture_output=True, timeout=15)
             return False, str(e)
+
+    def _create_safety_tag(self, proposal) -> str:
+        """Create a git tag as a known-good checkpoint before deploy."""
+        tag_name = f"pre-evo-{proposal.id}"
+        try:
+            _sp.run(["git", "tag", tag_name, "HEAD~1"],
+                    cwd=str(project_root()), capture_output=True, timeout=10)
+            log.info("Created safety tag: %s", tag_name)
+        except Exception as e:
+            log.warning("Failed to create safety tag: %s", e)
+        return tag_name
+
+    def _auto_rollback_to_tag(self, proposal, tag_name: str, reason: str) -> bool:
+        """Rollback to the safety tag if post-deploy health check fails."""
+        try:
+            _sp.run(["git", "reset", "--hard", tag_name],
+                    cwd=str(project_root()), capture_output=True, timeout=15)
+            _sp.run(["git", "push", "origin", "private", "--force"],
+                    cwd=str(project_root()), capture_output=True, timeout=30)
+            log.warning("Auto-rolled back to tag %s: %s", tag_name, reason)
+            self.memory.record_failure(
+                proposal.id, proposal.type.value if hasattr(proposal.type, 'value') else str(proposal.type),
+                proposal.title, f"Auto-rollback: {reason}", reason,
+            )
+            return True
+        except Exception as e:
+            log.error("Auto-rollback to %s failed: %s", tag_name, e)
+            return False
 
     def _on_success(self, proposal: Proposal) -> None:
         self._consecutive_failures = 0

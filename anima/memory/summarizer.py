@@ -105,13 +105,15 @@ class ConversationSummarizer:
         If a summary exists it is prepended as a system message so the LLM
         has a condensed view of the older conversation.
         """
+        # M-02 fix: exclude self-thoughts from user-facing conversation context
+        filtered_buffer = [m for m in self._raw_buffer if not m.get("is_self_thought")]
         messages: list[dict] = []
         if self._summary:
             messages.append({
                 "role": "system",
                 "content": f"[对话历史摘要]\n{self._summary}",
             })
-        messages.extend(self._raw_buffer)
+        messages.extend(filtered_buffer)
         return messages
 
     def set_save_path(self, path: Path | str) -> None:
@@ -250,12 +252,10 @@ class ConversationSummarizer:
     def _rule_truncation(self, messages: list[dict]) -> str:
         """Fallback: build a summary from truncated messages.
 
-        Keeps at most 20 messages, each truncated to 80 characters, appended
-        to any existing summary.
+        Keeps at most 20 messages, each truncated to 80 characters.
+        Does NOT include the old summary to avoid unbounded growth.
         """
         parts: list[str] = []
-        if self._summary:
-            parts.append(self._summary)
         tail = messages[-20:]
         for msg in tail:
             role = msg.get("role", "?")

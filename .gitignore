@@ -14,6 +14,8 @@ venv/
 
 # Runtime data (local, regenerated at runtime)
 data/anima.db
+data/anima.db-shm
+data/anima.db-wal
 data/chroma/
 data/logs/*
 data/notes/*
