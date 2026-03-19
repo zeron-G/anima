@@ -35,8 +35,8 @@ perception:
 
 # ── LLM ──
 llm:
-  tier1: { model: "claude-opus-4-6", max_tokens: 8192, max_context: 200000 }
-  tier2: { model: "claude-opus-4-6", max_tokens: 8192, max_context: 200000 }
+  tier1: { model: "claude-opus-4-6", max_tokens: 16384, max_context: 1000000 }
+  tier2: { model: "claude-opus-4-6", max_tokens: 16384, max_context: 1000000 }
   # Model prefix routing:
   #   "claude-opus-4-6"    → Anthropic API (OAuth/API key)
   #   "local/"             → local server (llama.cpp/ollama/vLLM)
