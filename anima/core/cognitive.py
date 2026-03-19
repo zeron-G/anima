@@ -657,6 +657,24 @@ class AgenticLoop:
             return p.get("evolution_prompt", "[EVOLUTION: no prompt provided]")
         if t == EventType.SELF_THINKING:
             tick = p.get("tick_count", 0)
+
+            # ── Memory health check — every 20 ticks ──
+            if tick > 0 and tick % 20 == 0:
+                self._last_chosen_kw = "memory_health"
+                return (
+                    f"[INTERNAL: MEMORY_HEALTH_CHECK tick #{tick}]\n"
+                    "Lightweight self-check of your memory system. Do ALL of these:\n"
+                    "1. read_file('agents/eva/memory/feelings.md', offset=-10, limit=10) — "
+                    "check the last timestamp. If >48h since last entry, record a concern.\n"
+                    "2. read_file('data/user_profile.md') — confirm the file exists and is non-empty.\n"
+                    "3. glob_search('data/notes/*.md') — count files. If >50, flag abnormal growth.\n"
+                    "4. Write a ONE-LINE emoji summary to feelings via update_feelings, e.g. "
+                    "'🩺 记忆自检: feelings ✅ | profile ✅ | notes(4) ✅' or flag ⚠️ for issues.\n"
+                    "5. If everything is normal, do NOT notify 主人 — this is self-care only.\n"
+                    "   If you find a real problem (file missing/corrupt, feelings stale >48h), "
+                    "THEN gently tell 主人."
+                )
+
             # Curated task pool — each task has a keyword for dedup detection
             task_pool = [
                 ("log_errors",   "Scan your logs for errors: read_file on data/logs/anima.log (offset=-80, limit=80). Find any ERROR or repeated failures. If you spot something fixable, fix it or use self_repair."),

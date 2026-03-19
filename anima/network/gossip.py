@@ -135,6 +135,10 @@ class GossipMesh:
         # can safely post callbacks via call_soon_threadsafe.
         self._event_loop: asyncio.AbstractEventLoop | None = None
 
+        # Stored reference so start() can sync the event loop to the delegate
+        # even when attach_task_delegate() was called before start().
+        self._task_delegate_ref: Any | None = None
+
     def set_callbacks(self, **kwargs: Any) -> None:
         for k, v in kwargs.items():
             setattr(self, f"_{k}", v)
@@ -154,6 +158,9 @@ class GossipMesh:
             self._event_loop = asyncio.get_running_loop()
         except RuntimeError:
             self._event_loop = None
+        # Sync the event loop to a previously attached TaskDelegate
+        if self._task_delegate_ref is not None and self._event_loop is not None:
+            self._task_delegate_ref.set_loop(self._event_loop)
         self._thread = threading.Thread(target=self._gossip_thread, daemon=True)
         self._thread.start()
         log.info("Gossip mesh started on port %d", self._port)
@@ -207,6 +214,7 @@ class GossipMesh:
             await self.send_task_message(msg_type, msg)
 
         delegate.set_broadcast(_broadcast)
+        self._task_delegate_ref = delegate
         # Share the event loop reference so handle_task_result can safely
         # resolve futures from the gossip background thread.
         if self._event_loop is not None:
