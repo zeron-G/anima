@@ -973,6 +973,19 @@ async def run() -> bool:
     # Graceful shutdown sequence
     timeout = get("shutdown.timeout_s", 5)
 
+    # 0. Stop local LLM server (if running)
+    try:
+        from anima.llm.providers import get_local_server_manager
+        lsm = get_local_server_manager()
+        if lsm.is_running:
+            lsm.stop()
+        # Also kill externally-managed server
+        if getattr(lsm, "_externally_managed", False):
+            lsm._last_used = 0  # force idle
+            lsm.check_idle_shutdown()
+    except Exception:
+        pass
+
     # 1. Stop heartbeat
     await heartbeat.stop()
     log.info("Heartbeat stopped.")
