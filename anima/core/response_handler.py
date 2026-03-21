@@ -319,7 +319,36 @@ class ResponseHandler:
         complete the loop immediately.  If no proposal but work was
         detected, auto-complete with a best-effort title.
         """
-        proposal = parse_proposal(last_content)
+        # Try structured output parsing first (more reliable than regex)
+        proposal = None
+        try:
+            from anima.llm.structured import EvolutionProposal
+            import json as _json
+            # Try to extract JSON from the content
+            for prefix in ["{", "```json\n{"]:
+                idx = last_content.find(prefix)
+                if idx >= 0:
+                    end = last_content.find("}", idx)
+                    if end > idx:
+                        raw = last_content[idx:end+1]
+                        if prefix.startswith("```"):
+                            raw = raw.removeprefix("```json\n")
+                        data = _json.loads(raw)
+                        ep = EvolutionProposal(**data)
+                        if ep.title:
+                            proposal = {
+                                "title": ep.title, "type": ep.type,
+                                "problem": ep.problem, "solution": ep.solution,
+                                "files": ep.files, "risk": ep.risk,
+                            }
+                            log.info("Parsed evolution proposal via structured output: %s", ep.title)
+                            break
+        except Exception as e:
+            log.debug("Structured proposal parsing failed: %s", e)
+
+        # Fallback to old free-text parsing
+        if not proposal:
+            proposal = parse_proposal(last_content)
 
         if proposal.get("title"):
             # Formal proposal parsed successfully

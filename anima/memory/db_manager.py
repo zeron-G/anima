@@ -72,6 +72,7 @@ class DatabaseManager:
     def __init__(self, db_path: str | Path) -> None:
         self._db_path = str(db_path)
         self._write_lock = asyncio.Lock()
+        self._sync_write_lock = __import__("threading").Lock()
         self._conn: sqlite3.Connection | None = None
         self._closed = False
 
@@ -289,6 +290,35 @@ class DatabaseManager:
                 )
                 self._conn.commit()
             await asyncio.to_thread(_create)
+
+    # ── Synchronous write (thread-safe, for _sync methods in store.py) ──
+
+    def write_sync(self, sql: str, params: tuple = ()) -> int:
+        """Execute a single write + commit under threading.Lock.
+
+        Use this from _sync methods that run inside asyncio.to_thread().
+        The threading.Lock prevents concurrent writes from different threads.
+        """
+        self._check_open()
+        with self._sync_write_lock:
+            cursor = self._conn.execute(sql, params)
+            self._conn.commit()
+            return cursor.rowcount
+
+    def write_many_sync(self, sql: str, params_list: list[tuple]) -> int:
+        """Execute multiple writes atomically under threading.Lock."""
+        self._check_open()
+        if not params_list:
+            return 0
+        with self._sync_write_lock:
+            self._conn.execute("BEGIN IMMEDIATE")
+            try:
+                self._conn.executemany(sql, params_list)
+                self._conn.commit()
+            except Exception:
+                self._conn.rollback()
+                raise
+            return len(params_list)
 
     # ── Synchronous access (for legacy code migration) ──
 

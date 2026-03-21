@@ -146,6 +146,8 @@ class SoulContainer:
                     result = self._apply_length_guard(result, rule)
                 elif rtype == "catchphrase_ensure":
                     result = self._apply_catchphrase(result, rule)
+                elif rtype == "style_check":
+                    result = self._apply_style_checks(result, rule)
                 else:
                     log.debug("Unknown rule type: %s", rtype)
             except Exception as exc:
@@ -324,3 +326,80 @@ class SoulContainer:
             )
 
         return text
+
+    # ------------------------------------------------------------------ #
+    #  style_check — deterministic checks from rules/style.md             #
+    # ------------------------------------------------------------------ #
+
+    @staticmethod
+    def _apply_style_checks(text: str, rule: dict[str, Any]) -> str:
+        """Apply deterministic style checks (zero LLM cost).
+
+        Each check in ``rule["checks"]`` has:
+          * ``name``    — identifier for logging
+          * ``pattern`` — regex to detect the violation
+          * ``action``  — what to do: trim_to_3, keep_first, remove_sentence, log_only
+          * ``max_count`` — (optional) max allowed matches
+        """
+        checks = rule.get("checks", [])
+        if not checks:
+            return text
+
+        for check in checks:
+            name = check.get("name", "unnamed")
+            action = check.get("action", "log_only")
+            pattern = check.get("pattern")
+            max_count = check.get("max_count")
+
+            try:
+                if max_count is not None:
+                    # Count-based check (e.g. 主人_frequency)
+                    word = check.get("word", pattern or "")
+                    if word and text.count(word) > max_count:
+                        if action == "trim_excess":
+                            # Keep first N occurrences, replace rest
+                            parts = text.split(word)
+                            if len(parts) > max_count + 1:
+                                kept = word.join(parts[:max_count + 1])
+                                rest = word.join(parts[max_count + 1:])
+                                # Replace remaining occurrences with "" or "你"
+                                rest = rest.replace(word, "")
+                                text = kept + rest
+                        log.debug("style_check %s: trimmed excess", name)
+                    continue
+
+                if not pattern:
+                    continue
+
+                matches = list(re.finditer(pattern, text))
+                if not matches:
+                    continue
+
+                if action == "trim_to_3":
+                    # Keep first 3 emoji, remove rest
+                    for m in reversed(matches[3:]):
+                        text = text[:m.start()] + text[m.end():]
+                elif action == "keep_first":
+                    # Keep first match, remove subsequent
+                    for m in reversed(matches[1:]):
+                        text = text[:m.start()] + text[m.end():]
+                elif action == "remove_sentence":
+                    # Remove entire sentence containing the match
+                    for m in reversed(matches):
+                        # Find sentence boundaries
+                        start = max(text.rfind("。", 0, m.start()),
+                                    text.rfind(".", 0, m.start()),
+                                    text.rfind("\n", 0, m.start()), 0)
+                        end = len(text)
+                        for sep in ("。", ".", "\n"):
+                            idx = text.find(sep, m.end())
+                            if idx != -1 and idx < end:
+                                end = idx + 1
+                        text = text[:start] + text[end:]
+                elif action == "log_only":
+                    log.debug("style_check %s: pattern matched (log only)", name)
+
+            except Exception as exc:
+                log.debug("style_check %s error: %s", name, exc)
+
+        return text.strip()

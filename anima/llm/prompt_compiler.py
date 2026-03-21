@@ -469,10 +469,27 @@ class PromptCompiler:
     #  Layer builders                                                      #
     # ------------------------------------------------------------------ #
 
-    def _build_identity_layer(self) -> str:
-        """Layer 1: identity (core + extended personality).
+    def _detect_model_tier(self, model_name: str = "") -> str:
+        """Map model name to hint tier: opus/sonnet/codex/local."""
+        m = model_name.lower()
+        if "opus" in m:
+            return "opus"
+        if "sonnet" in m:
+            return "sonnet"
+        if m.startswith("codex/") or "gpt-5" in m or "gpt-4" in m:
+            return "codex"
+        if m.startswith("local/"):
+            return "local"
+        return "opus"  # default
+
+    def _build_identity_layer(self, model_name: str = "") -> str:
+        """Layer 1: identity — adapts detail level based on model_hints.
 
         Checks file mtime to invalidate cache when source files change.
+        Uses model_hints.yaml to adjust what gets included:
+          - opus/codex: full identity + personality + relationship + extended
+          - sonnet: personality truncated + style rules explicit
+          - local: minimal — only core + style rules
         """
         identity_dir = self._agent_dir / "identity"
         core_path = identity_dir / "core.md"
@@ -480,7 +497,39 @@ class PromptCompiler:
         if self._identity_cache is None or current_mtime != self._identity_mtime:
             self._load_identity()
             self._identity_mtime = current_mtime
-        return self._identity_cache or ""
+
+        # If no model hints loaded, return full cache
+        hints_data = self._model_hints.get("model_hints", self._model_hints)
+        if not hints_data or not model_name:
+            return self._identity_cache or ""
+
+        tier = self._detect_model_tier(model_name)
+        hints = hints_data.get(tier, hints_data.get("opus", {}))
+        detail = hints.get("identity_detail", "full")
+
+        if detail == "full":
+            return self._identity_cache or ""
+        elif detail == "moderate":
+            # Sonnet/Codex: core + truncated personality + style rules
+            parts = [self._core_identity]
+            if self._personality_cache:
+                # Truncate personality to ~200 tokens
+                trunc = self._personality_cache[:800]
+                if len(self._personality_cache) > 800:
+                    trunc = trunc.rsplit("\n", 1)[0] + "\n..."
+                parts.append(trunc)
+            # Include style rules explicitly for models that need it
+            style_path = self._agent_dir / "rules" / "style.md"
+            if style_path.exists():
+                parts.append(_read_md(style_path))
+            return "\n\n".join(p for p in parts if p)
+        else:
+            # Local/minimal: only core + style rules
+            parts = [self._core_identity]
+            style_path = self._agent_dir / "rules" / "style.md"
+            if style_path.exists():
+                parts.append(_read_md(style_path))
+            return "\n\n".join(p for p in parts if p)
 
     def _build_rules_layer(self) -> str:
         """Layer 2: behavioral rules.
@@ -675,6 +724,7 @@ class PromptCompiler:
         memory_context: MemoryContext | None = None,
         conversation_buffer: list[dict] | None = None,
         recent_self_thoughts: list[str] | None = None,
+        model_name: str = "",
     ) -> tuple[str, list[dict]]:
         """Compile a complete prompt via the 6-layer pipeline.
 
@@ -685,8 +735,8 @@ class PromptCompiler:
             ``messages`` is the conversation history ready for the LLM call
             (does NOT include the system message — caller wraps it).
         """
-        # -- Layer 1: Identity -----------------------------------------
-        identity = self._build_identity_layer()
+        # -- Layer 1: Identity (adapts to model tier via model_hints) ---
+        identity = self._build_identity_layer(model_name)
 
         # -- Layer 2: Rules --------------------------------------------
         rules = self._build_rules_layer()
@@ -760,7 +810,7 @@ class PromptCompiler:
         context since the new pipeline expects a ``MemoryContext`` object.
         """
         # Build the 6-layer system prompt without conversation
-        identity = self._build_identity_layer()
+        identity = self._build_identity_layer("")
         rules = self._build_rules_layer()
         context = self._build_context_layer(
             event_type,

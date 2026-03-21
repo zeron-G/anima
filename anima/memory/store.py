@@ -276,7 +276,7 @@ class MemoryStore:
         now = time.time()
         seq = self._next_sync_seq()
         chash = self._content_hash(content, type)
-        self._conn.execute(
+        self._db.write_sync(
             "INSERT INTO episodic_memories "
             "(id, type, content, importance, access_count, created_at, last_accessed, "
             "metadata_json, tags_json, sync_seq, content_hash) "
@@ -285,7 +285,6 @@ class MemoryStore:
              json.dumps(metadata), json.dumps(tags),
              seq, chash),
         )
-        self._conn.commit()
         return mid
 
     def save_memory(
@@ -322,12 +321,11 @@ class MemoryStore:
             vec = embed(content)
             if vec is not None:
                 blob = vector_to_bytes(vec)
-                self._conn.execute(
+                self._db.write_sync(
                     "INSERT OR REPLACE INTO memory_embeddings (mem_id, vector, created_at) "
                     "VALUES (?, ?, ?)",
                     (mem_id, blob, time.time()),
                 )
-                self._conn.commit()
         except Exception as e:
             log.debug("Embedding save failed: %s", e)
 
@@ -375,12 +373,11 @@ class MemoryStore:
             if vec is not None:
                 blob = vector_to_bytes(vec)
                 now = time.time()
-                self._conn.execute(
+                self._db.write_sync(
                     "INSERT OR REPLACE INTO memory_embeddings (mem_id, vector, created_at) "
                     "VALUES (?, ?, ?)",
                     (mem_id, blob, now),
                 )
-                self._conn.commit()
         except Exception as e:
             log.debug("Embedding save failed for %s: %s", mem_id, e)
 
@@ -566,11 +563,10 @@ class MemoryStore:
         trigger: str,
     ) -> None:
         """Sync inner — runs in thread."""
-        self._conn.execute(
+        self._db.write_sync(
             "INSERT INTO emotion_log (id, engagement, confidence, curiosity, concern, trigger, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?)",
             (gen_id("emo"), engagement, confidence, curiosity, concern, trigger, time.time()),
         )
-        self._conn.commit()
 
     def log_emotion(
         self,
@@ -603,11 +599,10 @@ class MemoryStore:
 
     def _save_snapshot_sync(self, state: dict) -> None:
         """Sync inner — runs in thread."""
-        self._conn.execute(
+        self._db.write_sync(
             "INSERT INTO state_snapshots (id, state_json, timestamp) VALUES (?, ?, ?)",
             (gen_id("snap"), json.dumps(state), time.time()),
         )
-        self._conn.commit()
 
     def save_snapshot(self, state: dict) -> None:
         """Save a state snapshot (sync backward-compat)."""
@@ -623,11 +618,10 @@ class MemoryStore:
 
     def audit_sync(self, action: str, details: str = "") -> None:
         """Sync version — for use from sync callers."""
-        self._conn.execute(
+        self._db.write_sync(
             "INSERT INTO audit_log (id, action, details, timestamp) VALUES (?, ?, ?, ?)",
             (gen_id("audit"), action, details, time.time()),
         )
-        self._conn.commit()
 
     # Keep backward-compat name pointing to sync for callers that haven't migrated
     def audit(self, action: str, details: str = "") -> None:

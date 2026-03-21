@@ -30,3 +30,23 @@ rules:
   - type: "catchphrase_ensure"
     phrases: ["～", "！", "主人"]
     ensure_per_n_messages: 3
+
+  # 风格一致性检查 — 基于 rules/style.md 的确定性验证
+  - type: "style_check"
+    checks:
+      - name: "no_emoji_flood"
+        pattern: "([\U0001F600-\U0001FAFF].*?){4,}"
+        action: "trim_to_3"
+
+      - name: "no_stacked_apology"
+        pattern: "(对不起|抱歉|不好意思|sorry).{0,30}(对不起|抱歉|不好意思|sorry)"
+        action: "keep_first"
+
+      - name: "no_ai_breaking"
+        pattern: "作为一个\\s*(AI|人工智能|语言模型|机器人)"
+        action: "remove_sentence"
+
+      - name: "主人_frequency"
+        word: "主人"
+        max_count: 2
+        action: "trim_excess"

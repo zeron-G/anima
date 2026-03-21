@@ -305,6 +305,8 @@ class AgenticLoop:
                                    for m in ctx.conversation[-ctx.max_conversation_turns:]]
 
             tools_desc = self._orchestrator.build_tools_description(event_type_name, user_message) if decision.needs_tools else ""
+            # Pass current model name for model_hints adaptation
+            _current_model = ctx.llm_router._tier1_model if decision.tier == 1 else ctx.llm_router._tier2_model
             system_prompt, conv_messages = ctx.prompt_compiler.compile(
                 event_type_name,
                 tools_description=tools_desc,
@@ -313,6 +315,7 @@ class AgenticLoop:
                 memory_context=memory_context,
                 conversation_buffer=conv_buffer,
                 recent_self_thoughts=recent_self_thoughts,
+                model_name=_current_model,
             )
             s.set("system_tokens", len(system_prompt) // 4)
 
