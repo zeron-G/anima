@@ -33,35 +33,35 @@ log = get_logger("emotion.feedback")
 
 _POSITIVE_SIGNALS: dict[str, list[tuple[str, float]]] = {
     "engagement": [
-        ("兴奋", 0.05), ("期待", 0.04), ("好奇", 0.04), ("有趣", 0.04),
-        ("想试试", 0.05), ("让我看看", 0.04), ("马上", 0.03),
-        ("excited", 0.04), ("interesting", 0.04), ("let me", 0.03),
+        ("兴奋", 0.10), ("期待", 0.09), ("好奇", 0.09), ("有趣", 0.09),
+        ("想试试", 0.10), ("让我看看", 0.08), ("马上", 0.07),
+        ("excited", 0.09), ("interesting", 0.09), ("let me", 0.07),
     ],
     "confidence": [
-        ("搞定了", 0.06), ("没问题", 0.05), ("很确定", 0.05),
-        ("我知道怎么做", 0.06), ("done", 0.04), ("fixed", 0.05),
-        ("successfully", 0.04), ("completed", 0.04),
+        ("搞定了", 0.12), ("没问题", 0.10), ("很确定", 0.10),
+        ("我知道怎么做", 0.12), ("done", 0.09), ("fixed", 0.10),
+        ("successfully", 0.09), ("completed", 0.09),
     ],
     "curiosity": [
-        ("为什么", 0.03), ("怎么回事", 0.03), ("研究一下", 0.04),
-        ("interesting", 0.03), ("wonder", 0.03), ("investigate", 0.04),
+        ("为什么", 0.07), ("怎么回事", 0.07), ("研究一下", 0.09),
+        ("interesting", 0.07), ("wonder", 0.07), ("investigate", 0.09),
     ],
 }
 
 _NEGATIVE_SIGNALS: dict[str, list[tuple[str, float]]] = {
     "engagement": [
-        ("无聊", -0.04), ("没什么", -0.03), ("算了", -0.03),
-        ("boring", -0.03), ("nothing to", -0.03),
+        ("无聊", -0.09), ("没什么", -0.07), ("算了", -0.07),
+        ("boring", -0.07), ("nothing to", -0.07),
     ],
     "confidence": [
-        ("不太确定", -0.05), ("可能不对", -0.04), ("抱歉", -0.03),
-        ("sorry", -0.03), ("not sure", -0.04), ("failed", -0.04),
-        ("error", -0.03), ("couldn't", -0.03),
+        ("不太确定", -0.10), ("可能不对", -0.09), ("抱歉", -0.07),
+        ("sorry", -0.07), ("not sure", -0.09), ("failed", -0.09),
+        ("error", -0.07), ("couldn't", -0.07),
     ],
     "concern": [
-        ("出错了", 0.05), ("有问题", 0.04), ("失败了", 0.05),
-        ("warning", 0.03), ("ERROR", 0.05), ("exception", 0.04),
-        ("crash", 0.05), ("bug", 0.03), ("broken", 0.04),
+        ("出错了", 0.12), ("有问题", 0.10), ("失败了", 0.12),
+        ("warning", 0.08), ("ERROR", 0.12), ("exception", 0.10),
+        ("crash", 0.12), ("bug", 0.08), ("broken", 0.10),
     ],
 }
 
@@ -102,32 +102,32 @@ def extract_emotion_adjustments(
 
     # Response length → engagement (long = engaged, short = disengaged)
     if len(response) > 500:
-        adjustments["engagement"] = adjustments.get("engagement", 0) + 0.03
+        adjustments["engagement"] = adjustments.get("engagement", 0) + 0.08
     elif len(response) < 30:
-        adjustments["engagement"] = adjustments.get("engagement", 0) - 0.02
+        adjustments["engagement"] = adjustments.get("engagement", 0) - 0.06
 
     # Tool usage → confidence
     if had_tool_calls:
         if tool_success_rate >= 0.8:
-            adjustments["confidence"] = adjustments.get("confidence", 0) + 0.04
+            adjustments["confidence"] = adjustments.get("confidence", 0) + 0.10
         elif tool_success_rate < 0.5:
-            adjustments["confidence"] = adjustments.get("confidence", 0) - 0.03
-            adjustments["concern"] = adjustments.get("concern", 0) + 0.03
+            adjustments["confidence"] = adjustments.get("confidence", 0) - 0.08
+            adjustments["concern"] = adjustments.get("concern", 0) + 0.08
 
     # Questions in response → curiosity
     question_count = response.count("?") + response.count("？")
     if question_count >= 2:
-        adjustments["curiosity"] = adjustments.get("curiosity", 0) + 0.03
+        adjustments["curiosity"] = adjustments.get("curiosity", 0) + 0.08
 
     # Code blocks → engagement + confidence (active work)
     if "```" in response:
-        adjustments["engagement"] = adjustments.get("engagement", 0) + 0.02
-        adjustments["confidence"] = adjustments.get("confidence", 0) + 0.02
+        adjustments["engagement"] = adjustments.get("engagement", 0) + 0.07
+        adjustments["confidence"] = adjustments.get("confidence", 0) + 0.06
 
     # ── Clamp individual adjustments to prevent single-response spikes ──
     clamped: dict[str, float] = {}
     for dim, val in adjustments.items():
-        clamped[dim] = max(-0.15, min(0.15, val))
+        clamped[dim] = max(-0.30, min(0.30, val))
 
     if clamped:
         log.debug("Emotion adjustments: %s",

@@ -86,6 +86,17 @@ class ResponseHandler:
                 )
             else:
                 await self._handle_user_response(ctx, content, current_source)
+        elif not is_self and not is_delegation and user_message:
+            # LLM returned empty content for a user message — notify user
+            # instead of silently dropping their message.
+            log.warning("Empty LLM response for user message: %s", user_message[:80])
+            fallback = "抱歉，我刚才处理出了点问题，没能正常回复你。可以再说一次吗？ (´;ω;`)"
+            if ctx.output_callback:
+                try:
+                    ctx.output_callback(fallback)
+                except Exception:
+                    pass
+            content = fallback  # So conversation buffer gets the fallback
 
         # -- 2. Conversation buffer: always append both sides ------------
         ctx.conversation.append({"role": "user", "content": user_message})
@@ -125,7 +136,7 @@ class ResponseHandler:
             if adjustments:
                 ctx.emotion.adjust(**adjustments)
             else:
-                ctx.emotion.adjust(engagement=0.05)  # Minimal default
+                ctx.emotion.adjust(engagement=0.08)  # Minimal default
 
         # -- 5. Evolution phase transitions ------------------------------
         if event.payload and event.payload.get("evolution"):

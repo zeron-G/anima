@@ -360,10 +360,13 @@ function showToast(text) {
 let _renderedMsgCount = 0;
 let _lastActLine = null;     // reusable activity line at bottom
 
+let _chatWasAtBottom = true;
 function renderChat(d) {
   const history = d.chat_history || [];
   const activity = d.activity || [];
   const el = document.getElementById('chat-msgs');
+  // Detect scroll position BEFORE DOM update — if user scrolled up, don't auto-scroll
+  _chatWasAtBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 40;
 
   // ── Handle history reset/clear ──
   if (history.length < _renderedMsgCount) {
@@ -437,7 +440,11 @@ function renderChat(d) {
     }
   }
 
-  el.scrollTop = el.scrollHeight;
+  // Only auto-scroll if user was already at the bottom — don't interrupt
+  // manual scroll-back to read history. 40px threshold for rounding.
+  if (_chatWasAtBottom) {
+    el.scrollTop = el.scrollHeight;
+  }
 
   // ── Processing state for TTS gating ──
   if (activity.length > 0) {

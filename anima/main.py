@@ -183,6 +183,8 @@ async def _init_llm(config: dict, tool_registry, tool_executor, memory_store) ->
         if val:
             os.environ.setdefault(env_key, str(val))
 
+    openai_cfg = get("llm.openai_fallback", {})
+    codex_cfg = get("llm.codex_fallback", {})
     llm_router = LLMRouter(
         tier1_model=get("llm.tier1.model", "claude-opus-4-6"),
         tier2_model=get("llm.tier2.model", "claude-opus-4-6"),
@@ -191,6 +193,10 @@ async def _init_llm(config: dict, tool_registry, tool_executor, memory_store) ->
         daily_budget=get("llm.budget.daily_limit_usd", 5.0),
         local_model=local_cfg.get("model", ""),
         local_max_tokens=local_cfg.get("max_tokens", 4096),
+        openai_fallback=openai_cfg.get("model", ""),
+        openai_max_tokens=openai_cfg.get("max_tokens", 16384),
+        codex_fallback=codex_cfg.get("model", ""),
+        codex_max_tokens=codex_cfg.get("max_tokens", 16384),
     )
 
     # ── Model degradation/recovery notifications ──

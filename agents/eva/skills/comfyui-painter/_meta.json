@@ -1,0 +1,47 @@
+{
+  "name": "comfyui-painter",
+  "version": "2.0.0",
+  "description": "本地 ComfyUI 画图工作流 + CivitAI 集成。通过 API 控制本地 ComfyUI 生成图片（文生图/图生图），支持 CivitAI 模型搜索/下载/更新检查/自动调参。",
+  "entry_point": "scripts/generate.py",
+  "commands": {
+    "start": {
+      "description": "启动 ComfyUI 服务",
+      "usage": "python scripts/comfyui_manager.py start"
+    },
+    "stop": {
+      "description": "关闭 ComfyUI 服务",
+      "usage": "python scripts/comfyui_manager.py stop"
+    },
+    "status": {
+      "description": "检查 ComfyUI 运行状态",
+      "usage": "python scripts/comfyui_manager.py status"
+    },
+    "generate": {
+      "description": "生成图片（需通过 Python API 调用 scripts/generate.py）",
+      "usage": "python -c \"from scripts.generate import generate; print(generate(positive='test', model='noobv6'))\""
+    },
+    "civitai_search": {
+      "description": "搜索 CivitAI 模型",
+      "usage": "python scripts/civitai.py search \"anime\" --limit 5"
+    },
+    "civitai_check_updates": {
+      "description": "检查本地模型是否有 CivitAI 更新",
+      "usage": "python scripts/civitai.py check-updates"
+    },
+    "auto_tune_all": {
+      "description": "从 CivitAI 更新所有模型的推荐参数到 config",
+      "usage": "python scripts/auto_tune.py update-all"
+    },
+    "auto_shutdown_check": {
+      "description": "检查 ComfyUI 空闲状态，超时则自动关闭",
+      "usage": "python scripts/auto_shutdown.py"
+    }
+  },
+  "cron": {
+    "auto_shutdown": {
+      "schedule": "*/5 * * * *",
+      "command": "python scripts/auto_shutdown.py",
+      "description": "每5分钟检查 ComfyUI 空闲状态"
+    }
+  }
+}

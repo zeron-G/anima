@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(wsl:*)",
+      "WebFetch(domain:pincc.ai)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "Bash(curl -s http://localhost:3000/health)",
+      "Bash(curl:*)",
+      "Read(//d/data/code/github/anima/$APPDATA/**)",
+      "Read(//d/data/code/github/anima/$HOME/**)",
+      "Bash(TOKEN=\"ab610b739b0f6160caaa700345758f211fccbf96e959137732012ddf3dc9e4d5\")"
+    ]
+  }
+}

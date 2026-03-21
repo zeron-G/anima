@@ -5,7 +5,7 @@ description: "赛博芭蕾天使 — 心跳驱动自进化 AI 生命体"
 
 model_preferences:
   tier1: claude-opus-4-6
-  tier2: claude-sonnet-4-6
+  tier2: claude-opus-4-6
   temperature: 0.7
 
 # null = 全部可用，或指定白名单列表

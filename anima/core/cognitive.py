@@ -179,6 +179,18 @@ class AgenticLoop:
                 continue
             if event.type == EventType.SHUTDOWN:
                 break
+
+            # Preemption: if this is a low-priority internal event and the queue
+            # has a higher-priority event (e.g. USER_MESSAGE), skip this one to
+            # prevent internal events from starving user messages.
+            if (event.type in (EventType.SELF_THINKING, EventType.FILE_CHANGE,
+                               EventType.SYSTEM_ALERT, EventType.IDLE_TASK)):
+                front_priority = ctx.event_queue.peek_priority()
+                if front_priority is not None and front_priority > event.priority:
+                    log.info("Preempting %s (pri=%d) — higher priority event in queue (pri=%d)",
+                             event.type.name, event.priority, front_priority)
+                    continue
+
             try:
                 await self._process_event(event)
             except Exception as e:
@@ -226,6 +238,21 @@ class AgenticLoop:
         # Track in summarizer
         if ctx.summarizer and event.type == EventType.USER_MESSAGE and user_message:
             asyncio.ensure_future(ctx.summarizer.add_message("user", user_message))
+
+        # ── Step 1.5: Perceive user emotion ──
+        if event.type == EventType.USER_MESSAGE and user_message:
+            from anima.emotion.perception import perceive_user_emotion
+            perception = perceive_user_emotion(user_message)
+            if perception["adjustments"]:
+                ctx.emotion.adjust(**perception["adjustments"])
+            ctx.emotion.set_user_state(
+                perception["user_state"],
+                perception["intensity"],
+            )
+            log.debug(
+                "User emotion: state=%s intensity=%.2f",
+                perception["user_state"], perception["intensity"],
+            )
 
         # ── Step 2: Memory retrieval ──
         memory_context = None
@@ -290,6 +317,17 @@ class AgenticLoop:
         for conv_msg in conv_messages:
             role = conv_msg.get("role", "user")
             content = conv_msg.get("content", "")
+            # Sanitize: list content (tool_use blocks from prev turns) → string
+            if isinstance(content, list):
+                parts = []
+                for block in content:
+                    if isinstance(block, dict):
+                        parts.append(block.get("text", "") or f"[{block.get('type', 'block')}]")
+                    elif isinstance(block, str):
+                        parts.append(block)
+                content = "\n".join(parts) if parts else ""
+            if not isinstance(content, str):
+                content = str(content) if content else ""
             if role == "system":
                 messages[0]["content"] += f"\n\n{content}"
             elif role in ("user", "assistant") and content.strip():
@@ -299,8 +337,6 @@ class AgenticLoop:
         tools = self._orchestrator.get_tool_schemas(event_type_name, user_message) if decision.needs_tools else []
 
         # ── Step 4: Agentic loop (LLM + tools) ──
-        is_evolution = decision.is_evolution
-        timeout = 300 if is_evolution else (60 if decision.is_self else 180)
         ctx.emit_status({"stage": "thinking", "detail": f"processing {event_type_name}"})
 
         with trace.span("tool_loop") as s:
@@ -314,8 +350,14 @@ class AgenticLoop:
             )
             content = loop_result.get("content", "")
             tool_calls_made = loop_result.get("tool_calls_made", 0)
+            loop_error = loop_result.get("error")
             s.set("content_length", len(content))
             s.set("tool_calls", tool_calls_made)
+
+            if loop_error:
+                log.warning("LLM loop failed for %s: %s (turns=%d, tools=%d)",
+                            event_type_name, loop_error,
+                            loop_result.get("turns", 0), tool_calls_made)
 
         # ── Step 5: Handle response ──
         with trace.span("response_handling"):

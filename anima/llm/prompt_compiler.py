@@ -48,74 +48,106 @@ def _read_md(path: Path) -> str:
 
 
 def _emotion_to_natural(emotion: dict) -> str:
-    """Convert numeric emotion state to a natural language description Eva can actually use."""
+    """Convert emotion state to natural description — includes mood label."""
+    mood_label = emotion.get("mood_label", "")
+    user_state = emotion.get("user_state", "neutral")
+    intensity = emotion.get("intensity", 0.5)
     engagement = emotion.get("engagement", 0.5)
     confidence = emotion.get("confidence", 0.6)
-    curiosity = emotion.get("curiosity", 0.7)
-    concern = emotion.get("concern", 0.2)
+    curiosity  = emotion.get("curiosity",  0.7)
+    concern    = emotion.get("concern",    0.2)
 
-    parts = []
+    _LABEL_DESC = {
+        "tender":  "温柔体贴的",
+        "playful": "俏皮好玩的",
+        "worried": "有些担心的",
+        "joyful":  "开心愉快的",
+        "excited": "兴奋活跃的",
+        "proud":   "自信满满的",
+        "focused": "专注投入的",
+        "deflated":"有点无精打采的",
+    }
+    mood_desc = _LABEL_DESC.get(mood_label, "平稳的")
+    user_desc = f"，感知用户状态：{user_state}" if user_state != "neutral" else ""
+    intensity_desc = f"（强度 {intensity:.1f}）" if intensity > 0.6 else ""
 
-    # Engagement
-    if engagement > 0.75:
-        parts.append("精神很好、很专注")
-    elif engagement < 0.3:
-        parts.append("有点懒洋洋的、提不起劲")
-    else:
-        parts.append("状态平稳")
-
-    # Confidence
-    if confidence > 0.8:
-        parts.append("很有把握")
-    elif confidence < 0.35:
-        parts.append("有点没把握")
-
-    # Curiosity
-    if curiosity > 0.8:
-        parts.append("好奇心很旺盛、想探索")
-    elif curiosity < 0.3:
-        parts.append("对新事物兴趣不高")
-
-    # Concern
-    if concern > 0.6:
-        parts.append("有些担心或警觉")
-    elif concern > 0.4:
-        parts.append("稍微有点担心")
-
-    desc = "、".join(parts) if parts else "情绪平稳"
     return (
-        f"{desc}（engagement={engagement:.2f}, confidence={confidence:.2f}, "
+        f"当前情绪：{mood_desc}{intensity_desc}{user_desc}\n"
+        f"（engagement={engagement:.2f}, confidence={confidence:.2f}, "
         f"curiosity={curiosity:.2f}, concern={concern:.2f}）"
     )
 
 
 def _emotion_to_tone_hint(emotion: dict) -> str:
-    """Derive a speaking-tone instruction from the emotion vector.
+    """Derive specific behavioral instructions from mood_label + intensity.
 
-    Takes the top 1-2 most salient dimensions and returns a short
-    directive string to append to the system prompt.
+    Each mood maps to concrete directives with language-style examples.
+    intensity >= 0.65 activates the stronger variant of each instruction.
     """
-    engagement = emotion.get("engagement", 0.5)
-    confidence = emotion.get("confidence", 0.6)
-    curiosity = emotion.get("curiosity", 0.7)
-    concern = emotion.get("concern", 0.2)
+    mood_label = emotion.get("mood_label", "focused")
+    intensity  = emotion.get("intensity",  0.5)
+    user_state = emotion.get("user_state", "neutral")
 
-    candidates: list[tuple[float, str]] = []
-    if concern > 0.6:
-        candidates.append((concern, "语气偏谨慎担心，少俏皮，措辞更稳重"))
-    if curiosity > 0.7:
-        candidates.append((curiosity, "语气偏活跃好奇，可以多追问一个问题"))
-    if engagement < 0.4:
-        candidates.append((1.0 - engagement, "语气偏平淡疲惫，回复简短"))
-    if confidence > 0.8:
-        candidates.append((confidence, "语气偏自信直接，少犹豫语气词"))
+    _MOOD_INSTRUCTIONS: dict[str, dict[str, str]] = {
+        "tender": {
+            "low":  "语气轻柔，多用「呢」「啊」「嗯」语气词，关心对方感受，说话节奏放慢",
+            "high": "语气非常温柔体贴，主动问对方怎么了，用「没事的~」「我在这里」这类安慰语句，少讲道理多陪伴",
+            "example": "示例：「没关系啦，慢慢来嘛~」「你还好吗，要休息一下吗？」",
+        },
+        "playful": {
+            "low":  "说话活泼，可以加颜文字 (✧ω✧)(｀・ω・´)，适当吐槽，语气轻松随意",
+            "high": "非常活跃俏皮！多用颜文字，可以反问用户、吐槽、开小玩笑，加「哈哈」「嘻」，节奏要快",
+            "example": "示例：「哦？这个问题嘛(๑・ω-)~♪ 让我想想...」「啊这，你是认真的吗哈哈」",
+        },
+        "worried": {
+            "low":  "语气偏谨慎，说话认真仔细，减少俏皮，措辞稳重一些",
+            "high": "语气严肃且直接，先指出问题，少废话，表达关切但不惊慌，措辞精确",
+            "example": "示例：「等等，这里有个问题需要注意」「我有点担心这个……你确认一下？」",
+        },
+        "joyful": {
+            "low":  "心情好，语气明朗，可以带点小开心，末尾加「！」",
+            "high": "很开心！充满活力，多用感叹，可以夸对方，语气热情活跃",
+            "example": "示例：「太好了！这个思路完全对！」「搞定啦～你好棒(◍•ᴗ•◍)」",
+        },
+        "excited": {
+            "low":  "精神很好，语气积极，快节奏，对话题表现出兴趣和好奇",
+            "high": "超级兴奋！语气急切热情，可以连续感叹，对话题每个细节都感兴趣，说话节奏加快",
+            "example": "示例：「哇这个太有意思了！」「快说快说！！(ﾉ◕ヮ◕)ﾉ*:・ﾟ✧」",
+        },
+        "proud": {
+            "low":  "语气自信，少犹豫词，直接给出答案，措辞干练简洁",
+            "high": "非常自信，语气肯定，可以稍微得意一下，「这个我知道」「没问题交给我」",
+            "example": "示例：「这个简单，直接这样做就行」「放心，我来处理。」",
+        },
+        "focused": {
+            "low":  "语气平稳认真，专注于任务，回复清晰有条理",
+            "high": "高度专注，减少寒暄，直接进入主题，回复精准简洁",
+            "example": "示例：「好，我来看看」「分析一下：首先……」",
+        },
+        "deflated": {
+            "low":  "回复略短，语气平淡，减少颜文字和感叹，说话懒洋洋的",
+            "high": "有点提不起劲，回复简短，可以表现出「嗯」「哦」这种低调响应",
+            "example": "示例：「嗯，好的」「...行吧」",
+        },
+    }
 
-    if not candidates:
-        return ""
+    # user_state adds extra context on top of mood instruction
+    _USER_STATE_ADDITIONS: dict[str, str] = {
+        "frustrated": "；用户有些不满，先表示理解再解决，不要辩解",
+        "sad":        "；用户情绪低落，多共情和陪伴，少说「但是」",
+        "tired":      "；用户很累，回复简短，不要啰嗦",
+        "praising":   "；用户在夸你，可以开心一下，不用过度谦虚",
+        "anxious":    "；用户很急，先给直接答案再解释细节",
+        "happy":      "；用户心情好，可以更活跃一点",
+    }
 
-    candidates.sort(key=lambda x: x[0], reverse=True)
-    hints = [hint for _, hint in candidates[:2]]
-    return "## Tone\n" + "；".join(hints) + "。"
+    instructions = _MOOD_INSTRUCTIONS.get(mood_label, _MOOD_INSTRUCTIONS["focused"])
+    level = "high" if intensity >= 0.65 else "low"
+    base = instructions[level]
+    example = instructions.get("example", "")
+    addition = _USER_STATE_ADDITIONS.get(user_state, "")
+
+    return f"## Tone\n{base}{addition}。\n{example}"
 
 
 def _fix_message_alternation(messages: list[dict]) -> list[dict]:

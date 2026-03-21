@@ -2,7 +2,7 @@
   "id": "iss_9d09cb329e1b",
   "title": "[audit-t1] F401: `re` imported but unused",
   "description": "{\n  \"tool\": \"ruff\",\n  \"severity\": \"error\",\n  \"message\": \"F401: `re` imported but unused\",\n  \"file\": \"D:\\\\data\\\\code\\\\github\\\\anima\\\\anima\\\\main.py\",\n  \"line\": 238,\n  \"files\": [\n    \"D:\\\\data\\\\code\\\\github\\\\anima\\\\anima\\\\main.py\"\n  ]\n}",
-  "status": "open",
+  "status": "closed",
   "priority": "medium",
   "labels": [
     "audit",
@@ -14,6 +14,6 @@
   "reporter": "self_audit",
   "assignee": "",
   "created_at": 1773898461.0025575,
-  "updated_at": 1773898461.0025575,
-  "resolution": ""
+  "updated_at": 1773953832.133067,
+  "resolution": "ruff 重新验证：All checks passed! 问题已不存在，可能在之前的代码更新中已被修复。关闭。"
 }

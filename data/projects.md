@@ -17,7 +17,7 @@
 - **Path:** D:\data\code\github\agenthome
 - **GitHub:** zeron-G/AgentHome (private)
 - **Type:** 2D sandbox AI simulation, 4 NPC + God Agent, LLM-driven
-- **Tech:** Python + FastAPI + WebSocket + HTML5 Canvas
+- **Tech:** Python + FastAPI + WebSocket + **Godot Engine**（已升级，非 HTML5 Canvas）
 - **Status:** Core complete, narrative system in progress
 
 ## Eva Evolution History
@@ -28,4 +28,7 @@
 - [x] D盘 aimodel 文件夹探索（2026-03-15 完成：模型在 D:\data\code\model\，Qwen 3.5 35B abliterated via Ollama）
 - [ ] AgentHome 下一步方向（等主人确认）
 - [ ] PiDog bark 实机测试
-- [ ] Module 2 课程 DDL 补充（3月23日后）
+- [x] Module 2 课程 DDL 补充（2026-03-19 完成）
+  - **Module 2 时间：** 2026-03-23 ~ 2026-05-17
+  - **课程：** Business Leadership, Generative AI, Sequential Decision Making, Forecasting
+  - 具体 DDL 待主人开课后补充

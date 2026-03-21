@@ -35,16 +35,19 @@ perception:
 
 # ── LLM ──
 llm:
-  tier1: { model: "claude-opus-4-6", max_tokens: 16384, max_context: 1000000 }
-  tier2: { model: "claude-opus-4-6", max_tokens: 16384, max_context: 1000000 }
+  tier1: { model: "codex/gpt-5.3-codex", max_tokens: 16384, max_context: 200000 }
+  tier2: { model: "codex/gpt-5.3-codex", max_tokens: 16384, max_context: 200000 }
   # Model prefix routing:
-  #   "claude-opus-4-6"    → Anthropic API (OAuth/API key)
-  #   "local/"             → local server (llama.cpp/ollama/vLLM)
-  #   "local/qwen"         → local server, specific model
-  #   "openai/gpt-4o"      → OpenAI cloud API
+  #   "codex/..."           → Codex OAuth (ChatGPT subscription, free)
+  #   "claude-opus-4-6"     → Anthropic API (OAuth/API key)
+  #   "local/"              → local server (llama.cpp/ollama/vLLM)
+  #   "openai/gpt-4o"       → OpenAI cloud API
   # Hot-switch: POST /api/config {"key":"llm.tier1.model","value":"local/"}
+  # Fallback cascade: codex → opus → sonnet → local
+  codex_fallback: { model: "", max_tokens: 16384 }
+  openai_fallback: { model: "", max_tokens: 16384 }
   local: { model: "local/", base_url: "http://localhost:8080", max_tokens: 4096, max_context: 32768 }
-  budget: { daily_limit_usd: 10.0 }
+  budget: { daily_limit_usd: 0 }
 
 decision:
   low_threshold: 0.3

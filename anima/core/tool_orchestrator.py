@@ -21,7 +21,7 @@ from anima.utils.logging import get_logger
 
 log = get_logger("tool_orchestrator")
 
-MAX_TURNS = 15  # Maximum tool-use loop iterations
+MAX_TURNS = 50  # Maximum tool-use loop iterations
 
 # ------------------------------------------------------------------ #
 #  Tool subsets for dynamic selection                                  #

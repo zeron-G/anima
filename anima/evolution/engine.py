@@ -250,7 +250,7 @@ class EvolutionEngine:
             else:
                 # Fallback: push to private branch (backward compat)
                 log.warning("PR flow failed (%s), falling back to private branch", pr_msg)
-                checkout_r = _sp.run(["git", "checkout", "master"],
+                _sp.run(["git", "checkout", "master"],
                         cwd=str(project_root()), capture_output=True, timeout=15)
                 # M-09 fix: check cherry-pick result before proceeding
                 cp_r = _sp.run(["git", "cherry-pick", branch],

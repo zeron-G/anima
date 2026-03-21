@@ -377,6 +377,13 @@ class HeartbeatEngine:
         This is the key architectural fix — the agent can now take action
         during proactive thinking, not just produce text.
         """
+        # Don't push if queue already has pending events — prevents SELF_THINKING
+        # from accumulating and starving user messages during LLM outages.
+        queue_depth = self._event_queue.qsize()
+        if queue_depth >= 3:
+            log.info("LLM heartbeat skipped — queue depth %d (backpressure)", queue_depth)
+            return
+
         log.info("LLM heartbeat triggered — pushing SELF_THINKING event")
         await self._archive_notes_if_needed()
 
@@ -512,6 +519,13 @@ class HeartbeatEngine:
                         f"\nIDLE STATUS: score={self._idle_scheduler.score:.2f}, "
                         f"level={self._idle_scheduler.level}\n"
                     )
+                # Backpressure: don't push evolution if queue is backed up
+                queue_depth = self._event_queue.qsize()
+                if queue_depth >= 3:
+                    log.info("Major heartbeat skipped — queue depth %d (backpressure)", queue_depth)
+                    await asyncio.sleep(effective_interval)
+                    continue
+
                 log.info("Major heartbeat — pushing evolution thinking event "
                          "(idle=%s)", self._idle_scheduler.level if self._idle_scheduler else "n/a")
                 await self._event_queue.put(Event(

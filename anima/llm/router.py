@@ -41,6 +41,10 @@ class LLMRouter:
         daily_budget: float = 1.0,
         local_model: str = "",
         local_max_tokens: int = 4096,
+        openai_fallback: str = "",
+        openai_max_tokens: int = 16384,
+        codex_fallback: str = "",
+        codex_max_tokens: int = 16384,
     ) -> None:
         self._tier1_model = tier1_model
         self._tier2_model = tier2_model
@@ -48,6 +52,10 @@ class LLMRouter:
         self._tier2_max_tokens = tier2_max_tokens
         self._local_model = local_model       # e.g. "local/" or "local/qwen"
         self._local_max_tokens = local_max_tokens
+        self._openai_fallback = openai_fallback  # e.g. "openai/gpt-4o"
+        self._openai_max_tokens = openai_max_tokens
+        self._codex_fallback = codex_fallback    # e.g. "codex/gpt-4o"
+        self._codex_max_tokens = codex_max_tokens
         self._daily_budget = daily_budget
         self._usage: list[dict] = []
         self._day_start = self._today()
@@ -124,26 +132,36 @@ class LLMRouter:
                     elapsed, int(_CB_PROBE_INTERVAL_S - (time.time() - self._last_probe_at)))
         return False  # skip
 
-    # Sonnet fallback model for 529 overload
+    # Anthropic fallback models for cascade
+    OPUS_FALLBACK = "claude-opus-4-6"
     SONNET_FALLBACK = "claude-sonnet-4-6"
 
     async def _try_call(self, messages, tier, temperature, tools=None):
-        """Core call logic: primary → Sonnet fallback → local fallback.
+        """Core call logic: primary → fallback cascade → local.
 
-        Cascade: cloud primary → cloud Sonnet → local LLM (if configured).
+        Cascade order: primary → Opus → Sonnet → Codex → OpenAI → local.
         On 529 (overloaded), immediately tries next in cascade.
+        Total cascade capped at 120s (user) / 60s (internal) to prevent
+        SELF_THINKING from blocking the cognitive loop for 3+ minutes.
         """
         import asyncio as _aio
 
-        # Build model cascade: primary → Sonnet → local
-        # H-04 fix: tier==1 (user messages) → Opus, tier>=2 (internal) → Sonnet
         primary_model = self._tier1_model if tier == 1 else self._tier2_model
         primary_max = self._tier1_max_tokens if tier == 1 else self._tier2_max_tokens
         models_to_try = [
             (primary_model, primary_max, 120),
         ]
+        # Anthropic fallbacks (skip if primary is already one of them)
+        if self.OPUS_FALLBACK not in primary_model:
+            models_to_try.append((self.OPUS_FALLBACK, 16384, 90))
         if self.SONNET_FALLBACK not in primary_model:
-            models_to_try.append((self.SONNET_FALLBACK, 4096, 90))
+            models_to_try.append((self.SONNET_FALLBACK, 8192, 90))
+        # Codex OAuth fallback (ChatGPT subscription, no extra cost)
+        if self._codex_fallback:
+            models_to_try.append((self._codex_fallback, self._codex_max_tokens, 120))
+        # OpenAI API fallback (paid per token)
+        if self._openai_fallback:
+            models_to_try.append((self._openai_fallback, self._openai_max_tokens, 120))
         # Local LLM as last resort (free, no API cost)
         if self._local_model:
             models_to_try.append((self._local_model, self._local_max_tokens, 300))
@@ -151,7 +169,15 @@ class LLMRouter:
         primary = models_to_try[0][0]
         failed_models: list[str] = []
 
+        # Total cascade timeout: user messages get more time, internal events are capped
+        total_deadline = time.time() + (120 if tier == 1 else 60)
+
         for model, max_tokens, _cascade_timeout in models_to_try:
+            # Abort cascade if total deadline exceeded
+            if time.time() > total_deadline:
+                log.warning("Cascade deadline exceeded for tier=%d, aborting", tier)
+                break
+
             try:
                 kwargs = dict(model=model, messages=messages,
                              max_tokens=max_tokens, temperature=temperature)
@@ -168,7 +194,7 @@ class LLMRouter:
                 self._notify_model_change(primary, model, failed_models)
                 return resp
             except _aio.TimeoutError:
-                log.warning("%s timeout, trying next", model)
+                log.warning("%s timeout (tier=%d), trying next", model, tier)
                 failed_models.append(model)
                 self._on_failure()
                 continue
@@ -176,8 +202,11 @@ class LLMRouter:
                 err = str(e)
                 is_overload = "529" in err or "overloaded" in err.lower()
                 is_transient = is_overload or "500" in err or "502" in err or "503" in err
+                is_timeout = "timeout" in err.lower() or "timed out" in err.lower()
                 is_local = model.startswith("local/")
-                log.warning("%s %s: %s", model, "overloaded" if is_overload else "failed", err[:200])
+                log.warning("%s %s: %s", model,
+                            "overloaded" if is_overload else "timeout" if is_timeout else "failed",
+                            err[:200])
                 failed_models.append(model)
                 if not is_local:
                     self._on_failure()
@@ -185,7 +214,8 @@ class LLMRouter:
                     await _aio.sleep(2)
                 continue
 
-        log.error("All models exhausted (cloud + local)")
+        log.error("All models exhausted (cloud + local, tier=%d, tried=%s)",
+                  tier, ", ".join(failed_models) or "none")
         self._on_failure()
         return None
 
@@ -253,6 +283,7 @@ class LLMRouter:
     async def call_with_tools(self, messages, tools, tier=2, temperature=0.7) -> dict | None:
         """Call LLM with tools. Returns response dict or None."""
         if not self.check_budget():
+            log.warning("Budget exceeded (call_with_tools, tier=%d)", tier)
             return None
         check = self._check_circuit()
         if check is False:
@@ -273,6 +304,7 @@ class LLMRouter:
         from anima.llm.providers import completion_stream, StreamEvent
 
         if not self.check_budget():
+            log.warning("Budget exceeded (streaming, tier=%d)", tier)
             yield StreamEvent(type="error", error="Budget exceeded")
             return
         check = self._check_circuit()
@@ -344,6 +376,11 @@ class LLMRouter:
         "haiku": (0.25, 1.25),
         "sonnet": (3.0, 15.0),
         "opus": (15.0, 75.0),
+        "gpt-4o": (2.5, 10.0),
+        "gpt-4.1": (2.0, 8.0),
+        "o3": (2.0, 8.0),
+        "o4-mini": (1.1, 4.4),
+        "codex": (0.0, 0.0),   # Codex OAuth uses ChatGPT subscription (free)
         "local": (0.0, 0.0),  # local models are free
     }
 
@@ -355,7 +392,11 @@ class LLMRouter:
         estimated_cost:
             Pre-estimated cost of the upcoming call (USD).
             Added to the running total before comparison.
+
+        If daily_limit_usd is 0 or negative, budget check is disabled.
         """
+        if self._daily_budget <= 0:
+            return True  # No budget limit
         today = self._today()
         if today != self._day_start:
             self._usage.clear()

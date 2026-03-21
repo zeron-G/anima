@@ -1,0 +1,33 @@
+{
+  "name": "doujin",
+  "version": "1.0.0",
+  "description": "同人志/本子搜索下载工具。支持 E-Hentai/ExHentai 和禁漫天堂 (JMComic)。",
+  "entry_point": "scripts/ehentai.py",
+  "commands": {
+    "ehentai_search": {
+      "description": "在 E-Hentai 搜索本子",
+      "usage": "python scripts/ehentai.py search \"keyword\""
+    },
+    "exhentai_search": {
+      "description": "在 ExHentai (里站) 搜索本子",
+      "usage": "python scripts/ehentai.py search \"keyword\" --ex"
+    },
+    "ehentai_download": {
+      "description": "从 E-Hentai 下载本子（需提供 URL）",
+      "usage": "python scripts/ehentai.py download \"URL\""
+    },
+    "jm_search": {
+      "description": "在禁漫天堂搜索本子",
+      "usage": "python scripts/jm.py search \"keyword\""
+    },
+    "jm_download": {
+      "description": "从禁漫天堂下载本子（需提供 JM 号）",
+      "usage": "python scripts/jm.py download \"JM_ID\""
+    },
+    "jm_info": {
+      "description": "查看禁漫天堂本子详情",
+      "usage": "python scripts/jm.py info \"JM_ID\""
+    }
+  },
+  "cron": {}
+}

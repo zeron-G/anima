@@ -1,0 +1,19 @@
+{
+  "id": "iss_d6633e815a6f",
+  "title": "[audit-t1] F841: Local variable `timeout` is assigned to but never used",
+  "description": "{\n  \"tool\": \"ruff\",\n  \"severity\": \"error\",\n  \"message\": \"F841: Local variable `timeout` is assigned to but never used\",\n  \"file\": \"D:\\\\data\\\\code\\\\github\\\\anima\\\\anima\\\\core\\\\cognitive.py\",\n  \"line\": 303,\n  \"files\": [\n    \"D:\\\\data\\\\code\\\\github\\\\anima\\\\anima\\\\core\\\\cognitive.py\"\n  ]\n}",
+  "status": "closed",
+  "priority": "medium",
+  "labels": [
+    "audit",
+    "tier-1"
+  ],
+  "files": [
+    "D:\\data\\code\\github\\anima\\anima\\core\\cognitive.py"
+  ],
+  "reporter": "self_audit",
+  "assignee": "",
+  "created_at": 1773953916.9541612,
+  "updated_at": 1773955383.05419,
+  "resolution": "ruff 验证通过，F841 已不存在于当前代码中，issue 过时，关闭。"
+}
