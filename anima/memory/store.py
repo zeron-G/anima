@@ -666,12 +666,11 @@ class MemoryStore:
         """Sync inner — runs in thread."""
         total = prompt_tokens + completion_tokens
         cost = self._estimate_cost(model, prompt_tokens, completion_tokens)
-        self._conn.execute(
+        self._db.write_sync(
             "INSERT INTO llm_usage (id, timestamp, model, provider, auth_mode, tier, prompt_tokens, completion_tokens, total_tokens, estimated_cost_usd, event_type, success) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (gen_id("llm"), time.time(), model, provider, auth_mode, tier,
              prompt_tokens, completion_tokens, total, cost, event_type, int(success)),
         )
-        self._conn.commit()
 
     def log_llm_usage(
         self,
@@ -776,19 +775,20 @@ class MemoryStore:
         """Sync inner — runs in thread."""
         if not entries:
             return
-        for e in entries:
-            self._conn.execute(
-                "INSERT OR REPLACE INTO env_catalog "
-                "(id, path, type, size_bytes, modified_at, scanned_at, scan_layer, "
-                "category, extension, parent_dir, is_important) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (e["id"], e["path"], e["type"], e.get("size_bytes", 0),
-                 e.get("modified_at", 0), e.get("scanned_at", 0),
-                 e.get("scan_layer", 1), e.get("category", "other"),
-                 e.get("extension", ""), e.get("parent_dir", ""),
-                 e.get("is_important", 0)),
-            )
-        self._conn.commit()
+        with self._db._sync_write_lock:
+            for e in entries:
+                self._conn.execute(
+                    "INSERT OR REPLACE INTO env_catalog "
+                    "(id, path, type, size_bytes, modified_at, scanned_at, scan_layer, "
+                    "category, extension, parent_dir, is_important) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (e["id"], e["path"], e["type"], e.get("size_bytes", 0),
+                     e.get("modified_at", 0), e.get("scanned_at", 0),
+                     e.get("scan_layer", 1), e.get("category", "other"),
+                     e.get("extension", ""), e.get("parent_dir", ""),
+                     e.get("is_important", 0)),
+                )
+            self._conn.commit()
 
     # Keep backward-compat sync name — EnvScanner calls this from sync code
     def upsert_env_catalog_batch(self, entries: list[dict]) -> None:
@@ -802,38 +802,39 @@ class MemoryStore:
     def _update_scan_progress_sync(self, layer_id: str, status: str, **kwargs: Any) -> None:
         """Sync inner — runs in thread."""
         now = time.time()
-        row = self._conn.execute(
-            "SELECT id FROM env_scan_progress WHERE id = ?", (layer_id,)
-        ).fetchone()
-        if row:
-            sets = ["status = ?", "updated_at = ?"]
-            vals: list = [status, now]
-            for k, v in kwargs.items():
-                sets.append(f"{k} = ?")
-                vals.append(v)
-            if status == "completed":
-                sets.append("completed_at = ?")
-                vals.append(now)
-            vals.append(layer_id)
-            self._conn.execute(
-                f"UPDATE env_scan_progress SET {', '.join(sets)} WHERE id = ?",
-                vals,
-            )
-        else:
-            cols = ["id", "status", "started_at", "updated_at"]
-            vals_list: list = [layer_id, status, now, now]
-            for k, v in kwargs.items():
-                cols.append(k)
-                vals_list.append(v)
-            if status == "completed":
-                cols.append("completed_at")
-                vals_list.append(now)
-            placeholders = ", ".join("?" * len(cols))
-            self._conn.execute(
-                f"INSERT INTO env_scan_progress ({', '.join(cols)}) VALUES ({placeholders})",
-                vals_list,
-            )
-        self._conn.commit()
+        with self._db._sync_write_lock:
+            row = self._conn.execute(
+                "SELECT id FROM env_scan_progress WHERE id = ?", (layer_id,)
+            ).fetchone()
+            if row:
+                sets = ["status = ?", "updated_at = ?"]
+                vals: list = [status, now]
+                for k, v in kwargs.items():
+                    sets.append(f"{k} = ?")
+                    vals.append(v)
+                if status == "completed":
+                    sets.append("completed_at = ?")
+                    vals.append(now)
+                vals.append(layer_id)
+                self._conn.execute(
+                    f"UPDATE env_scan_progress SET {', '.join(sets)} WHERE id = ?",
+                    vals,
+                )
+            else:
+                cols = ["id", "status", "started_at", "updated_at"]
+                vals_list: list = [layer_id, status, now, now]
+                for k, v in kwargs.items():
+                    cols.append(k)
+                    vals_list.append(v)
+                if status == "completed":
+                    cols.append("completed_at")
+                    vals_list.append(now)
+                placeholders = ", ".join("?" * len(cols))
+                self._conn.execute(
+                    f"INSERT INTO env_scan_progress ({', '.join(cols)}) VALUES ({placeholders})",
+                    vals_list,
+                )
+            self._conn.commit()
 
     # Keep backward-compat sync name — EnvScanner calls this from sync code
     def update_scan_progress(self, layer_id: str, status: str, **kwargs: Any) -> None:
@@ -1010,11 +1011,10 @@ class MemoryStore:
 
     def _mark_env_deleted_sync(self, path: str) -> None:
         """Sync inner — runs in thread."""
-        self._conn.execute(
+        self._db.write_sync(
             "UPDATE env_catalog SET is_deleted=1 WHERE path=?",
             (path.replace("\\", "/"),),
         )
-        self._conn.commit()
 
     # Keep backward-compat sync name — EnvScanner calls this from sync code
     def mark_env_deleted(self, path: str) -> None:
@@ -1035,10 +1035,9 @@ class MemoryStore:
             sets.append(f"{k} = ?")
             vals.append(v)
         vals.append(path.replace("\\", "/"))
-        self._conn.execute(
-            f"UPDATE env_catalog SET {', '.join(sets)} WHERE path = ?", vals
+        self._db.write_sync(
+            f"UPDATE env_catalog SET {', '.join(sets)} WHERE path = ?", tuple(vals)
         )
-        self._conn.commit()
 
     # Keep backward-compat sync name — EnvScanner calls this from sync code
     def update_env_entry(self, path: str, updates: dict) -> None:
@@ -1078,17 +1077,10 @@ class MemoryStore:
         if not ids:
             return
         now = time.time()
-        self._conn.execute("BEGIN IMMEDIATE")
-        try:
-            for mid in ids:
-                self._conn.execute(
-                    "UPDATE episodic_memories SET access_count = access_count + 1, last_accessed = ? WHERE id = ?",
-                    (now, mid),
-                )
-            self._conn.commit()
-        except Exception:
-            self._conn.rollback()
-            raise
+        self._db.write_many_sync(
+            "UPDATE episodic_memories SET access_count = access_count + 1, last_accessed = ? WHERE id = ?",
+            [(now, mid) for mid in ids],
+        )
 
     # Keep backward-compat sync name — retriever calls this from sync code
     def touch_memories(self, ids: list[str]) -> None:
@@ -1144,12 +1136,10 @@ class MemoryStore:
         """Sync inner — runs in thread."""
         if not updates:
             return
-        for mid, score in updates:
-            self._conn.execute(
-                "UPDATE episodic_memories SET decay_score = ? WHERE id = ?",
-                (score, mid),
-            )
-        self._conn.commit()
+        self._db.write_many_sync(
+            "UPDATE episodic_memories SET decay_score = ? WHERE id = ?",
+            [(score, mid) for mid, score in updates],
+        )
 
     # Keep backward-compat sync name — tests call this from sync code
     def batch_update_decay_scores(self, updates: list[tuple[str, float]]) -> None:
@@ -1165,11 +1155,10 @@ class MemoryStore:
         if not ids:
             return
         placeholders = ",".join("?" * len(ids))
-        self._conn.execute(
+        self._db.write_sync(
             f"UPDATE episodic_memories SET content_hash = 'consolidated:' || content_hash WHERE id IN ({placeholders})",
-            ids,
+            tuple(ids),
         )
-        self._conn.commit()
 
     def mark_consolidated(self, ids: list[str]) -> None:
         """Mark memories as consolidated (sync backward-compat)."""
@@ -1187,7 +1176,7 @@ class MemoryStore:
         meta = metadata or {}
         meta["source_ids"] = source_ids
         meta["archived"] = True
-        self._conn.execute(
+        self._db.write_sync(
             "INSERT INTO episodic_memories "
             "(id, type, content, importance, access_count, created_at, last_accessed, "
             "metadata_json, tags_json, sync_seq, content_hash) "
@@ -1196,7 +1185,6 @@ class MemoryStore:
              json.dumps(meta), self._next_sync_seq(),
              self._content_hash(summary, "archive")),
         )
-        self._conn.commit()
         return mid
 
     def archive_to_knowledge(self, summary: str, source_ids: list[str],
@@ -1304,7 +1292,7 @@ class MemoryStore:
     ) -> None:
         """Sync inner — runs in thread."""
         now = updated_at or time.time()
-        self._conn.execute(
+        self._db.write_sync(
             "INSERT INTO static_knowledge (category, key, value, source, importance, updated_at, scope, node_id) "
             "VALUES (?, ?, ?, ?, ?, ?, ?, ?) "
             "ON CONFLICT(category, key, scope) DO UPDATE SET "
@@ -1312,7 +1300,6 @@ class MemoryStore:
             "updated_at=excluded.updated_at, node_id=excluded.node_id",
             (category, key, value, source, importance, now, scope, node_id),
         )
-        self._conn.commit()
 
     # Keep backward-compat sync name — StaticKnowledgeStore calls this from sync code
     def upsert_static_knowledge(
@@ -1350,12 +1337,11 @@ class MemoryStore:
 
     def _delete_static_knowledge_sync(self, category: str, key: str, scope: str) -> bool:
         """Sync inner — runs in thread."""
-        cursor = self._conn.execute(
+        rowcount = self._db.write_sync(
             "DELETE FROM static_knowledge WHERE category=? AND key=? AND scope=?",
             (category, key, scope),
         )
-        self._conn.commit()
-        return cursor.rowcount > 0
+        return rowcount > 0
 
     # Keep backward-compat sync name — StaticKnowledgeStore calls this from sync code
     def delete_static_knowledge(self, category: str, key: str, scope: str = "global") -> bool:

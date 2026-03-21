@@ -302,7 +302,7 @@ class TestMemoryTools:
     def test_get_tools(self):
         from anima.tools.builtin.memory_tools import get_memory_tools
         tools = get_memory_tools()
-        assert len(tools) == 2
+        assert len(tools) == 4  # update_feelings, update_user_profile, update_personality, mark_golden_reply
         names = {t.name for t in tools}
         assert "update_feelings" in names
         assert "update_user_profile" in names

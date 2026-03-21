@@ -87,7 +87,13 @@ SELF_AXIS_PERSONALITY_REFLECT = (
     "   - Is my personality.md still accurate?\n"
     "   - What direction am I growing in?\n"
     "5. If you have real insights, update personality.md and growth_log.md.\n"
-    "6. If nothing new, say so briefly — don't fabricate growth."
+    "6. If nothing new, say so briefly — don't fabricate growth.\n"
+    "7. Read agents/eva/memory/persona_state.yaml. Based on your reflection, "
+    "consider if any values should shift slightly (EMA: new = old * 0.9 + signal * 0.1). "
+    "For example: if you've been more assertive lately, nudge assertiveness up. "
+    "If you've been warmer, nudge warmth up. Only change values you have evidence for. "
+    "Values must stay in [0.0, 1.0]. Write the updated YAML back via save_note "
+    "or write_file if changes are needed."
 )
 
 SELF_AXIS_CURATE_EXAMPLES = (

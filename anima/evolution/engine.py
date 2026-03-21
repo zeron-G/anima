@@ -248,31 +248,10 @@ class EvolutionEngine:
                     except Exception as e:
                         log.warning("Failed to broadcast deployment: %s", e)
             else:
-                # Fallback: push to private branch (backward compat)
-                log.warning("PR flow failed (%s), falling back to private branch", pr_msg)
-                _sp.run(["git", "checkout", "master"],
-                        cwd=str(project_root()), capture_output=True, timeout=15)
-                # M-09 fix: check cherry-pick result before proceeding
-                cp_r = _sp.run(["git", "cherry-pick", branch],
-                        cwd=str(project_root()), capture_output=True, timeout=15)
-                if cp_r.returncode != 0:
-                    log.error("Cherry-pick failed (rc=%d): %s", cp_r.returncode,
-                              cp_r.stderr.decode("utf-8", errors="replace")[:200])
-                    # Abort the failed cherry-pick and report failure
-                    _sp.run(["git", "cherry-pick", "--abort"],
-                            cwd=str(project_root()), capture_output=True, timeout=10)
-                    self._on_failure(proposal, stage="deploy", error=f"Cherry-pick failed: {pr_msg}")
-                    return "deploy_failed"
-                try:
-                    _sp.run(["git", "push", "origin", "private"],
-                            cwd=str(project_root()), capture_output=True, timeout=30)
-                    proposal.status = ProposalStatus.DEPLOYED
-                    self.memory.record_success(
-                        proposal.id, proposal.type.value, proposal.title,
-                        proposal.files, proposal.solution[:200],
-                    )
-                except Exception as e:
-                    log.warning("Private push also failed: %s", e)
+                # PR failed — abandon this evolution, don't touch production
+                log.warning("PR flow failed (%s) — abandoning evolution (production safe)", pr_msg)
+                self._on_failure(proposal, stage="deploy", error=f"PR creation failed: {pr_msg}")
+                return "deploy_failed"
 
             # Sprint 8: Post-deploy health check
             if self.deployer and hasattr(self.deployer, 'verify_deployment'):

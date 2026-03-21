@@ -345,6 +345,9 @@ class SoulContainer:
         if not checks:
             return text
 
+        original_text = text
+        fired_checks: list[str] = []
+
         for check in checks:
             name = check.get("name", "unnamed")
             action = check.get("action", "log_only")
@@ -365,6 +368,7 @@ class SoulContainer:
                                 # Replace remaining occurrences with "" or "你"
                                 rest = rest.replace(word, "")
                                 text = kept + rest
+                        fired_checks.append(name)
                         log.debug("style_check %s: trimmed excess", name)
                     continue
 
@@ -379,10 +383,12 @@ class SoulContainer:
                     # Keep first 3 emoji, remove rest
                     for m in reversed(matches[3:]):
                         text = text[:m.start()] + text[m.end():]
+                    fired_checks.append(name)
                 elif action == "keep_first":
                     # Keep first match, remove subsequent
                     for m in reversed(matches[1:]):
                         text = text[:m.start()] + text[m.end():]
+                    fired_checks.append(name)
                 elif action == "remove_sentence":
                     # Remove entire sentence containing the match
                     for m in reversed(matches):
@@ -396,10 +402,32 @@ class SoulContainer:
                             if idx != -1 and idx < end:
                                 end = idx + 1
                         text = text[:start] + text[end:]
+                    fired_checks.append(name)
                 elif action == "log_only":
+                    fired_checks.append(name)
                     log.debug("style_check %s: pattern matched (log only)", name)
 
             except Exception as exc:
                 log.debug("style_check %s error: %s", name, exc)
+
+        # Drift scoring — log style violations for growth system feedback
+        if fired_checks:
+            import json as _json
+            import time as _time
+            drift_score = min(1.0, len(fired_checks) * 0.2 +
+                            abs(len(text) - len(original_text)) / max(len(original_text), 1))
+            try:
+                drift_path = Path(__file__).parent.parent.parent / "data" / "logs" / "drift.jsonl"
+                drift_path.parent.mkdir(parents=True, exist_ok=True)
+                entry = _json.dumps({
+                    "timestamp": _time.time(),
+                    "drift_score": round(drift_score, 3),
+                    "flags": fired_checks,
+                    "chars_modified": abs(len(text) - len(original_text)),
+                }, ensure_ascii=False)
+                with open(drift_path, "a", encoding="utf-8") as f:
+                    f.write(entry + "\n")
+            except Exception:
+                pass  # Drift logging must never crash response path
 
         return text.strip()

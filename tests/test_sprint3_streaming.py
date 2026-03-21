@@ -59,8 +59,9 @@ class TestStreamingRouter:
         from anima.llm.router import LLMRouter
         router = LLMRouter(
             tier1_model="opus", tier2_model="sonnet",
-            daily_budget=0.0,  # Zero budget
+            daily_budget=0.001,  # Tiny budget
         )
+        router._usage.append({"model": "opus", "prompt_tokens": 1_000_000, "completion_tokens": 100_000})
         events = []
         async for event in router.call_with_tools_stream(
             messages=[{"role": "user", "content": "hi"}],

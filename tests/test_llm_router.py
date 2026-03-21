@@ -27,7 +27,8 @@ def test_budget_day_reset():
 
 @pytest.mark.asyncio
 async def test_call_returns_none_when_budget_exceeded():
-    router = LLMRouter("t1/model", "t2/model", daily_budget=0.0)
-    # Budget is 0, should refuse
+    router = LLMRouter("t1/model", "t2/model", daily_budget=0.001)
+    # Exhaust budget by faking a huge usage entry
+    router._usage.append({"model": "opus", "prompt_tokens": 1_000_000, "completion_tokens": 100_000})
     result = await router.call([{"role": "user", "content": "hi"}])
     assert result is None
