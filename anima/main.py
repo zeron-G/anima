@@ -940,13 +940,20 @@ async def run() -> bool:
     )
     log.info("ANIMA starting...")
 
-    # Startup dependency validation — fast-fail on missing critical deps
+    # Startup dependency validation — fast-fail only on critical issues
     from anima.startup_check import verify_dependencies
-    startup_errors = verify_dependencies(config)
-    if startup_errors:
-        for err in startup_errors:
-            log.error("Startup check FAILED: %s", err)
-        log.error("Fix the above errors and restart. Aborting.")
+    startup_issues = verify_dependencies(config)
+    has_critical = False
+    for severity, msg in startup_issues:
+        if severity == "critical":
+            log.error("Startup CRITICAL: %s", msg)
+            has_critical = True
+        elif severity == "warning":
+            log.warning("Startup warning: %s", msg)
+        else:
+            log.info("Startup info: %s", msg)
+    if has_critical:
+        log.error("Fix critical errors above and restart. Aborting.")
         return False
 
     shutdown_event = asyncio.Event()
