@@ -27,8 +27,9 @@ class TestTracerIntegration:
         assert "get_tracer" in source
 
     def test_tracer_spans_in_process_event(self):
-        import anima.core.cognitive as cog
-        source = open(cog.__file__, encoding="utf-8").read()
+        """Tracer spans exist in the pipeline stages (moved from cognitive.py)."""
+        import anima.core.stages as stg
+        source = open(stg.__file__, encoding="utf-8").read()
         assert "event_routing" in source
         assert "memory_retrieval" in source
         assert "tool_loop" in source

@@ -1,4 +1,4 @@
-"""SQLite backend + optional ChromaDB for memory storage.
+"""SQLite backend + ChromaDB for memory storage.
 
 All public DB methods are async (use asyncio.to_thread to avoid blocking
 the event loop).  Methods that MUST also be callable from synchronous code
@@ -23,12 +23,7 @@ from anima.utils.ids import gen_id
 
 log = get_logger("memory_store")
 
-# Try to import ChromaDB
-try:
-    import chromadb
-    HAS_CHROMADB = True
-except ImportError:
-    HAS_CHROMADB = False
+import chromadb
 
 
 _SCHEMA = """
@@ -159,7 +154,7 @@ CREATE TABLE IF NOT EXISTS memory_embeddings (
 
 
 class MemoryStore:
-    """SQLite-backed memory store with optional ChromaDB vector search."""
+    """SQLite-backed memory store with ChromaDB vector search."""
 
     def __init__(self, db_path: str) -> None:
         resolved = Path(db_path)
@@ -206,35 +201,34 @@ class MemoryStore:
 
         log.info("Memory store initialized (via DatabaseManager): %s", store._db_path)
 
-        # Optional ChromaDB
-        if HAS_CHROMADB:
-            try:
-                def _init_chroma() -> Any:
-                    chroma_path = Path(store._db_path).parent / "chroma"
-                    chroma_path.mkdir(exist_ok=True)
-                    client = chromadb.PersistentClient(path=str(chroma_path))
-                    return client.get_or_create_collection("episodic")
+        # Initialize ChromaDB (required dependency)
+        try:
+            def _init_chroma() -> Any:
+                chroma_path = Path(store._db_path).parent / "chroma"
+                chroma_path.mkdir(exist_ok=True)
+                client = chromadb.PersistentClient(path=str(chroma_path))
+                return client.get_or_create_collection("episodic")
 
-                store._chroma_collection = await asyncio.to_thread(_init_chroma)
-                log.info("ChromaDB initialized for vector search")
-                # M-15: Backfill ChromaDB from SQLite if collection is empty
-                try:
-                    chroma_count = store._chroma_collection.count()
-                    if chroma_count == 0:
-                        recent = store._conn.execute(
-                            "SELECT id, content, type, importance FROM episodic_memories "
-                            "ORDER BY created_at DESC LIMIT 200"
-                        ).fetchall()
-                        if recent:
-                            ids = [r["id"] for r in recent]
-                            docs = [r["content"] for r in recent]
-                            metas = [{"type": r["type"], "importance": r["importance"]} for r in recent]
-                            store._chroma_collection.add(ids=ids, documents=docs, metadatas=metas)
-                            log.info("Backfilled %d memories into ChromaDB", len(recent))
-                except Exception as e:
-                    log.debug("ChromaDB backfill skipped: %s", e)
+            store._chroma_collection = await asyncio.to_thread(_init_chroma)
+            log.info("ChromaDB initialized for vector search")
+            # M-15: Backfill ChromaDB from SQLite if collection is empty
+            try:
+                chroma_count = store._chroma_collection.count()
+                if chroma_count == 0:
+                    recent = store._conn.execute(
+                        "SELECT id, content, type, importance FROM episodic_memories "
+                        "ORDER BY created_at DESC LIMIT 200"
+                    ).fetchall()
+                    if recent:
+                        ids = [r["id"] for r in recent]
+                        docs = [r["content"] for r in recent]
+                        metas = [{"type": r["type"], "importance": r["importance"]} for r in recent]
+                        store._chroma_collection.add(ids=ids, documents=docs, metadatas=metas)
+                        log.info("Backfilled %d memories into ChromaDB", len(recent))
             except Exception as e:
-                log.warning("ChromaDB init failed, falling back to SQLite: %s", e)
+                log.debug("ChromaDB backfill skipped: %s", e)
+        except Exception as e:
+            log.warning("ChromaDB init failed, falling back to SQLite: %s", e)
 
         return store
 
@@ -299,15 +293,15 @@ class MemoryStore:
         mid = self._save_memory_sync(
             content, type, importance, metadata or {}, tags or [],
         )
-        # Optional: add to ChromaDB
-        if self._chroma_collection is not None:
-            try:
+        # Add to ChromaDB
+        try:
+            if self._chroma_collection is not None:
                 self._chroma_collection.add(
                     ids=[mid], documents=[content],
                     metadatas=[{"type": type, "importance": importance}],
                 )
-            except Exception as e:
-                log.warning("ChromaDB add failed: %s", e)  # M-14: WARNING
+        except Exception as e:
+            log.warning("ChromaDB add failed: %s", e)  # M-14: WARNING
         # H-08: Store local embedding (sync path)
         self._save_embedding_sync(mid, content)
         return mid
@@ -343,16 +337,16 @@ class MemoryStore:
             metadata or {}, tags or [],
         )
 
-        # Optional: add to ChromaDB (also in thread)
-        if self._chroma_collection is not None:
-            try:
+        # Add to ChromaDB (also in thread)
+        try:
+            if self._chroma_collection is not None:
                 await asyncio.to_thread(
                     self._chroma_collection.add,
                     ids=[mid], documents=[content],
                     metadatas=[{"type": type, "importance": importance}],
                 )
-            except Exception as e:
-                log.warning("ChromaDB add failed: %s", e)  # M-14: WARNING not debug
+        except Exception as e:
+            log.warning("ChromaDB add failed: %s", e)  # M-14: WARNING not debug
 
         # H-08: Compute and store local embedding for semantic search fallback
         await self._save_embedding_async(mid, content)
@@ -390,11 +384,11 @@ class MemoryStore:
         """Sync inner — runs in thread.
 
         H-08: 3-tier semantic search fallback:
-          1. ChromaDB vector search (if installed)
+          1. ChromaDB vector search (always available)
           2. Local embedder cosine similarity (if sentence-transformers installed)
           3. SQLite LIKE (last resort — logs warning)
         """
-        # ── Tier 1: ChromaDB vector search ──
+        # ── ChromaDB vector search ──
         if query and self._chroma_collection is not None:
             try:
                 results = self._chroma_collection.query(

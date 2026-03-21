@@ -18,6 +18,7 @@ dependencies = [
     "msgpack>=1.0",
     "zeroconf>=0.131",
     "pywebview>=5.0",
+    "chromadb>=0.5.0",
 ]
 
 [project.optional-dependencies]
@@ -32,7 +33,7 @@ tts = [
     "einops",
 ]
 stt = ["faster-whisper"]
-vector = ["chromadb>=0.5.0"]
+vector = []  # chromadb moved to main dependencies
 watch = ["watchdog>=4.0.0"]
 discord = ["discord.py>=2.3"]
 dev = [

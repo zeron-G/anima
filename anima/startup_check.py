@@ -74,13 +74,20 @@ def _check_llm_credentials(issues: list) -> None:
 
 
 def _check_semantic_search(issues: list) -> None:
-    """Check for semantic search backend."""
-    has_chromadb = False
+    """Check for semantic search backend.
+
+    ChromaDB is required (critical). sentence-transformers is optional
+    and used as a local embedding fallback.
+    """
     try:
         import chromadb  # noqa: F401
-        has_chromadb = True
     except ImportError:
-        pass
+        issues.append((
+            "critical",
+            "ChromaDB is required but not installed. "
+            "Install: pip install chromadb"
+        ))
+        return
 
     has_st = False
     try:
@@ -89,16 +96,10 @@ def _check_semantic_search(issues: list) -> None:
     except ImportError:
         pass
 
-    if not has_chromadb and not has_st:
-        issues.append((
-            "warning",
-            "No semantic search backend installed. Memory search will use SQL LIKE (degraded). "
-            "Install: pip install chromadb  OR  pip install sentence-transformers"
-        ))
-    elif has_chromadb:
-        issues.append(("info", "Semantic search: ChromaDB"))
-    elif has_st:
-        issues.append(("info", "Semantic search: local sentence-transformers"))
+    if has_st:
+        issues.append(("info", "Semantic search: ChromaDB + local sentence-transformers"))
+    else:
+        issues.append(("info", "Semantic search: ChromaDB (sentence-transformers not installed — optional)"))
 
 
 def _check_required_files(issues: list) -> None:

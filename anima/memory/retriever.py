@@ -349,8 +349,11 @@ class MemoryRetriever:
         """
         if self._store is None or not query:
             return
-        # Only run semantic search on user-facing events.
-        if event_type != "USER_MESSAGE":
+        # Run semantic search on user-facing events and internal thinking/tasks.
+        _SEMANTIC_EVENT_TYPES = {
+            "USER_MESSAGE", "SELF_THINKING", "STARTUP", "SCHEDULED_TASK",
+        }
+        if event_type not in _SEMANTIC_EVENT_TYPES:
             return
 
         try:
