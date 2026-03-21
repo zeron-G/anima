@@ -1,3 +1,0 @@
-type: <class 'jmcomic.jm_entity.JmSearchPage'>
-repr: <jmcomic.jm_entity.JmSearchPage object at 0x000001B753D749D0>
-items count: 0
