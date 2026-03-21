@@ -96,6 +96,7 @@ tools/vrm_report.txt
 
 # Temporary/debug scripts (root level)
 _*.py
+tmp_*
 test_out*
 D*tmp*
 

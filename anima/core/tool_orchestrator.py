@@ -30,11 +30,29 @@ MAX_TURNS = 50  # Maximum tool-use loop iterations
 # usage and preventing the LLM from invoking inappropriate tools.
 
 _SELF_THINKING_TOOLS = frozenset({
-    "shell", "read_file", "write_file", "system_info", "search",
+    "read_file", "system_info", "search",
     "glob_search", "grep_search", "save_note", "get_datetime",
-    "update_feelings", "audit_run", "issue_manage", "list_jobs",
-    "read_email", "env_search", "list_directory", "edit_file",
-    "github", "update_user_profile",
+    "update_feelings", "list_jobs",
+    "read_email", "env_search", "list_directory",
+    "update_user_profile",
+})
+
+# ── Three-axis tool subsets ──
+_HUMAN_AXIS_TOOLS = frozenset({
+    "read_file", "update_user_profile", "update_feelings",
+    "save_note", "get_datetime", "update_personality",
+})
+
+_SELF_AXIS_TOOLS = frozenset({
+    "read_file", "save_note", "get_datetime",
+    "update_feelings", "update_personality", "mark_golden_reply",
+    "glob_search", "update_user_profile",
+})
+
+_WORLD_AXIS_TOOLS = frozenset({
+    "read_file", "system_info", "get_datetime",
+    "read_email", "env_search", "list_directory",
+    "glob_search", "grep_search", "save_note", "update_feelings",
 })
 
 _STARTUP_TOOLS = frozenset({
@@ -143,7 +161,14 @@ class ToolOrchestrator:
         all_tools = self._registry.list_tools()
 
         if event_type == "SELF_THINKING":
-            tools = [t for t in all_tools if t.name in _SELF_THINKING_TOOLS]
+            if "Human Axis" in message:
+                tools = [t for t in all_tools if t.name in _HUMAN_AXIS_TOOLS]
+            elif "Self Axis" in message or "Personality Reflect" in message or "Curate Examples" in message:
+                tools = [t for t in all_tools if t.name in _SELF_AXIS_TOOLS]
+            elif "World Axis" in message or "Late Night" in message:
+                tools = [t for t in all_tools if t.name in _WORLD_AXIS_TOOLS]
+            else:
+                tools = [t for t in all_tools if t.name in _SELF_THINKING_TOOLS]
         elif event_type == "STARTUP":
             tools = [t for t in all_tools if t.name in _STARTUP_TOOLS]
         elif event_type == "IDLE_TASK":
@@ -241,15 +266,22 @@ class ToolOrchestrator:
     #  Human-readable tools description (for system prompt)              #
     # ------------------------------------------------------------------ #
 
-    def build_tools_description(self) -> str:
-        """Build a human-readable Markdown description of all tools.
+    def build_tools_description(self, event_type: str = "USER_MESSAGE", message: str = "") -> str:
+        """Build a human-readable Markdown description of available tools.
 
         Used by PromptCompiler to embed tool documentation in the
         system prompt, giving the LLM context about what's available
         beyond the function-calling schema.
+
+        Only describes tools that get_tool_schemas() would return for
+        the given event_type and message, keeping prompt and schemas aligned.
         """
+        schemas = self.get_tool_schemas(event_type, message)
+        available_names = {s["name"] for s in schemas}
         lines: list[str] = []
         for spec in self._registry.list_tools():
+            if spec.name not in available_names:
+                continue
             params = spec.parameters.get("properties", {})
             required = spec.parameters.get("required", [])
             pp: list[str] = []
@@ -562,6 +594,10 @@ class ToolOrchestrator:
           - "turns": number of loop iterations (int)
           - "error": error message if loop failed (str | None)
         """
+        from anima.utils.invariants import require
+        require(llm_router is not None, "llm_router is None in run_tool_loop")
+        require(messages, "messages list is empty in run_tool_loop")
+
         total_tool_calls = 0
         turns = 0
 

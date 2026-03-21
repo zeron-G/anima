@@ -163,6 +163,9 @@ class AgenticLoop:
 
     async def run(self) -> None:
         """Main event processing loop."""
+        from anima.utils.invariants import require
+        require(self._ctx.prompt_compiler is not None,
+                "prompt_compiler must be set before run(). Call set_prompt_compiler() in main.py.")
         log.info("Agentic loop started (refactored)")
         ctx = self._ctx
 
@@ -301,7 +304,7 @@ class AgenticLoop:
                     conv_buffer = [{k: v for k, v in m.items() if k in _API_KEYS}
                                    for m in ctx.conversation[-ctx.max_conversation_turns:]]
 
-            tools_desc = self._orchestrator.build_tools_description() if decision.needs_tools else ""
+            tools_desc = self._orchestrator.build_tools_description(event_type_name, user_message) if decision.needs_tools else ""
             system_prompt, conv_messages = ctx.prompt_compiler.compile(
                 event_type_name,
                 tools_description=tools_desc,
@@ -340,13 +343,15 @@ class AgenticLoop:
         ctx.emit_status({"stage": "thinking", "detail": f"processing {event_type_name}"})
 
         with trace.span("tool_loop") as s:
+            _stream_cb = ctx.stream_callback if not decision.is_self and not decision.is_delegation else None
             loop_result = await self._orchestrator.run_tool_loop(
                 llm_router=ctx.llm_router,
                 messages=messages,
                 tools=tools,
                 tier=decision.tier,
-                stream_callback=ctx.stream_callback if not decision.is_self and not decision.is_delegation else None,
+                stream_callback=_stream_cb,
                 status_callback=ctx.status_callback,
+                use_streaming=bool(_stream_cb),
             )
             content = loop_result.get("content", "")
             tool_calls_made = loop_result.get("tool_calls_made", 0)

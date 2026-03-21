@@ -2,11 +2,17 @@
 
 Inspired by Letta's core_memory_append/core_memory_replace pattern.
 Includes version backup (.bak files) and audit logging.
+
+Also includes personality growth tools (update_personality, mark_golden_reply)
+for the personality evolution system.
 """
 
 from __future__ import annotations
 
+import json
+import re
 import shutil
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -303,11 +309,201 @@ async def _update_user_profile(
 
 
 # ------------------------------------------------------------------ #
+#  Tool: update_personality                                            #
+# ------------------------------------------------------------------ #
+
+async def _update_personality(
+    file: str,
+    section: str,
+    content: str,
+    reason: str,
+) -> dict:
+    """Update personality.md or relationship.md with growth logging.
+
+    Parameters
+    ----------
+    file:
+        ``"personality"`` or ``"relationship"``.
+    section:
+        Section heading to update (e.g. ``"语气特征"``).
+    content:
+        New content for the section body.
+    reason:
+        Reason for the change — logged to ``growth_log.md``.
+
+    Returns
+    -------
+    ``{"success": bool, "result"|"error": str}``
+    """
+    if file not in ("personality", "relationship"):
+        return {"success": False, "error": "file must be 'personality' or 'relationship'"}
+
+    agent = agent_dir()
+    target = agent / "identity" / f"{file}.md"
+    if not target.exists():
+        return {"success": False, "error": f"{file}.md not found"}
+
+    try:
+        # Read current content
+        current = target.read_text(encoding="utf-8")
+
+        # Backup
+        _create_backup(target)
+
+        # Update timestamp lines
+        now = time.strftime("%Y-%m-%d %H:%M")
+        if "> 最后更新:" in current:
+            current = re.sub(r"> 最后更新:.*", f"> 最后更新: {now}", current)
+        if "> 更新原因:" in current:
+            current = re.sub(r"> 更新原因:.*", f"> 更新原因: {reason}", current)
+
+        # Find and replace section
+        if f"## {section}" in current:
+            # Replace content under the section header until next ## or end
+            pattern = rf"(## {re.escape(section)}\n)(.*?)(\n## |\Z)"
+            replacement = rf"\g<1>{content}\n\g<3>"
+            current = re.sub(pattern, replacement, current, flags=re.DOTALL)
+        else:
+            # Append new section
+            current += f"\n\n## {section}\n{content}\n"
+
+        # Enforce 500 token limit for personality.md (~4 chars/token)
+        if file == "personality" and len(current) > 2000:
+            return {
+                "success": False,
+                "error": "personality.md would exceed 500 token limit. Condense existing content.",
+            }
+
+        target.write_text(current, encoding="utf-8")
+
+        # Log to growth_log.md
+        growth_log = agent / "memory" / "growth_log.md"
+        growth_log.parent.mkdir(parents=True, exist_ok=True)
+        log_entry = f"\n---\n*{now}*\n**变化**: {file}.md — {section}\n**原因**: {reason}\n"
+        if growth_log.exists():
+            with open(growth_log, "a", encoding="utf-8") as f:
+                f.write(log_entry)
+        else:
+            with open(growth_log, "w", encoding="utf-8") as f:
+                f.write(f"# Personality Growth Log\n{log_entry}")
+
+        _audit(
+            f"personality_edit:{file}:{section}",
+            f"Updated {file}.md section '{section}': {reason}",
+        )
+
+        # Refresh the prompt compiler's personality cache
+        if _prompt_compiler is not None and hasattr(
+            _prompt_compiler, "refresh_personality_cache"
+        ):
+            _prompt_compiler.refresh_personality_cache()
+
+        log.info("Updated %s.md section '%s': %s", file, section, reason)
+        return {
+            "success": True,
+            "result": f"Updated {file}.md section '{section}'. Logged to growth_log.md.",
+        }
+
+    except Exception as exc:
+        log.error("Failed to update %s.md: %s", file, exc)
+        return {"success": False, "error": f"Failed to update {file}.md: {exc}"}
+
+
+# ------------------------------------------------------------------ #
+#  Tool: mark_golden_reply                                             #
+# ------------------------------------------------------------------ #
+
+_VALID_SCENES = {"greeting", "technical", "emotional", "disagreement", "task_report", "casual"}
+
+
+async def _mark_golden_reply(
+    scene: str,
+    user_text: str,
+    eva_reply: str,
+    score: float = 0.85,
+) -> dict:
+    """Mark a reply as a golden example for few-shot learning.
+
+    Parameters
+    ----------
+    scene:
+        Scene category — one of: greeting, technical, emotional,
+        disagreement, task_report, casual.
+    user_text:
+        The user message that prompted this reply.
+    eva_reply:
+        Eva's reply to save as a golden example.
+    score:
+        Quality score 0.0–1.0 (default 0.85).
+
+    Returns
+    -------
+    ``{"success": bool, "result"|"error": str}``
+    """
+    if scene not in _VALID_SCENES:
+        return {"success": False, "error": f"scene must be one of: {_VALID_SCENES}"}
+
+    agent = agent_dir()
+    golden_path = agent / "memory" / "golden_replies.jsonl"
+    golden_path.parent.mkdir(parents=True, exist_ok=True)
+
+    try:
+        # Read existing entries
+        entries: list[dict] = []
+        if golden_path.exists():
+            for line in golden_path.read_text(encoding="utf-8").strip().split("\n"):
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    entries.append(json.loads(line))
+                except json.JSONDecodeError:
+                    pass
+
+        # Add new entry
+        entry = {
+            "id": f"gr_{len(entries)+1:03d}",
+            "scene": scene,
+            "user": user_text[:200],
+            "eva": eva_reply[:500],
+            "score": max(0.0, min(1.0, score)),
+            "added": time.strftime("%Y-%m-%d"),
+            "source": "auto_select",
+            "model": "unknown",
+        }
+        entries.append(entry)
+
+        # Enforce 50 entry limit — remove lowest scored
+        if len(entries) > 50:
+            entries.sort(key=lambda e: e.get("score", 0), reverse=True)
+            entries = entries[:50]
+
+        # Write back
+        lines = [json.dumps(e, ensure_ascii=False) for e in entries]
+        golden_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+        _audit(
+            "golden_reply:add",
+            f"Added golden reply (scene={scene}, score={score})",
+        )
+
+        log.info("Saved golden reply (scene=%s, score=%.2f). Total: %d", scene, score, len(entries))
+        return {
+            "success": True,
+            "result": f"Saved golden reply (scene={scene}, score={score}). Total: {len(entries)}",
+        }
+
+    except Exception as exc:
+        log.error("Failed to save golden reply: %s", exc)
+        return {"success": False, "error": f"Failed to save golden reply: {exc}"}
+
+
+# ------------------------------------------------------------------ #
 #  Tool registration                                                   #
 # ------------------------------------------------------------------ #
 
 def get_memory_tools() -> list[ToolSpec]:
-    """Return ToolSpec objects for both memory self-edit tools."""
+    """Return ToolSpec objects for all memory self-edit tools."""
     return [
         ToolSpec(
             name="update_feelings",
@@ -379,5 +575,94 @@ def get_memory_tools() -> list[ToolSpec]:
             },
             risk_level=RiskLevel.LOW,
             handler=_update_user_profile,
+        ),
+        ToolSpec(
+            name="update_personality",
+            description=(
+                "Update a section of personality.md or relationship.md. "
+                "Eva uses this to evolve her personality traits over time. "
+                "Changes are logged to growth_log.md. "
+                "personality.md is limited to ~500 tokens."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "file": {
+                        "type": "string",
+                        "enum": ["personality", "relationship"],
+                        "description": (
+                            "Which identity file to update: "
+                            "'personality' or 'relationship'."
+                        ),
+                    },
+                    "section": {
+                        "type": "string",
+                        "description": (
+                            "The section heading to update "
+                            "(e.g. '语气特征', '当前关系状态')."
+                        ),
+                    },
+                    "content": {
+                        "type": "string",
+                        "description": (
+                            "New content for the section body."
+                        ),
+                    },
+                    "reason": {
+                        "type": "string",
+                        "description": (
+                            "Reason for the change — logged to growth_log.md."
+                        ),
+                    },
+                },
+                "required": ["file", "section", "content", "reason"],
+            },
+            risk_level=RiskLevel.LOW,
+            handler=_update_personality,
+        ),
+        ToolSpec(
+            name="mark_golden_reply",
+            description=(
+                "Save a high-quality reply as a golden example for few-shot learning. "
+                "Golden replies are preferred over static examples in prompt compilation. "
+                "Maximum 50 entries; lowest-scored entries are pruned."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "scene": {
+                        "type": "string",
+                        "enum": [
+                            "greeting", "technical", "emotional",
+                            "disagreement", "task_report", "casual",
+                        ],
+                        "description": (
+                            "Scene category for this reply."
+                        ),
+                    },
+                    "user_text": {
+                        "type": "string",
+                        "description": (
+                            "The user message that prompted this reply (max 200 chars)."
+                        ),
+                    },
+                    "eva_reply": {
+                        "type": "string",
+                        "description": (
+                            "Eva's reply to save as a golden example (max 500 chars)."
+                        ),
+                    },
+                    "score": {
+                        "type": "number",
+                        "default": 0.85,
+                        "description": (
+                            "Quality score 0.0–1.0 (default 0.85)."
+                        ),
+                    },
+                },
+                "required": ["scene", "user_text", "eva_reply"],
+            },
+            risk_level=RiskLevel.LOW,
+            handler=_mark_golden_reply,
         ),
     ]

@@ -294,6 +294,12 @@ class PromptCompiler:
 
         # -- Static caches (loaded once, refreshed on demand) ----------
         self._identity_cache: str | None = None
+        self._core_identity: str = ""
+        self._extended_cache: str = ""
+        self._personality_cache: str = ""
+        self._relationship_cache: str = ""
+        self._model_hints: dict = {}
+        self._golden_replies: list[dict] = []
         self._rules_cache: str | None = None
         self._feelings_cache: str | None = None
         self._examples: list[dict] = []
@@ -319,7 +325,18 @@ class PromptCompiler:
         self._load_examples()
 
     def _load_identity(self) -> None:
-        """Load identity/core.md + identity/extended.md from agent_dir."""
+        """Load identity files from agent_dir.
+
+        Loads:
+          - identity/core.md (core personality, fallback: soul.md)
+          - identity/extended.md (extended persona details)
+          - identity/personality.md (evolving personality traits)
+          - identity/relationship.md (relationship dynamics)
+          - identity/model_hints.yaml (per-model adaptation hints)
+
+        Personality and relationship caches are stored as separate
+        attributes for per-model adaptation and live refresh.
+        """
         identity_dir = self._agent_dir / "identity"
         core = _read_md(identity_dir / "core.md")
         extended = _read_md(identity_dir / "extended.md")
@@ -328,11 +345,36 @@ class PromptCompiler:
         if not core:
             core = _read_md(self._agent_dir / "soul.md")
 
-        parts = [p for p in [core, extended] if p]
+        # Cache sub-parts for refresh_personality_cache()
+        self._core_identity = core
+        self._extended_cache = extended
+        self._personality_cache = _read_md(identity_dir / "personality.md")
+        self._relationship_cache = _read_md(identity_dir / "relationship.md")
+
+        # Load per-model adaptation hints
+        hints_path = identity_dir / "model_hints.yaml"
+        if hints_path.exists():
+            try:
+                self._model_hints = yaml.safe_load(
+                    hints_path.read_text(encoding="utf-8"),
+                ) or {}
+            except Exception as exc:
+                log.warning("Failed to load model_hints.yaml: %s", exc)
+                self._model_hints = {}
+        else:
+            self._model_hints = {}
+
+        parts = [p for p in [
+            core, extended,
+            self._personality_cache, self._relationship_cache,
+        ] if p]
         self._identity_cache = "\n\n".join(parts) if parts else ""
         log.debug(
-            "Identity cache: %d tokens",
+            "Identity cache: %d tokens (personality=%d, relationship=%d, model_hints=%d keys)",
             count_tokens(self._identity_cache),
+            count_tokens(self._personality_cache),
+            count_tokens(self._relationship_cache),
+            len(self._model_hints),
         )
 
     def _load_rules(self) -> None:
@@ -368,14 +410,60 @@ class PromptCompiler:
         )
 
     def _load_examples(self) -> None:
-        """Load few-shot examples from agent examples/ directory."""
+        """Load few-shot examples from agent examples/ directory.
+
+        Also loads ``memory/golden_replies.jsonl`` — golden replies are
+        preferred over static examples when available for a given scene.
+        """
         examples_dir = self._agent_dir / "examples"
         self._examples = _load_examples(examples_dir)
+        self._load_golden_replies()
+
+    def _load_golden_replies(self) -> None:
+        """Load golden replies from ``memory/golden_replies.jsonl``.
+
+        Each line is a JSON object with keys: scene, user, eva, score.
+        Golden replies are used as high-quality few-shot examples,
+        preferred over static examples when a matching scene exists.
+        """
+        golden_path = self._agent_dir / "memory" / "golden_replies.jsonl"
+        self._golden_replies = []
+        if not golden_path.exists():
+            return
+        try:
+            for line in golden_path.read_text(encoding="utf-8").strip().split("\n"):
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    entry = json.loads(line)
+                    self._golden_replies.append(entry)
+                except json.JSONDecodeError:
+                    log.debug("Skipping malformed golden reply line")
+            log.info(
+                "Loaded %d golden replies from %s",
+                len(self._golden_replies), golden_path,
+            )
+        except Exception as exc:
+            log.warning("Failed to load golden_replies.jsonl: %s", exc)
 
     def refresh_feelings_cache(self) -> None:
         """Re-read feelings.md — call after memory self-edit."""
         self._load_feelings()
         log.info("Feelings cache refreshed")
+
+    def refresh_personality_cache(self) -> None:
+        """Called after Eva self-edits personality.md or relationship.md."""
+        identity_dir = self._agent_dir / "identity"
+        self._personality_cache = _read_md(identity_dir / "personality.md")
+        self._relationship_cache = _read_md(identity_dir / "relationship.md")
+        # Rebuild identity cache from all sub-parts
+        parts = [p for p in [
+            self._core_identity, self._personality_cache,
+            self._relationship_cache, self._extended_cache,
+        ] if p]
+        self._identity_cache = "\n\n".join(parts)
+        log.info("Personality caches refreshed")
 
     # ------------------------------------------------------------------ #
     #  Layer builders                                                      #
@@ -511,16 +599,37 @@ class PromptCompiler:
         """
         messages: list[dict] = []
 
-        # Few-shot examples (injected as early conversation turns)
-        selected = _select_examples(self._examples, event_type, max_count=2)
-        for ex in selected:
-            # Parse user/assistant turns from the example body
-            for line in ex["body"].splitlines():
-                line = line.strip()
-                if line.startswith("user:"):
-                    messages.append({"role": "user", "content": line[5:].strip()})
-                elif line.startswith("assistant:"):
-                    messages.append({"role": "assistant", "content": line[10:].strip()})
+        # Few-shot examples: golden replies preferred over static examples.
+        # Map event_type to golden-reply scenes for matching.
+        _EVENT_TO_SCENES: dict[str, set[str]] = {
+            "USER_MESSAGE": {"greeting", "technical", "emotional", "disagreement", "casual"},
+            "SELF_THINKING": {"task_report"},
+        }
+        candidate_scenes = _EVENT_TO_SCENES.get(event_type, set())
+        golden_matches = [
+            gr for gr in self._golden_replies
+            if gr.get("scene") in candidate_scenes
+        ]
+
+        if golden_matches:
+            # Use top-scored golden replies (up to 2)
+            golden_matches.sort(key=lambda g: g.get("score", 0), reverse=True)
+            for gr in golden_matches[:2]:
+                if gr.get("user"):
+                    messages.append({"role": "user", "content": gr["user"]})
+                if gr.get("eva"):
+                    messages.append({"role": "assistant", "content": gr["eva"]})
+        else:
+            # Fallback to static examples
+            selected = _select_examples(self._examples, event_type, max_count=2)
+            for ex in selected:
+                # Parse user/assistant turns from the example body
+                for line in ex["body"].splitlines():
+                    line = line.strip()
+                    if line.startswith("user:"):
+                        messages.append({"role": "user", "content": line[5:].strip()})
+                    elif line.startswith("assistant:"):
+                        messages.append({"role": "assistant", "content": line[10:].strip()})
 
         # Conversation buffer
         if conversation_buffer:

@@ -92,6 +92,7 @@ class AgentManager:
 
     async def spawn_internal(
         self, prompt: str, parent_id: str = "", timeout: int = 120,
+        working_dir: str = "",
     ) -> AgentSession:
         """Spawn an internal sub-agent with its own LLM agentic loop.
 
@@ -100,8 +101,17 @@ class AgentManager:
         - Has access to all ANIMA tools (read_file, shell, web_fetch, etc.)
         - Runs multi-turn tool-use until the task is done
         - Returns the final text result
+
+        Parameters
+        ----------
+        working_dir:
+            If provided, the sub-agent's system prompt is augmented with a
+            working directory hint so file operations target the right tree.
         """
-        session = AgentSession(type="internal", prompt=prompt, parent_id=parent_id)
+        if working_dir:
+            prompt = f"WORKING_DIR: {working_dir}\n\n{prompt}"
+        session = AgentSession(type="internal", prompt=prompt, parent_id=parent_id,
+                               metadata={"working_dir": working_dir} if working_dir else {})
         self._sessions[session.id] = session
         self._emit("agent_spawn", f"internal: {prompt[:80]}", agent_id=session.id)
         task = asyncio.create_task(self._run_internal_agent(session, timeout))

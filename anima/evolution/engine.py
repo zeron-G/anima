@@ -165,8 +165,8 @@ class EvolutionEngine:
             proposal.status = ProposalStatus.TESTING
             log.info("Layer 4 (Test): running three-level tests...")
 
-            # Test in project root (SubAgent edits files there, not in worktree)
-            runner = TestRunner(str(project_root()))
+            # Test in worktree (SubAgent edits files there)
+            runner = TestRunner(str(worktree_path))
 
             # Level 1: Static
             ok, out = runner.level1_static(proposal.files)
@@ -188,10 +188,10 @@ class EvolutionEngine:
             proposal.status = ProposalStatus.REVIEWING
             log.info("Layer 5 (Review): checking diff...")
 
-            # Get diff from main project (SubAgent edits there, not in worktree)
+            # Get diff from worktree (SubAgent edits there)
             try:
                 diff_result = _sp.run(
-                    ["git", "diff"], cwd=str(project_root()),
+                    ["git", "diff"], cwd=str(worktree_path),
                     capture_output=True, text=True, timeout=10,
                 )
                 diff = diff_result.stdout or ""
@@ -204,25 +204,25 @@ class EvolutionEngine:
                 self._on_failure(proposal, stage="review", error=review_msg)
                 return "review_failed"
 
-            # Create evo/* branch for PR flow
+            # Create evo/* branch for PR flow (in worktree)
             branch = f"evo/{proposal.id}"
             _sp.run(["git", "checkout", "-b", branch],
-                    cwd=str(project_root()), capture_output=True, timeout=15)
+                    cwd=str(worktree_path), capture_output=True, timeout=15)
 
-            # Commit changes in main project (SubAgent edited files there)
-            _sp.run(["git", "add", "-A"], cwd=str(project_root()),
+            # Commit changes in worktree (SubAgent edited files there)
+            _sp.run(["git", "add", "-A"], cwd=str(worktree_path),
                     capture_output=True, timeout=15)
             _sp.run(
                 ["git", "commit", "-m", f"Evolution {proposal.id}: {proposal.title}"],
-                cwd=str(project_root()), capture_output=True, timeout=15,
+                cwd=str(worktree_path), capture_output=True, timeout=15,
             )
 
             # Sprint 8: Create safety tag before deploy
             safety_tag = self._create_safety_tag(proposal)
 
-            # Layer 6: Deploy via evo/* branch + PR
+            # Layer 6: Deploy via evo/* branch + PR (from worktree)
             log.info("Layer 6 (Deploy): creating PR on %s...", branch)
-            pr_ok, pr_msg = self._deploy_via_pr(proposal, branch)
+            pr_ok, pr_msg = self._deploy_via_pr(proposal, branch, cwd=str(worktree_path))
 
             if pr_ok:
                 # M-08 fix: set DEPLOYING first, DEPLOYED only after verification
@@ -333,13 +333,14 @@ class EvolutionEngine:
         try:
             session = await self._agent_manager.spawn_claude_code(
                 prompt=impl_prompt,
-                working_dir=str(project_root()),
+                working_dir=str(worktree_path),
                 timeout=timeout,
             )
         except Exception as e:
             log.warning("Claude Code spawn failed (%s), falling back to internal agent", e)
             session = await self._agent_manager.spawn_internal(
                 prompt=impl_prompt,
+                working_dir=str(worktree_path),
                 timeout=timeout,
             )
 
@@ -445,9 +446,10 @@ class EvolutionEngine:
             return False, "; ".join(issues)
         return True, "OK"
 
-    def _deploy_via_pr(self, proposal: Proposal, branch: str) -> tuple[bool, str]:
+    def _deploy_via_pr(self, proposal: Proposal, branch: str,
+                       cwd: str = "") -> tuple[bool, str]:
         """Push evo/* branch and create PR. Auto-merge if low risk (≤3 files)."""
-        root = str(project_root())
+        root = cwd or str(project_root())
         try:
             # Push branch
             push = _sp.run(
@@ -484,11 +486,12 @@ class EvolutionEngine:
                     cwd=root, capture_output=True, text=True, timeout=30,
                 )
                 if merge.returncode == 0:
-                    # Pull merged changes back to master
+                    # Pull merged changes back to project_root (main checkout)
+                    main_root = str(project_root())
                     _sp.run(["git", "checkout", "master"],
-                            cwd=root, capture_output=True, timeout=15)
+                            cwd=main_root, capture_output=True, timeout=15)
                     _sp.run(["git", "pull", "origin", "master"],
-                            cwd=root, capture_output=True, timeout=30)
+                            cwd=main_root, capture_output=True, timeout=30)
                     return True, f"Auto-merged: {pr_url}"
                 else:
                     log.warning("Auto-merge failed: %s", merge.stderr)

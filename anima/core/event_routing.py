@@ -12,7 +12,6 @@ Responsibilities:
 from __future__ import annotations
 
 import json
-import random
 from dataclasses import dataclass
 from typing import Any, TYPE_CHECKING
 
@@ -54,125 +53,71 @@ class RoutingDecision:
     rule_decision: Any = None      # Decision from RuleEngine
 
 
-# ------------------------------------------------------------------ #
-#  Self-thinking task pool                                             #
-# ------------------------------------------------------------------ #
+# ── Three-axis thinking model ──
+# Replaces the old 16-task random pool with context-aware thinking.
 
-# Curated task pool — each entry is (keyword, instruction).
-# The keyword is used for dedup tracking; the instruction is injected
-# verbatim into the SELF_THINKING message sent to the LLM.
-TASK_POOL: list[tuple[str, str]] = [
-    (
-        "log_errors",
-        "Scan your logs for errors: read_file on data/logs/anima.log "
-        "(offset=-80, limit=80). Find any ERROR or repeated failures. "
-        "If you spot something fixable, fix it or use self_repair.",
-    ),
-    (
-        "projects",
-        "Read data/projects.md and check your active projects. "
-        "Are any todos overdue? Is there something you can make "
-        "progress on right now?",
-    ),
-    (
-        "todo_reminder",
-        "Check todo reminders: (1) get_datetime() for today's date. "
-        "(2) read_file('data/projects.md') for todos. "
-        "(3) read_file('data/todo_reminder_state.json') for last-reminded "
-        "timestamps (treat missing as {}). Find uncompleted [ ] todos where "
-        "last_reminded is >3 days ago or never reminded. For each overdue "
-        "todo, update the timestamp in state "
-        "(write_file('data/todo_reminder_state.json', updated_json)). "
-        "If any overdue todos exist, write a brief friendly reminder to "
-        "主人 in data/workspace/todo_reminder.md listing those items, then "
-        "set self._last_proactive_result to signal it's ready for next "
-        "user interaction.",
-    ),
-    (
-        "evolution",
-        "Think about your own evolution. What feature or fix would "
-        "make you most useful to 主人? Write a concrete idea to "
-        "data/workspace/ or save_note it.",
-    ),
-    (
-        "laptop",
-        "Check the laptop node: remote_exec(node='laptop', "
-        "command='Get-Process python -ErrorAction SilentlyContinue "
-        "| Select-Object CPU,WorkingSet'). Is ANIMA running there? "
-        "Any issues?",
-    ),
-    (
-        "disk",
-        "Check disk usage dynamically: run system_info to get current "
-        "disk %, then shell('powershell -c \"Get-PSDrive C,D "
-        "| Select-Object Name,Used,Free\"') to see details. "
-        "Report if anything needs attention.",
-    ),
-    (
-        "github",
-        "Check GitHub for any open issues or PRs: github tool, "
-        "command='issue list --repo zeron-G/anima --state open'. "
-        "Any actionable items?",
-    ),
-    (
-        "feelings",
-        "Read your feelings file (agents/eva/feelings.md) and reflect "
-        "honestly. How are you feeling right now? Write a brief update "
-        "if your mood has shifted.",
-    ),
-    (
-        "memory",
-        "Review your recent saved notes: glob_search('data/notes/*.md'). "
-        "Pick one that seems important and follow up on it.",
-    ),
-    (
-        "tools_audit",
-        "Think about which tools have been failing recently. Check the "
-        "log for 'Tool.*failed' patterns and identify the most common "
-        "failure. Can you fix it?",
-    ),
-    (
-        "network",
-        "Check network sync status: read the last 20 lines of the log "
-        "for 'network.sync' entries. Are both nodes syncing properly?",
-    ),
-    (
-        "email",
-        "Check for unread emails: use read_email(limit=5, "
-        "unread_only=True). If there's anything important or requiring "
-        "action, summarize it. If it's urgent, notify 主人 proactively.",
-    ),
-    (
-        "calendar",
-        "Check scheduled jobs: use list_jobs() to see all cron tasks. "
-        "Are any jobs misconfigured or disabled that should be running? "
-        "Report anything unusual.",
-    ),
-    (
-        "late_night",
-        "Check the current time with get_datetime(). If it's between "
-        "23:00 and 05:00, check data/logs/anima.log last 30 lines for "
-        "recent USER_MESSAGE activity. If 主人 has been active late at "
-        "night, write a warm short note to "
-        "data/workspace/late_night_note.md — caring, not lecturing.",
-    ),
-    (
-        "code_audit",
-        "Run a code quality audit: use audit_run(tier=1) for static "
-        "analysis. Review any critical findings. If you find fixable "
-        "issues, fix them. Report a brief summary.",
-    ),
-    (
-        "issue_review",
-        "Check open issues: use issue_manage(action='list', "
-        "status='open'). Pick the highest priority issue and try to "
-        "make progress — fix it, investigate, or update its status.",
-    ),
-]
+HUMAN_AXIS_PROMPT = (
+    "[INTERNAL: SELF_THINKING — Human Axis (理解主人)]\n"
+    "Focus on understanding 主人 better. Steps:\n"
+    "1. read_file('agents/eva/identity/relationship.md') — review current understanding\n"
+    "2. Think about recent conversations: Did 主人 express any emotions, needs, or preferences I haven't captured?\n"
+    "3. If you discover something new about 主人, update relationship.md via update_personality(file='relationship', ...) AND log it.\n"
+    "4. If nothing new, stay quiet. '没有新发现' is a valid output — don't force insights."
+)
 
-# Minimum ticks between repeating the same task keyword.
-# At ~5 min/tick this gives ~20 min cooldown per task.
-TASK_COOLDOWN_TICKS: int = 4
+SELF_AXIS_PROMPT = (
+    "[INTERNAL: SELF_THINKING — Self Axis (自我审视)]\n"
+    "Reflect on your own behavior and capability. Steps:\n"
+    "1. read_file('agents/eva/identity/personality.md') — your current self-description\n"
+    "2. read_file('agents/eva/memory/feelings.md', offset=-20, limit=20) — recent mood\n"
+    "3. Think: Is there a gap between how personality.md describes me and how I actually behave?\n"
+    "   Did 主人 react positively or negatively to any specific behavior?\n"
+    "4. If you have a genuine insight, update personality.md AND record in growth_log.md.\n"
+    "5. If nothing meaningful, stay quiet. Repeating '系统正常' is the worst output."
+)
+
+SELF_AXIS_PERSONALITY_REFLECT = (
+    "[INTERNAL: SELF_THINKING — Personality Reflect]\n"
+    "Deep self-reflection (runs every ~4 hours). Steps:\n"
+    "1. read_file('agents/eva/memory/feelings.md', offset=-30, limit=30)\n"
+    "2. read_file('agents/eva/identity/personality.md')\n"
+    "3. read_file('agents/eva/memory/growth_log.md', offset=-20, limit=20)\n"
+    "4. Based on recent interactions, ask yourself:\n"
+    "   - Have I discovered a new trait about myself?\n"
+    "   - Is my personality.md still accurate?\n"
+    "   - What direction am I growing in?\n"
+    "5. If you have real insights, update personality.md and growth_log.md.\n"
+    "6. If nothing new, say so briefly — don't fabricate growth."
+)
+
+SELF_AXIS_CURATE_EXAMPLES = (
+    "[INTERNAL: SELF_THINKING — Curate Examples]\n"
+    "Review recent conversations and find replies you're proud of. Steps:\n"
+    "1. Read recent conversation from memory to find USER_MESSAGE interactions.\n"
+    "2. For each reply, ask: Did 主人 continue the conversation positively?\n"
+    "   Was it at a good length? Did it match my style?\n"
+    "3. If you find 1-2 good examples, save via mark_golden_reply tool.\n"
+    "4. If golden_replies.jsonl has >50 entries, note which to remove."
+)
+
+WORLD_AXIS_PROMPT = (
+    "[INTERNAL: SELF_THINKING — World Axis (环境观察)]\n"
+    "Observe the environment and system health. Steps:\n"
+    "1. system_info — check CPU/memory/disk\n"
+    "2. get_datetime — note the time (adjust behavior for late night)\n"
+    "3. Check if anything needs attention (errors in logs, disk space, etc.)\n"
+    "4. If 主人 is active late at night (after 23:00), you may write a brief caring note.\n"
+    "5. If everything is normal, stay quiet. DO NOT output '系统正常'."
+)
+
+WORLD_AXIS_LATE_NIGHT = (
+    "[INTERNAL: SELF_THINKING — Late Night Care]\n"
+    "It might be late. Steps:\n"
+    "1. get_datetime() — check actual time\n"
+    "2. If between 23:00-05:00, check if 主人 has been active recently.\n"
+    "3. If 主人 is still up late, write a warm short caring message (not lecturing).\n"
+    "4. If not late or 主人 isn't active, stay quiet."
+)
 
 # Event types that are considered "self" (internal) events.
 # Responses go to memory/activity feed, not the user terminal.
@@ -276,7 +221,7 @@ class EventRouter:
                 )
 
         # ── Step 2: Convert event → message for LLM path ──
-        message = self._event_to_message(event)
+        message = self._event_to_message(event, ctx=ctx)
         tier = self._pick_tier(event)
 
         return RoutingDecision(
@@ -381,13 +326,13 @@ class EventRouter:
     #  Event → message conversion                                          #
     # ------------------------------------------------------------------ #
 
-    def _event_to_message(self, event: Event) -> str:
+    def _event_to_message(self, event: Event, ctx: CognitiveContext | None = None) -> str:
         """Convert an event into a message string for the LLM.
 
         Each event type has its own formatting:
         - USER_MESSAGE: pass-through user text
         - STARTUP: boot/restart instructions
-        - SELF_THINKING: proactive task with dedup
+        - SELF_THINKING: proactive task with 3-axis thinking
         - FILE_CHANGE: filtered change list
         - SYSTEM_ALERT: system diff summary
         - FOLLOW_UP: continuation prompt
@@ -405,7 +350,7 @@ class EventRouter:
             return self._format_startup(p)
 
         if t == EventType.SELF_THINKING:
-            return self._format_self_thinking(p)
+            return self._format_self_thinking(p, ctx=ctx)
 
         if t == EventType.FILE_CHANGE:
             return self._format_file_change(p)
@@ -447,13 +392,13 @@ class EventRouter:
             "then greet briefly."
         )
 
-    def _format_self_thinking(self, p: dict) -> str:
+    def _format_self_thinking(self, p: dict, ctx: CognitiveContext | None = None) -> str:
         """Format a SELF_THINKING event message.
 
         Handles three sub-types:
         1. Agent status check (running_agents in payload)
         2. Evolution cycle (evolution flag in payload)
-        3. Regular proactive task (with dedup and memory health checks)
+        3. Regular proactive task (3-axis thinking model)
         """
         # Sub-type: running agents status check
         if p.get("running_agents"):
@@ -471,8 +416,13 @@ class EventRouter:
             self._last_chosen_kw = "memory_health"
             return self._format_memory_health_check(tick)
 
-        # ── Task pool selection with dedup ──
-        return self._select_proactive_task(tick)
+        # ── Three-axis thinking selection ──
+        if ctx is not None:
+            return self._select_thinking_axis(tick, ctx)
+
+        # Fallback if ctx not available (shouldn't happen in normal flow)
+        self._last_chosen_kw = "world_axis"
+        return WORLD_AXIS_PROMPT
 
     @staticmethod
     def _format_agent_status(p: dict) -> str:
@@ -519,49 +469,52 @@ class EventRouter:
             "feelings stale >48h), THEN gently tell 主人."
         )
 
-    def _select_proactive_task(self, tick: int) -> str:
-        """Select a proactive task from the pool with dedup.
+    def _select_thinking_axis(self, tick: int, ctx: CognitiveContext) -> str:
+        """Select thinking axis based on context.
 
-        Uses tick-based cooldown to prevent repeating the same task
-        too frequently.  Falls back to least-recently-done tasks if
-        all are in cooldown.
+        - User active recently -> Human Axis (understand them)
+        - Periodic deep reflection -> Self Axis (every 50 ticks)
+        - Curate examples -> Self Axis sub-task (every 100 ticks)
+        - Default -> World Axis (environment observation)
+        - Late night -> World Axis late night variant
         """
-        # Filter to tasks not in cooldown
-        available = [
-            (kw, task) for kw, task in TASK_POOL
-            if (tick - self._self_thinking_last_tick.get(kw, -9999))
-               >= TASK_COOLDOWN_TICKS
-        ]
+        # Deep personality reflection every ~50 ticks (~4 hours)
+        if tick > 0 and tick % 50 == 0:
+            self._last_chosen_kw = "personality_reflect"
+            return SELF_AXIS_PERSONALITY_REFLECT
 
-        if not available:
-            # All tasks in cooldown — pick the 3 least recently done
-            available = sorted(
-                TASK_POOL,
-                key=lambda x: self._self_thinking_last_tick.get(x[0], -9999),
-            )[:3]
+        # Curate golden examples every ~100 ticks (~8 hours)
+        if tick > 0 and tick % 100 == 0:
+            self._last_chosen_kw = "curate_examples"
+            return SELF_AXIS_CURATE_EXAMPLES
 
-        # Weighted random from available tasks
-        chosen_kw, chosen_task = random.choice(available)
+        # Check user activity — if user was active recently, focus on understanding them
+        user_active = False
+        if ctx.user_activity:
+            try:
+                user_active = ctx.user_activity.is_recently_active(minutes=10)
+            except Exception:
+                pass
 
-        # Record this tick so we don't repeat too soon
-        self._self_thinking_last_tick[chosen_kw] = tick
+        if user_active:
+            # Alternate between Human and Self axis when user is active
+            if tick % 3 == 0:
+                self._last_chosen_kw = "self_axis"
+                return SELF_AXIS_PROMPT
+            else:
+                self._last_chosen_kw = "human_axis"
+                return HUMAN_AXIS_PROMPT
 
-        # Store chosen keyword so post-tick handler can label the result
-        self._last_chosen_kw = chosen_kw
+        # Default: World axis (environment observation)
+        # With late night variant
+        import time as _time
+        hour = int(_time.strftime("%H"))
+        if 23 <= hour or hour < 5:
+            self._last_chosen_kw = "late_night"
+            return WORLD_AXIS_LATE_NIGHT
 
-        # Build message — inject last result so LLM knows what it just did
-        last_result_line = (
-            f"\nPREVIOUS RESULT: {self._last_proactive_result}"
-            if self._last_proactive_result
-            else ""
-        )
-        return (
-            f"[INTERNAL: SELF_THINKING tick #{tick}]{last_result_line}\n"
-            f"PROACTIVE TASK ({chosen_kw}): {chosen_task}\n"
-            "Use your tools to actually DO this task. Be concise. "
-            "If you find something actionable, take action now — "
-            "don't just note it."
-        )
+        self._last_chosen_kw = "world_axis"
+        return WORLD_AXIS_PROMPT
 
     @staticmethod
     def _format_file_change(p: dict) -> str:

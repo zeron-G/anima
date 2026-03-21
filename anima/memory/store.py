@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any
 
 from anima.config import project_root
+from anima.memory.db_manager import DatabaseManager
 from anima.utils.logging import get_logger
 from anima.utils.ids import gen_id
 
@@ -166,7 +167,8 @@ class MemoryStore:
             resolved = project_root() / db_path
         resolved.parent.mkdir(parents=True, exist_ok=True)
         self._db_path = str(resolved)
-        self._conn: sqlite3.Connection | None = None
+        self._db: DatabaseManager | None = None  # owns the connection
+        self._conn: sqlite3.Connection | None = None  # backward-compat alias
         self._chroma_collection = None
         self._write_lock = threading.Lock()
 
@@ -179,32 +181,30 @@ class MemoryStore:
         """Factory method — creates and initializes the store."""
         store = cls(db_path)
 
-        def _init_db() -> None:
-            store._conn = sqlite3.connect(store._db_path, check_same_thread=False)
-            store._conn.row_factory = sqlite3.Row
-            # C-06 fix: WAL mode for safe concurrent reads + busy timeout
-            store._conn.execute("PRAGMA journal_mode = WAL")
-            store._conn.execute("PRAGMA synchronous = NORMAL")
-            store._conn.execute("PRAGMA busy_timeout = 5000")
-            store._conn.execute("PRAGMA foreign_keys = ON")
-            store._conn.executescript(_SCHEMA)
-            # Migrate: add columns that may not exist in older DBs
-            for col, default in [("sync_seq", "0"), ("content_hash", "''"), ("decay_score", "NULL")]:
-                try:
-                    col_type = "INTEGER" if default == "0" else ("REAL" if default == "NULL" else "TEXT")
-                    store._conn.execute(f"ALTER TABLE episodic_memories ADD COLUMN {col} {col_type} DEFAULT {default}")
-                except sqlite3.OperationalError:
-                    pass  # Column already exists
-            # Create indexes for sync columns
-            try:
-                store._conn.execute("CREATE INDEX IF NOT EXISTS idx_sync_seq ON episodic_memories(sync_seq)")
-                store._conn.execute("CREATE INDEX IF NOT EXISTS idx_content_hash ON episodic_memories(content_hash)")
-            except sqlite3.OperationalError:
-                pass
-            store._conn.commit()
+        # Use DatabaseManager for initialization (WAL, schema, pragmas)
+        store._db = DatabaseManager(store._db_path)
+        await store._db.init(schema=_SCHEMA)
 
-        await asyncio.to_thread(_init_db)
-        log.info("Memory store initialized: %s", store._db_path)
+        # Backward-compat: expose raw connection so existing sync methods
+        # (save_memory, search_memories, etc.) keep working unchanged.
+        store._conn = store._db.raw_connection
+
+        # Migrate: add columns that may not exist in older DBs
+        for col, default in [("sync_seq", "0"), ("content_hash", "''"), ("decay_score", "NULL")]:
+            col_type = "INTEGER" if default == "0" else ("REAL" if default == "NULL" else "TEXT")
+            await store._db.add_column_if_missing(
+                "episodic_memories", col, col_type, default,
+            )
+
+        # Create indexes for sync columns
+        await store._db.create_index_if_missing(
+            "idx_sync_seq", "episodic_memories", "sync_seq",
+        )
+        await store._db.create_index_if_missing(
+            "idx_content_hash", "episodic_memories", "content_hash",
+        )
+
+        log.info("Memory store initialized (via DatabaseManager): %s", store._db_path)
 
         # Optional ChromaDB
         if HAS_CHROMADB:
@@ -1379,7 +1379,11 @@ class MemoryStore:
     # ------------------------------------------------------------------ #
 
     async def close(self) -> None:
-        if self._conn:
+        if self._db and self._db.is_open:
+            await self._db.close()
+            self._conn = None
+            log.info("Memory store closed.")
+        elif self._conn:
             await asyncio.to_thread(self._conn.close)
             self._conn = None
             log.info("Memory store closed.")

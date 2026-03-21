@@ -1,0 +1,27 @@
+# 跨模型 prompt 策略适配
+# 不同模型对人格指令的遵从能力不同
+
+model_hints:
+  opus:
+    identity_detail: "full"
+    style_rules: "implicit"
+    few_shot_count: 1
+    emotion_hint: "natural"
+
+  sonnet:
+    identity_detail: "moderate"
+    style_rules: "explicit"
+    few_shot_count: 2
+    emotion_hint: "parameter"
+
+  codex:
+    identity_detail: "moderate"
+    style_rules: "explicit"
+    few_shot_count: 2
+    emotion_hint: "parameter"
+
+  local:
+    identity_detail: "minimal"
+    style_rules: "strict"
+    few_shot_count: 3
+    emotion_hint: "none"
