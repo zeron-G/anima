@@ -197,7 +197,7 @@ class EvolutionEngine:
                 diff = diff_result.stdout or ""
             except Exception:
                 diff = worktree.get_diff() or ""
-            review_ok, review_msg = self._review_diff(diff, proposal)
+            review_ok, review_msg = self._review_diff(diff, proposal, cwd=str(worktree_path))
             if not review_ok:
                 log.warning("Review failed: %s", review_msg)
                 proposal.status = ProposalStatus.FAILED
@@ -357,40 +357,37 @@ class EvolutionEngine:
         proposal.last_test_output = output[:500]
         return "retry"
 
-    def _review_diff(self, diff: str, proposal: Proposal) -> tuple[bool, str]:
+    def _review_diff(self, diff: str, proposal: Proposal, cwd: str = "") -> tuple[bool, str]:
         """Basic automated code review."""
+        review_cwd = cwd or str(project_root())
         issues = []
 
         if not diff or not diff.strip():
-            # SubAgent may have already committed — check git log instead
+            # SubAgent may have already committed — check git log in worktree
             try:
                 log_result = _sp.run(
                     ["git", "log", "--oneline", "-1"],
-                    cwd=str(project_root()), capture_output=True, text=True, timeout=5,
+                    cwd=review_cwd, capture_output=True, text=True, timeout=5,
                 )
                 last_commit = log_result.stdout.strip()
                 if proposal.title and proposal.title[:20] in last_commit:
-                    # SubAgent already committed — that's fine
                     return True, "Already committed"
             except Exception as e:
                 log.debug("_review_diff: %s", e)
-            # Check if there are any new commits since proposal started
             try:
                 log_result = _sp.run(
                     ["git", "log", "--oneline", "-3"],
-                    cwd=str(project_root()), capture_output=True, text=True, timeout=5,
+                    cwd=review_cwd, capture_output=True, text=True, timeout=5,
                 )
                 recent = log_result.stdout.strip()
                 if "Evolution" in recent or "evolution" in recent:
                     return True, "Changes already committed by Claude Code"
             except Exception as e:
                 log.debug("engine: %s", e)
-            # Claude Code may have made changes that just need staging
-            _sp.run(["git", "add", "-A"], cwd=str(project_root()), capture_output=True, timeout=15)
-            diff_check = _sp.run(["git", "diff", "--cached", "--stat"], cwd=str(project_root()), capture_output=True, text=True, timeout=10)
+            _sp.run(["git", "add", "-A"], cwd=review_cwd, capture_output=True, timeout=15)
+            diff_check = _sp.run(["git", "diff", "--cached", "--stat"], cwd=review_cwd, capture_output=True, text=True, timeout=10)
             if diff_check.stdout and diff_check.stdout.strip():
                 return True, "Staged changes found"
-            # Really no changes
             issues.append("No changes detected")
 
         # Check for obvious problems

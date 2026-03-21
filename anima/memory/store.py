@@ -775,20 +775,21 @@ class MemoryStore:
         """Sync inner — runs in thread."""
         if not entries:
             return
-        with self._db._sync_write_lock:
-            for e in entries:
-                self._conn.execute(
-                    "INSERT OR REPLACE INTO env_catalog "
-                    "(id, path, type, size_bytes, modified_at, scanned_at, scan_layer, "
-                    "category, extension, parent_dir, is_important) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                    (e["id"], e["path"], e["type"], e.get("size_bytes", 0),
-                     e.get("modified_at", 0), e.get("scanned_at", 0),
-                     e.get("scan_layer", 1), e.get("category", "other"),
-                     e.get("extension", ""), e.get("parent_dir", ""),
-                     e.get("is_important", 0)),
-                )
-            self._conn.commit()
+        params_list = [
+            (e["id"], e["path"], e["type"], e.get("size_bytes", 0),
+             e.get("modified_at", 0), e.get("scanned_at", 0),
+             e.get("scan_layer", 1), e.get("category", "other"),
+             e.get("extension", ""), e.get("parent_dir", ""),
+             e.get("is_important", 0))
+            for e in entries
+        ]
+        self._db.write_many_sync(
+            "INSERT OR REPLACE INTO env_catalog "
+            "(id, path, type, size_bytes, modified_at, scanned_at, scan_layer, "
+            "category, extension, parent_dir, is_important) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            params_list,
+        )
 
     # Keep backward-compat sync name — EnvScanner calls this from sync code
     def upsert_env_catalog_batch(self, entries: list[dict]) -> None:
@@ -800,10 +801,11 @@ class MemoryStore:
         await asyncio.to_thread(self._upsert_env_catalog_batch_sync, entries)
 
     def _update_scan_progress_sync(self, layer_id: str, status: str, **kwargs: Any) -> None:
-        """Sync inner — runs in thread."""
+        """Sync inner — runs in thread. Uses db lock for read-then-write atomicity."""
         now = time.time()
         with self._db._sync_write_lock:
-            row = self._conn.execute(
+            conn = self._db.raw_connection
+            row = conn.execute(
                 "SELECT id FROM env_scan_progress WHERE id = ?", (layer_id,)
             ).fetchone()
             if row:
@@ -816,7 +818,7 @@ class MemoryStore:
                     sets.append("completed_at = ?")
                     vals.append(now)
                 vals.append(layer_id)
-                self._conn.execute(
+                conn.execute(
                     f"UPDATE env_scan_progress SET {', '.join(sets)} WHERE id = ?",
                     vals,
                 )
@@ -830,11 +832,11 @@ class MemoryStore:
                     cols.append("completed_at")
                     vals_list.append(now)
                 placeholders = ", ".join("?" * len(cols))
-                self._conn.execute(
+                conn.execute(
                     f"INSERT INTO env_scan_progress ({', '.join(cols)}) VALUES ({placeholders})",
                     vals_list,
                 )
-            self._conn.commit()
+            conn.commit()
 
     # Keep backward-compat sync name — EnvScanner calls this from sync code
     def update_scan_progress(self, layer_id: str, status: str, **kwargs: Any) -> None:
