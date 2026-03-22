@@ -7,6 +7,7 @@ import { useChatStore } from './stores/chatStore'
 import { ws } from './api/websocket'
 import OrbitNav from './components/global/OrbitNav.vue'
 import ConnectionBadge from './components/global/ConnectionBadge.vue'
+import EvaPresence from './components/global/EvaPresence.vue'
 import ThinkingStream from './components/global/ThinkingStream.vue'
 
 const emotion = useEmotionStore()
@@ -55,6 +56,7 @@ onMounted(() => {
       </router-view>
     </main>
     <ThinkingStream />
+    <EvaPresence />
     <ConnectionBadge />
   </div>
 </template>

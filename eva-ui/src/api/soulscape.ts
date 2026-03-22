@@ -1,0 +1,16 @@
+import client from './client'
+
+export const getEmotion = () => client.get('/v1/soulscape/emotion')
+export const getPersona = () => client.get('/v1/soulscape/persona')
+export const updatePersona = (data: Record<string, number>) => client.put('/v1/soulscape/persona', data)
+export const getPersonality = () => client.get('/v1/soulscape/personality')
+export const updatePersonality = (content: string) => client.put('/v1/soulscape/personality', { content })
+export const getRelationship = () => client.get('/v1/soulscape/relationship')
+export const updateRelationship = (content: string) => client.put('/v1/soulscape/relationship', { content })
+export const getGrowthLog = () => client.get('/v1/soulscape/growth-log')
+export const getGoldenReplies = () => client.get('/v1/soulscape/golden-replies')
+export const deleteGoldenReply = (id: string) => client.delete(`/v1/soulscape/golden-replies/${id}`)
+export const getStyleRules = () => client.get('/v1/soulscape/style-rules')
+export const updateStyleRules = (content: string) => client.put('/v1/soulscape/style-rules', { content })
+export const getBoundaries = () => client.get('/v1/soulscape/boundaries')
+export const getDrift = (limit = 50) => client.get('/v1/soulscape/drift', { params: { limit } })
