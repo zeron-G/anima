@@ -347,7 +347,7 @@ class HeartbeatEngine:
         self._consecutive_skips = self._max_consecutive_skips
         while self._running:
             try:
-                # Dynamic interval based on idle scheduler
+                # Dynamic interval based on idle scheduler + governance
                 if self._idle_scheduler:
                     effective_interval = self._idle_scheduler.get_llm_heartbeat_interval(
                         self._llm_interval
@@ -359,6 +359,14 @@ class HeartbeatEngine:
                         continue
                 else:
                     effective_interval = self._llm_interval
+
+                # Governance: cautious mode doubles the interval
+                from anima.core.governance import get_governance
+                activity = get_governance().get_activity_level()
+                if activity == "cautious":
+                    effective_interval = max(effective_interval, 600)  # min 10 min
+                elif activity == "minimal":
+                    effective_interval = max(effective_interval, 1800)  # min 30 min
 
                 if self._should_llm_think():
                     await self._on_llm_tick()
@@ -377,7 +385,11 @@ class HeartbeatEngine:
                 await asyncio.sleep(self._llm_interval)
 
     def _should_llm_think(self) -> bool:
-        """Always think on LLM heartbeat — cost is acceptable for proactive behavior."""
+        """Check governance activity level before allowing self-thinking."""
+        from anima.core.governance import get_governance
+        level = get_governance().get_activity_level()
+        if level == "minimal":
+            return False  # Self-thinking disabled in minimal mode
         return True
 
     async def _on_llm_tick(self) -> None:
@@ -502,6 +514,14 @@ class HeartbeatEngine:
                     effective_interval = self._major_interval
 
                 if not self._evolution_engine:
+                    await asyncio.sleep(effective_interval)
+                    continue
+
+                # Governance: block evolution in cautious/minimal mode
+                from anima.core.governance import get_governance
+                gov_level = get_governance().get_activity_level()
+                if gov_level in ("cautious", "minimal"):
+                    log.debug("Evolution blocked — governance mode: %s", gov_level)
                     await asyncio.sleep(effective_interval)
                     continue
 

@@ -153,7 +153,10 @@ dashboard:
 
 # ── Governance ──
 governance:
-  default_mode: "active"
+  default_mode: "active"       # active / cautious / minimal
+  # active:   full autonomy — normal heartbeat, self-thinking, evolution
+  # cautious: reduced — LLM heartbeat min 10min, evolution disabled
+  # minimal:  passive — self-thinking disabled, evolution disabled, heartbeat 30min
 
 # ── System ──
 shutdown:
