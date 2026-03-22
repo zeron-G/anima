@@ -96,6 +96,6 @@ class TestDynamicToolSelection:
 
 class TestDashboardTraceEndpoint:
     def test_trace_route_registered(self):
-        import anima.dashboard.server as srv
-        source = open(srv.__file__, encoding="utf-8").read()
-        assert "/api/traces" in source
+        import anima.api.router as router_mod
+        source = open(router_mod.__file__, encoding="utf-8").read()
+        assert "/v1/settings/traces" in source

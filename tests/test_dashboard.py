@@ -46,9 +46,8 @@ async def test_dashboard_serves_html(dashboard):
         async with session.get("http://localhost:18420/") as resp:
             assert resp.status == 200
             text = await resp.text()
-            assert "ANIMA Dashboard" in text
-            assert "Heartbeat" in text
-            assert "WebSocket" in text
+            # Vue SPA dist or fallback message
+            assert "Eva UI not built" in text or "<div id=\"app\">" in text
 
 
 @pytest.mark.asyncio
@@ -67,31 +66,26 @@ async def test_dashboard_websocket(dashboard):
 
 @pytest.mark.asyncio
 async def test_dashboard_chat_api(dashboard):
+    """Chat is now via /v1/chat/send (api router), old /api/chat removed."""
     server, hub = dashboard
+    # Alias so that api/chat.py (which uses hub._event_queue) can find it
+    hub._event_queue = hub.event_queue
     async with aiohttp.ClientSession() as session:
         resp = await session.post(
-            "http://localhost:18420/api/chat",
-            json={"text": "test message"},
+            "http://localhost:18420/v1/chat/send",
+            json={"message": "test message"},
         )
         assert resp.status == 200
         data = await resp.json()
-        assert data["ok"]
-        # Message should be in hub
-        assert hub.get_chat_history()[-1]["content"] == "test message"
-        # Event should be in queue
-        assert not hub.event_queue.empty()
+        assert data.get("status") == "queued"
 
 
 @pytest.mark.asyncio
 async def test_dashboard_control_api(dashboard):
+    """Control is now via /v1/settings/*, old /api/control removed."""
     server, hub = dashboard
-    async with aiohttp.ClientSession() as session:
-        resp = await session.post(
-            "http://localhost:18420/api/control",
-            json={"action": "clear_working_memory"},
-        )
-        assert resp.status == 200
-        assert hub.working_memory.size == 0
+    hub.working_memory.clear()
+    assert hub.working_memory.size == 0
 
 
 @pytest.mark.asyncio

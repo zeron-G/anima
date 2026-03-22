@@ -28,7 +28,7 @@ def launch_desktop(*, headless: bool = False, experimental: bool = False) -> Non
     atexit.register(release_lock)
 
     port = get("dashboard.port", 8420)
-    url = f"http://127.0.0.1:{port}/desktop"
+    url = f"http://127.0.0.1:{port}/"  # Vue SPA served at root
 
     if headless:
         from anima.main import main_entry
