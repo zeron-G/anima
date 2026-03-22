@@ -39,6 +39,8 @@ class PipelineContext:
     tool_calls_made: int = 0
     loop_error: str | None = None
 
+    session_id: str = ""           # Session ID for multi-user isolation
+
     filtered: bool = False        # Set True if content safety filtered
     filter_reason: str = ""        # Reason for filtering
 

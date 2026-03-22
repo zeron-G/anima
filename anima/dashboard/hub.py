@@ -37,6 +37,7 @@ class DashboardHub:
         self.gossip_mesh = None
         self.evolution_engine = None
         self.idle_scheduler = None
+        self.session_manager = None
         self.config: dict = {}
         self._start_time = time.time()
         self._chat_history: list[dict] = []
@@ -171,6 +172,13 @@ class DashboardHub:
             snapshot["idle_scheduler"] = self.idle_scheduler.get_status()
         else:
             snapshot["idle_scheduler"] = {}
+
+        # Multi-user session info
+        if self.session_manager:
+            snapshot["sessions"] = {
+                "active": self.session_manager.active_count,
+                "sessions": self.session_manager.list_sessions(),
+            }
 
         return snapshot
 

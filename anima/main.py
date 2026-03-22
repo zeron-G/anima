@@ -820,6 +820,15 @@ async def _init_cognitive(config: dict, core: dict, llm: dict, heartbeat_deps: d
     cognitive.set_user_activity(heartbeat_deps["user_activity"])
     cognitive.set_idle_scheduler(heartbeat_deps["idle_scheduler"])
 
+    # ── Multi-user session isolation ──
+    from anima.core.session_manager import SessionManager
+    session_manager = SessionManager(
+        max_sessions=get("sessions.max_sessions", 50),
+        session_ttl_s=get("sessions.ttl_s", 3600),
+    )
+    cognitive.set_session_manager(session_manager)
+    heartbeat_deps["heartbeat"].set_session_manager(session_manager)
+
     # ── v3: Wire new memory + prompt components into cognitive loop ──
     cognitive.set_prompt_compiler(llm["prompt_compiler"])
     cognitive.set_memory_retriever(llm["memory_retriever"])
@@ -865,6 +874,7 @@ async def _init_cognitive(config: dict, core: dict, llm: dict, heartbeat_deps: d
     return {
         "cognitive": cognitive,
         "terminal": terminal,
+        "session_manager": session_manager,
     }
 
 
@@ -895,6 +905,7 @@ def _init_dashboard(core: dict, llm: dict, heartbeat_deps: dict, cognitive_deps:
     dashboard_hub.gossip_mesh = network.get("gossip_mesh")
     dashboard_hub.evolution_engine = heartbeat_deps["evolution_engine"]
     dashboard_hub.idle_scheduler = heartbeat_deps.get("idle_scheduler")
+    dashboard_hub.session_manager = cognitive_deps.get("session_manager")
     dashboard_hub.config = config
 
     dashboard_port = get("dashboard.port", 8420)

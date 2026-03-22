@@ -51,6 +51,7 @@ class DashboardServer:
         self._app.router.add_get("/v1/status", self._handle_v1_status)
         self._app.router.add_get("/v1/emotion", self._handle_v1_emotion)
         self._app.router.add_get("/v1/memory/search", self._handle_v1_memory_search)
+        self._app.router.add_get("/v1/sessions", self._handle_v1_sessions)
         # Static files for Live2D model + SDK
         static_dir = Path(__file__).parent / "static"
         if static_dir.exists():
@@ -555,6 +556,17 @@ class DashboardServer:
                   "type": r.get("type"), "importance": r.get("importance"),
                   "created_at": r.get("created_at")} for r in results]
         return web.json_response({"results": clean, "count": len(clean)})
+
+    async def _handle_v1_sessions(self, request: web.Request) -> web.Response:
+        if not self._check_auth(request):
+            return web.json_response({"error": "unauthorized"}, status=401)
+        sm = self._hub.session_manager
+        if not sm:
+            return web.json_response({"active": 0, "sessions": []})
+        return web.json_response({
+            "active": sm.active_count,
+            "sessions": sm.list_sessions(),
+        })
 
     # ── WebSocket push loop ──
 

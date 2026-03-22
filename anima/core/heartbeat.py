@@ -76,6 +76,7 @@ class HeartbeatEngine:
         self._is_restart = False  # Set via mark_as_restart()
         self._restart_reason = ""
         self._idle_scheduler = None  # Set via set_idle_scheduler()
+        self._session_manager = None  # Set via set_session_manager()
 
         # File watcher
         watch_paths = get("perception.watch_paths", ["."])
@@ -114,6 +115,10 @@ class HeartbeatEngine:
     def set_idle_scheduler(self, idle_scheduler) -> None:
         """Set the idle scheduler for off-peak task dispatch."""
         self._idle_scheduler = idle_scheduler
+
+    def set_session_manager(self, session_manager) -> None:
+        """Set the session manager for periodic session cleanup."""
+        self._session_manager = session_manager
 
     async def start(self) -> None:
         """Start all heartbeat loops."""
@@ -300,6 +305,12 @@ class HeartbeatEngine:
                      self._tick_count,
                      self._working_memory.size,
                      self._working_memory.capacity)
+            # Periodic session cleanup
+            if self._session_manager:
+                try:
+                    self._session_manager.cleanup_expired()
+                except Exception as e:
+                    log.debug("Session cleanup failed: %s", e)
 
     async def _check_agent_timeouts(self) -> None:
         """Check active sub-agents for slow/hung status and auto-timeout at 5min."""

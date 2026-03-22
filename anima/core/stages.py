@@ -67,6 +67,20 @@ class EventRoutingStage(PipelineStage):
 
         pctx.user_message = decision.message
 
+        # Extract session_id from event source
+        pctx.session_id = event.source or ""
+
+        # If session manager exists, use per-session state
+        if ctx.session_manager and pctx.session_id:
+            session = ctx.session_manager.get_or_create(
+                pctx.session_id,
+                user_id=event.payload.get("user", ""),
+                channel=event.payload.get("channel", ""),
+            )
+            session.message_count += 1
+            # Store session reference for other stages
+            pctx._session = session
+
         # Record user activity
         if event.type == EventType.USER_MESSAGE and ctx.user_activity:
             ctx.user_activity.record_user_message()
@@ -312,6 +326,13 @@ class ResponseHandlingStage(PipelineStage):
                 action=f"event:{event.type.name}",
                 details=pctx.user_message[:200],
             )
+
+        # Update session conversation if multi-user
+        if hasattr(pctx, '_session') and pctx._session:
+            session = pctx._session
+            session.conversation.append({"role": "user", "content": pctx.user_message})
+            session.conversation.append({"role": "assistant", "content": pctx.content or ""})
+            session.trim_conversation(100)
 
         # Governance: Self-Thinking loop detection + drift accumulation
         from anima.core.governance import get_governance

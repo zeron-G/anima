@@ -110,6 +110,9 @@ class CognitiveContext:
     reload_manager: Any | None = None
     """Hot-reload / restart manager."""
 
+    session_manager: Any | None = None
+    """Per-session state manager for multi-user isolation."""
+
     # ── Callbacks ──
 
     output_callback: Callable[..., Any] | None = None

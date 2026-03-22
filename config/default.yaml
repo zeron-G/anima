@@ -86,6 +86,11 @@ tools:
 skills:
   extra_dirs: []
 
+# ── Sessions ──
+sessions:
+  max_sessions: 50
+  ttl_s: 3600        # 1 hour inactivity timeout
+
 # ── Idle Scheduler ──
 idle_scheduler:
   enabled: true

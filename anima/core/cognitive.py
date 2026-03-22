@@ -133,6 +133,9 @@ class AgenticLoop:
     def set_token_budget(self, budget) -> None:
         self._ctx.token_budget = budget
 
+    def set_session_manager(self, manager) -> None:
+        self._ctx.session_manager = manager
+
     def set_output_callback(self, callback: Callable[[str], Any]) -> None:
         self._ctx.output_callback = callback
 
