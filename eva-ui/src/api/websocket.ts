@@ -15,6 +15,8 @@ class EvaWebSocket {
   private reconnectDelay = 1000
   private handlers: Map<WSMessageType, MessageHandler[]> = new Map()
   public connected = ref(false)
+  private _lastChatHistory: any[] = []
+  private _lastActivityTs: number = 0
 
   connect() {
     const base = import.meta.env.VITE_WS_BASE || window.location.host
@@ -30,8 +32,39 @@ class EvaWebSocket {
 
     this.ws.onmessage = (event) => {
       try {
-        const msg: WSMessage = JSON.parse(event.data)
-        this.dispatch(msg)
+        const raw = JSON.parse(event.data)
+
+        if (raw.type) {
+          // Typed event (new protocol)
+          this.dispatch(raw as WSMessage)
+        } else if (raw.emotion || raw.uptime_s !== undefined) {
+          // Full snapshot (legacy protocol) — convert to typed events
+          this.dispatch({ type: 'heartbeat', data: raw })
+
+          // Extract chat history updates
+          if (raw.chat_history) {
+            this._lastChatHistory = this._lastChatHistory || []
+            const newMsgs = raw.chat_history.slice(this._lastChatHistory.length)
+            for (const msg of newMsgs) {
+              if (msg.role === 'agent' || msg.role === 'assistant') {
+                this.dispatch({
+                  type: 'stream',
+                  data: { correlation_id: `ws_${msg.timestamp || Date.now()}`, text: msg.content, done: true }
+                })
+              }
+            }
+            this._lastChatHistory = raw.chat_history
+          }
+
+          // Extract activity events
+          if (raw.activity) {
+            const lastAct = raw.activity[raw.activity.length - 1]
+            if (lastAct && lastAct.timestamp !== this._lastActivityTs) {
+              this._lastActivityTs = lastAct.timestamp
+              this.dispatch({ type: 'activity', data: lastAct })
+            }
+          }
+        }
       } catch (e) {
         console.warn('WS parse error:', e)
       }
