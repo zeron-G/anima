@@ -17,6 +17,14 @@ log = get_logger("api.chat")
 
 async def send(request: web.Request) -> web.Response:
     """POST /v1/chat/send — queue a message, return correlation_id."""
+    import traceback as _tb
+    try:
+        return await _send_impl(request)
+    except Exception as e:
+        log.error("Chat send error: %s\n%s", e, _tb.format_exc())
+        return web.json_response({"error": str(e)}, status=500)
+
+async def _send_impl(request: web.Request) -> web.Response:
     if not check_auth(request):
         return web.json_response({"error": "unauthorized"}, status=401)
     hub = request.app["hub"]
@@ -31,14 +39,20 @@ async def send(request: web.Request) -> web.Response:
         return web.json_response({"error": "message required"}, status=400)
 
     correlation_id = gen_id("msg")
-    await hub._event_queue.put(Event(
-        type=EventType.USER_MESSAGE,
-        payload={"text": message, "correlation_id": correlation_id},
-        priority=EventPriority.NORMAL,
-        source=session_id,
-        id=correlation_id,
-    ))
-    hub.add_chat_message("user", message)
+    if not hub.event_queue:
+        return web.json_response({"error": "backend not ready"}, status=503)
+    try:
+        await hub.event_queue.put(Event(
+            type=EventType.USER_MESSAGE,
+            payload={"text": message, "correlation_id": correlation_id},
+            priority=EventPriority.NORMAL,
+            source=session_id,
+            id=correlation_id,
+        ))
+        hub.add_chat_message("user", message)
+    except Exception as e:
+        log.error("Chat send failed: %s", e)
+        return web.json_response({"error": str(e)}, status=500)
 
     return web.json_response({
         "status": "queued",
@@ -66,7 +80,7 @@ async def stream(request: web.Request) -> web.StreamResponse:
     hub.register_stream(stream_id, q)
 
     hub.add_chat_message("user", message)
-    await hub._event_queue.put(Event(
+    await hub.event_queue.put(Event(
         type=EventType.USER_MESSAGE,
         payload={"text": message, "stream_id": stream_id, "correlation_id": correlation_id},
         priority=EventPriority.NORMAL,

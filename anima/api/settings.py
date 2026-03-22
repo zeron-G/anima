@@ -123,7 +123,7 @@ async def restart(request: web.Request) -> web.Response:
         return web.json_response({"error": "unauthorized"}, status=401)
     hub = request.app["hub"]
     from anima.models.event import Event, EventType, EventPriority
-    await hub._event_queue.put(Event(
+    await hub.event_queue.put(Event(
         type=EventType.SHUTDOWN,
         payload={"restart": True, "reason": "API restart request"},
         priority=EventPriority.CRITICAL,
@@ -138,7 +138,7 @@ async def shutdown(request: web.Request) -> web.Response:
         return web.json_response({"error": "unauthorized"}, status=401)
     hub = request.app["hub"]
     from anima.models.event import Event, EventType, EventPriority
-    await hub._event_queue.put(Event(
+    await hub.event_queue.put(Event(
         type=EventType.SHUTDOWN,
         payload={"reason": "API shutdown request"},
         priority=EventPriority.CRITICAL,

@@ -6,8 +6,8 @@
   "build": {
     "frontendDist": "../../eva-ui/dist",
     "devUrl": "http://localhost:5173",
-    "beforeDevCommand": "cd ../../eva-ui && npm run dev",
-    "beforeBuildCommand": "cd ../../eva-ui && npm run build"
+    "beforeDevCommand": "",
+    "beforeBuildCommand": ""
   },
   "app": {
     "windows": [

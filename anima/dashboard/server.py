@@ -56,15 +56,19 @@ class DashboardServer:
             self._app.router.add_static("/desktop/static/", desktop_dir)
 
         # Vue SPA — serve from eva-ui/dist/ (production)
+        # IMPORTANT: SPA routes must NOT conflict with API routes.
+        # Use explicit SPA paths instead of catch-all to avoid 405 on POST /v1/*.
         ui_dist = Path(__file__).parent.parent.parent / "eva-ui" / "dist"
         if ui_dist.exists():
             self._app.router.add_static("/assets/", ui_dist / "assets")
 
-            async def _serve_spa(request):
-                if request.path.startswith(("/v1/", "/ws", "/api/", "/static/", "/desktop/")):
-                    raise web.HTTPNotFound()
+            async def _serve_spa(request: web.Request) -> web.Response:
                 return web.FileResponse(ui_dist / "index.html")
-            self._app.router.add_get("/{path:.*}", _serve_spa)
+
+            # Register SPA routes for Vue Router paths (not API paths)
+            for spa_path in ["/", "/login", "/soulscape", "/evolution",
+                             "/memory", "/network", "/settings"]:
+                self._app.router.add_get(spa_path, _serve_spa)
         else:
             # Fallback: show message if Vue SPA not built
             async def _no_ui(request):
