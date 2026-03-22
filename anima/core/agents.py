@@ -399,6 +399,51 @@ class AgentManager:
         finally:
             session.completed_at = time.time()
 
+    async def transfer_to(
+        self,
+        agent_type: str,
+        task: str,
+        conversation_context: list[dict] | None = None,
+        timeout: int = 300,
+    ) -> dict:
+        """Transfer conversation to a sub-agent that inherits context.
+
+        The sub-agent gets the recent conversation history and runs a focused
+        LLM loop. Parent suspends until the sub-agent completes.
+        Returns the sub-agent's result.
+        """
+        # Build context-aware prompt
+        context_text = ""
+        if conversation_context:
+            recent = conversation_context[-10:]  # Last 10 turns
+            context_lines = []
+            for msg in recent:
+                role = msg.get("role", "?")
+                content = msg.get("content", "")
+                if isinstance(content, str) and content.strip():
+                    context_lines.append(f"{role}: {content[:200]}")
+            if context_lines:
+                context_text = "Recent conversation:\n" + "\n".join(context_lines) + "\n\n"
+
+        full_prompt = f"{context_text}Task: {task}"
+
+        # Spawn internal agent with the enriched prompt
+        session = await self.spawn_internal(
+            prompt=full_prompt,
+            timeout=timeout,
+        )
+
+        # Wait for completion
+        result = await self.wait_for(session.id, timeout=timeout)
+
+        return {
+            "success": result.status == "completed",
+            "result": result.result or "",
+            "error": result.error or "",
+            "agent_id": session.id,
+            "status": result.status,
+        }
+
     @staticmethod
     def _format_tool_result(result: dict) -> str:
         if not result.get("success"):

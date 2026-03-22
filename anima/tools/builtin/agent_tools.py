@@ -83,6 +83,20 @@ async def _list_agents() -> dict:
     return _agent_manager.get_hierarchy()
 
 
+async def _transfer_to_agent(agent_type: str, task: str) -> dict:
+    """Transfer the current conversation to a specialized sub-agent."""
+    if not _agent_manager:
+        return {"success": False, "error": "Agent manager not initialized"}
+
+    # Get recent conversation context from the cognitive context
+    # (The agent_tools module has access to _agent_manager which has _llm_router)
+    return await _agent_manager.transfer_to(
+        agent_type=agent_type,
+        task=task,
+        timeout=300,
+    )
+
+
 # ── Tool specs ──
 
 def get_agent_tools() -> list[ToolSpec]:
@@ -167,5 +181,19 @@ def get_agent_tools() -> list[ToolSpec]:
             },
             risk_level=RiskLevel.SAFE,
             handler=_list_agents,
+        ),
+        ToolSpec(
+            name="transfer_to_agent",
+            description="Transfer conversation to a specialized sub-agent that inherits context. The sub-agent completes the task and returns results.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "agent_type": {"type": "string", "description": "Type: researcher, coder, analyst"},
+                    "task": {"type": "string", "description": "Task description for the sub-agent"},
+                },
+                "required": ["agent_type", "task"],
+            },
+            risk_level=RiskLevel.MEDIUM,
+            handler=_transfer_to_agent,
         ),
     ]

@@ -89,6 +89,14 @@ async def _init_core(config: dict) -> dict:
     for tool in get_audit_tools():
         tool_registry.register(tool)
 
+    # Register document RAG tools
+    from anima.tools.builtin.document_tools import get_document_tools, set_document_store
+    from anima.memory.document_store import DocumentStore
+    doc_store = DocumentStore()
+    set_document_store(doc_store)
+    for tool in get_document_tools():
+        tool_registry.register(tool)
+
     # Register known remote nodes for cross-node communication
     from anima.tools.builtin.remote import register_node
     for node_cfg in get("network.remote_nodes", []):
@@ -119,6 +127,12 @@ async def _init_core(config: dict) -> dict:
                 cron_expr=cron_job["cron_expr"],
                 prompt=f"Run skill command: cd {cron_job['cwd']} && {cron_job['command']}",
             )
+
+    # Register skill management tools
+    from anima.tools.builtin.skill_management import get_skill_management_tools, set_skill_loader
+    set_skill_loader(skill_loader)
+    for tool in get_skill_management_tools():
+        tool_registry.register(tool)
 
     # ── MCP Server Integration ──
     mcp_manager = None
