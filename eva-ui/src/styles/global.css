@@ -1,6 +1,8 @@
 @import "tailwindcss";
 
-/* ── Eva Design System: 赛博芭蕾 ── */
+/* ── Eva Design System: Cyber Ballet (赛博芭蕾) ── */
+/* Typography: Sora (headings) + DM Sans (body) */
+@import url('https://fonts.googleapis.com/css2?family=Sora:wght@200;300;400;500;600;700&family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;1,9..40,400&family=JetBrains+Mono:wght@400;500&display=swap');
 
 :root {
   /* Emotion-driven (updated by useEmotion composable) */
@@ -12,36 +14,86 @@
   --glow-opacity: 0.2;
   --pulse-intensity: 0;
 
-  /* Static design tokens */
-  --eva-ice: hsl(200, 80%, 65%);
-  --eva-pink: hsl(330, 70%, 65%);
-  --eva-purple: hsl(270, 60%, 55%);
+  /* ── Color Palette ── */
+  --eva-ice: #66bbee;
+  --eva-ice-hsl: 200, 73%, 67%;
+  --eva-pink: #ee6688;
+  --eva-pink-hsl: 345, 80%, 67%;
+  --eva-purple: hsl(270, 60%, 60%);
   --eva-silver: hsl(220, 10%, 75%);
-  --eva-dark: hsl(220, 25%, 8%);
-  --eva-surface: hsla(210, 30%, 15%, 0.6);
-  --eva-glass: hsla(210, 30%, 20%, 0.4);
-  --eva-glass-border: hsla(200, 60%, 40%, 0.15);
-  --eva-text: hsl(210, 20%, 92%);
-  --eva-text-dim: hsl(210, 15%, 55%);
-  --eva-glow: hsla(200, 80%, 65%, var(--glow-opacity));
+  --eva-dark: hsl(222, 30%, 6%);
+  --eva-dark-mid: hsl(222, 25%, 10%);
 
+  /* ── Surface System ── */
+  --eva-surface: hsla(215, 28%, 12%, 0.65);
+  --eva-surface-elevated: hsla(215, 28%, 16%, 0.55);
+  --eva-glass: hsla(215, 28%, 18%, 0.35);
+  --eva-glass-hover: hsla(215, 28%, 22%, 0.45);
+  --eva-glass-border: hsla(var(--eva-ice-hsl), 0.1);
+  --eva-glass-border-hover: hsla(var(--eva-ice-hsl), 0.2);
+
+  /* ── Text ── */
+  --eva-text: hsl(210, 25%, 93%);
+  --eva-text-secondary: hsl(215, 15%, 65%);
+  --eva-text-dim: hsl(215, 12%, 45%);
+  --eva-glow: hsla(var(--eva-ice-hsl), var(--glow-opacity));
+
+  /* ── Radii ── */
+  --radius-sm: 8px;
   --radius: 12px;
   --radius-lg: 20px;
+  --radius-xl: 28px;
+
+  /* ── Transitions ── */
+  --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 
-* {
+/* ── Reset ── */
+*,
+*::before,
+*::after {
   margin: 0;
   padding: 0;
   box-sizing: border-box;
 }
 
+/* ── Body ── */
 body {
-  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-  background: hsl(var(--eva-bg-h), var(--eva-bg-s), var(--eva-bg-l));
+  font-family: 'DM Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font-size: 14px;
+  line-height: 1.6;
   color: var(--eva-text);
   overflow: hidden;
   height: 100vh;
+  background: var(--eva-dark);
   transition: background 2s ease;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Background gradient mesh */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: -2;
+  background:
+    radial-gradient(ellipse 80% 60% at 15% 80%, hsla(var(--eva-pink-hsl), 0.06) 0%, transparent 60%),
+    radial-gradient(ellipse 70% 50% at 85% 20%, hsla(var(--eva-ice-hsl), 0.08) 0%, transparent 55%),
+    radial-gradient(ellipse 90% 70% at 50% 50%, hsla(270, 50%, 40%, 0.04) 0%, transparent 50%);
+  pointer-events: none;
+}
+
+/* Subtle noise texture */
+body::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  opacity: 0.015;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  pointer-events: none;
 }
 
 #app {
@@ -49,43 +101,119 @@ body {
   display: flex;
 }
 
-/* Glass morphism */
+/* ── Headings use Sora ── */
+h1, h2, h3, h4, h5, h6 {
+  font-family: 'Sora', 'DM Sans', sans-serif;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+}
+
+/* ── Glass Morphism System ── */
 .glass {
   background: var(--eva-glass);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
+  backdrop-filter: blur(24px) saturate(1.2);
+  -webkit-backdrop-filter: blur(24px) saturate(1.2);
   border: 1px solid var(--eva-glass-border);
   border-radius: var(--radius);
+  transition: border-color 0.4s ease, background 0.4s ease;
+}
+
+.glass:hover {
+  border-color: var(--eva-glass-border-hover);
 }
 
 .glass-surface {
   background: var(--eva-surface);
-  backdrop-filter: blur(12px);
+  backdrop-filter: blur(16px) saturate(1.1);
+  -webkit-backdrop-filter: blur(16px) saturate(1.1);
   border: 1px solid var(--eva-glass-border);
   border-radius: var(--radius);
 }
 
-/* Breathing glow effect */
+.glass-elevated {
+  background: var(--eva-surface-elevated);
+  backdrop-filter: blur(20px) saturate(1.15);
+  -webkit-backdrop-filter: blur(20px) saturate(1.15);
+  border: 1px solid var(--eva-glass-border);
+  border-radius: var(--radius);
+  box-shadow:
+    0 4px 24px hsla(220, 50%, 5%, 0.4),
+    0 1px 2px hsla(220, 50%, 5%, 0.2),
+    inset 0 1px 0 hsla(var(--eva-ice-hsl), 0.04);
+}
+
+/* ── Breathing Glow ── */
 @keyframes breathe {
   0%, 100% { box-shadow: 0 0 20px var(--eva-glow); }
-  50% { box-shadow: 0 0 40px var(--eva-glow), 0 0 60px hsla(200, 80%, 65%, 0.05); }
+  50% { box-shadow: 0 0 40px var(--eva-glow), 0 0 80px hsla(var(--eva-ice-hsl), 0.03); }
 }
 
 .breathing {
   animation: breathe var(--breath-duration) ease-in-out infinite;
 }
 
-/* Scrollbar styling */
+/* ── Custom Scrollbar ── */
 ::-webkit-scrollbar {
-  width: 6px;
+  width: 5px;
 }
+
 ::-webkit-scrollbar-track {
   background: transparent;
 }
+
 ::-webkit-scrollbar-thumb {
-  background: hsla(200, 40%, 40%, 0.3);
-  border-radius: 3px;
+  background: hsla(var(--eva-ice-hsl), 0.15);
+  border-radius: 10px;
+  transition: background 0.3s;
 }
+
 ::-webkit-scrollbar-thumb:hover {
-  background: hsla(200, 40%, 40%, 0.5);
+  background: hsla(var(--eva-ice-hsl), 0.3);
+}
+
+/* Firefox scrollbar */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: hsla(var(--eva-ice-hsl), 0.15) transparent;
+}
+
+/* ── Focus System ── */
+:focus-visible {
+  outline: 2px solid hsla(var(--eva-ice-hsl), 0.5);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+/* ── Selection ── */
+::selection {
+  background: hsla(var(--eva-ice-hsl), 0.25);
+  color: var(--eva-text);
+}
+
+/* ── Interactive Primitives ── */
+button, [role="button"] {
+  font-family: 'DM Sans', sans-serif;
+  cursor: pointer;
+  border: none;
+  outline: none;
+  transition: all 0.25s var(--ease-out-expo);
+}
+
+button:active, [role="button"]:active {
+  transform: scale(0.97);
+}
+
+input, textarea {
+  font-family: 'DM Sans', sans-serif;
+}
+
+/* ── Utility: Fade Transition ── */
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.25s ease;
+}
+
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
 }

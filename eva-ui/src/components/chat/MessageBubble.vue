@@ -28,7 +28,12 @@ function renderMarkdown(text: string): string {
 
 <template>
   <div class="bubble-row" :class="{ 'user-row': isUser, 'eva-row': !isUser }">
-    <div class="bubble" :class="{ 'user-bubble': isUser, 'eva-bubble': !isUser, 'breathing': !isUser && !message.streaming }">
+    <!-- Eva avatar indicator (small dot, not emoji) -->
+    <div v-if="!isUser" class="eva-indicator">
+      <div class="eva-dot" />
+    </div>
+
+    <div class="bubble" :class="{ 'user-bubble': isUser, 'eva-bubble': !isUser }">
       <ProactiveTag v-if="isProactive" :source="message.proactive!.source" />
 
       <div class="bubble-content">
@@ -47,8 +52,22 @@ function renderMarkdown(text: string): string {
 <style scoped>
 .bubble-row {
   display: flex;
-  margin-bottom: 16px;
-  padding: 0 20px;
+  align-items: flex-end;
+  gap: 8px;
+  margin-bottom: 18px;
+  padding: 0 24px;
+  animation: bubbleEnter 0.3s var(--ease-out-expo) both;
+}
+
+@keyframes bubbleEnter {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .user-row {
@@ -57,10 +76,39 @@ function renderMarkdown(text: string): string {
 
 .eva-row {
   justify-content: flex-start;
+  max-width: 800px;
+  margin-left: auto;
+  margin-right: auto;
 }
 
+.user-row {
+  max-width: 800px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+/* Eva message indicator */
+.eva-indicator {
+  width: 24px;
+  height: 24px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 4px;
+}
+
+.eva-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 35%, var(--eva-ice), hsla(200, 50%, 35%, 1));
+  box-shadow: 0 0 8px hsla(var(--eva-ice-hsl), 0.3);
+}
+
+/* ── Bubble Base ── */
 .bubble {
-  max-width: 75%;
+  max-width: 70%;
   padding: 12px 16px;
   border-radius: 16px;
   position: relative;
@@ -68,29 +116,21 @@ function renderMarkdown(text: string): string {
 }
 
 .user-bubble {
-  background: hsla(200, 50%, 25%, 0.5);
+  background: hsla(var(--eva-ice-hsl), 0.1);
   backdrop-filter: blur(12px);
-  border: 1px solid hsla(200, 50%, 40%, 0.2);
+  border: 1px solid hsla(var(--eva-ice-hsl), 0.1);
   border-radius: 16px 16px 4px 16px;
 }
 
 .eva-bubble {
   background: var(--eva-glass);
-  backdrop-filter: blur(16px);
-  border: 1px solid var(--eva-glass-border);
+  backdrop-filter: blur(20px);
+  border: 1px solid hsla(var(--eva-ice-hsl), 0.08);
   border-radius: 16px 16px 16px 4px;
-  box-shadow: 0 0 20px hsla(200, 70%, 50%, var(--glow-opacity));
+  box-shadow: 0 2px 16px hsla(220, 50%, 5%, 0.3);
 }
 
-.eva-bubble.breathing {
-  animation: bubbleBreathe var(--breath-duration) ease-in-out infinite;
-}
-
-@keyframes bubbleBreathe {
-  0%, 100% { box-shadow: 0 0 15px hsla(200, 70%, 50%, 0.08); }
-  50% { box-shadow: 0 0 30px hsla(200, 70%, 50%, 0.15); }
-}
-
+/* ── Content ── */
 .bubble-content {
   font-size: 14px;
   line-height: 1.7;
@@ -100,29 +140,44 @@ function renderMarkdown(text: string): string {
 .bubble-time {
   display: block;
   text-align: right;
+  font-family: 'DM Sans', sans-serif;
   font-size: 10px;
   color: var(--eva-text-dim);
   margin-top: 6px;
-  opacity: 0.5;
+  opacity: 0;
+  transition: opacity 0.25s ease;
 }
 
+.bubble:hover .bubble-time {
+  opacity: 0.6;
+}
+
+/* ── Code Blocks ── */
 :deep(.code-block) {
-  background: hsla(220, 20%, 10%, 0.6);
-  border-radius: 8px;
-  padding: 12px;
-  margin: 8px 0;
+  background: hsla(222, 25%, 8%, 0.7);
+  border-radius: var(--radius-sm);
+  padding: 14px 16px;
+  margin: 10px 0;
   overflow-x: auto;
   font-family: 'JetBrains Mono', 'Fira Code', monospace;
-  font-size: 13px;
-  line-height: 1.5;
-  border: 1px solid hsla(200, 30%, 30%, 0.2);
+  font-size: 12.5px;
+  line-height: 1.6;
+  border: 1px solid hsla(var(--eva-ice-hsl), 0.06);
+  color: hsla(var(--eva-ice-hsl), 0.85);
 }
 
 :deep(.inline-code) {
-  background: hsla(220, 20%, 20%, 0.5);
-  padding: 2px 6px;
+  background: hsla(222, 20%, 18%, 0.6);
+  padding: 2px 7px;
   border-radius: 4px;
   font-family: 'JetBrains Mono', monospace;
-  font-size: 13px;
+  font-size: 12.5px;
+  color: var(--eva-ice);
+  border: 1px solid hsla(var(--eva-ice-hsl), 0.06);
+}
+
+:deep(strong) {
+  font-weight: 600;
+  color: var(--eva-text);
 }
 </style>

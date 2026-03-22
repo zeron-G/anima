@@ -21,11 +21,13 @@ defineProps<{ text: string }>()
   height: 1em;
   background: var(--eva-ice);
   margin-left: 1px;
-  animation: blink 1s step-end infinite;
+  animation: cursorBlink 1s step-end infinite;
   vertical-align: text-bottom;
+  border-radius: 1px;
+  box-shadow: 0 0 6px hsla(var(--eva-ice-hsl), 0.4);
 }
 
-@keyframes blink {
+@keyframes cursorBlink {
   50% { opacity: 0; }
 }
 </style>

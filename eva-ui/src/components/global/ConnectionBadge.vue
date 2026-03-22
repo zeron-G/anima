@@ -17,34 +17,36 @@ import { ws } from '../../api/websocket'
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 4px 10px;
-  border-radius: 16px;
-  background: hsla(0, 60%, 20%, 0.6);
-  backdrop-filter: blur(8px);
-  border: 1px solid hsla(0, 60%, 40%, 0.2);
-  font-size: 11px;
-  color: hsla(0, 60%, 70%, 0.8);
+  padding: 4px 12px;
+  border-radius: 20px;
+  background: hsla(0, 40%, 12%, 0.6);
+  backdrop-filter: blur(12px);
+  border: 1px solid hsla(0, 40%, 30%, 0.15);
+  font-family: 'DM Sans', sans-serif;
+  font-size: 10px;
+  letter-spacing: 0.03em;
+  color: hsla(0, 50%, 65%, 0.8);
   z-index: 1000;
   transition: all 0.5s ease;
 }
 
 .connection-badge.connected {
-  background: hsla(140, 40%, 15%, 0.6);
-  border-color: hsla(140, 40%, 40%, 0.2);
-  color: hsla(140, 40%, 65%, 0.8);
+  background: hsla(150, 30%, 10%, 0.5);
+  border-color: hsla(150, 30%, 30%, 0.15);
+  color: hsla(150, 40%, 60%, 0.7);
 }
 
 .status-dot {
-  width: 6px;
-  height: 6px;
+  width: 5px;
+  height: 5px;
   border-radius: 50%;
-  background: hsl(0, 60%, 50%);
-  transition: background 0.5s ease;
+  background: hsl(0, 50%, 50%);
+  transition: all 0.5s ease;
 }
 
 .connected .status-dot {
-  background: hsl(140, 50%, 50%);
-  box-shadow: 0 0 6px hsl(140, 50%, 50%);
+  background: hsl(150, 50%, 50%);
+  box-shadow: 0 0 6px hsla(150, 50%, 50%, 0.5);
 }
 
 .status-text {

@@ -2,29 +2,21 @@
 import { computed } from 'vue'
 import { useEmotionStore } from '@/stores/emotionStore'
 import { useRoute } from 'vue-router'
+import EvaAvatar from './EvaAvatar.vue'
 
 const emotion = useEmotionStore()
 const route = useRoute()
 
 // Hide on chat page (Eva is in the chat itself there)
 const visible = computed(() => route.name !== 'chat')
-
-const expression = computed(() => {
-  const e = emotion.current
-  if (e.concern > 0.6) return '\uD83D\uDE1F'
-  if (e.engagement > 0.75 && e.curiosity > 0.7) return '\u2728'
-  if (e.engagement > 0.7) return '\uD83D\uDE0A'
-  if (e.confidence > 0.8) return '\uD83D\uDE24'
-  if (e.curiosity > 0.7) return '\uD83E\uDD14'
-  return '\uD83D\uDE0C'
-})
 </script>
 
 <template>
   <Transition name="presence">
-    <div v-if="visible" class="eva-presence breathing">
-      <div class="presence-avatar">
-        <span class="avatar-face">{{ expression }}</span>
+    <div v-if="visible" class="eva-presence">
+      <div class="presence-avatar-wrap">
+        <EvaAvatar :size="56" />
+        <div class="presence-ring" />
       </div>
       <div class="presence-mood">{{ emotion.current.mood_label }}</div>
     </div>
@@ -40,43 +32,57 @@ const expression = computed(() => {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 4px;
+  gap: 6px;
   cursor: pointer;
-  transition: all 0.3s;
+  transition: all 0.35s var(--ease-out-expo);
 }
 
 .eva-presence:hover {
-  transform: scale(1.1);
+  transform: translateY(-2px);
 }
 
-.presence-avatar {
+.eva-presence:hover .presence-ring {
+  border-color: hsla(var(--eva-ice-hsl), 0.3);
+  box-shadow: 0 0 24px hsla(var(--eva-ice-hsl), 0.15);
+}
+
+.presence-avatar-wrap {
+  position: relative;
   width: 56px;
   height: 56px;
-  border-radius: 50%;
-  background: var(--eva-glass);
-  backdrop-filter: blur(12px);
-  border: 1px solid var(--eva-glass-border);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  box-shadow: 0 0 20px hsla(200, 60%, 50%, var(--glow-opacity));
 }
 
-.avatar-face {
-  font-size: 28px;
+.presence-ring {
+  position: absolute;
+  inset: -3px;
+  border-radius: 50%;
+  border: 1px solid hsla(var(--eva-ice-hsl), 0.15);
+  box-shadow: 0 0 16px hsla(var(--eva-ice-hsl), var(--glow-opacity));
+  animation: ringBreathe var(--breath-duration) ease-in-out infinite;
+  pointer-events: none;
+}
+
+@keyframes ringBreathe {
+  0%, 100% { box-shadow: 0 0 12px hsla(var(--eva-ice-hsl), 0.08); }
+  50% { box-shadow: 0 0 24px hsla(var(--eva-ice-hsl), 0.18); }
 }
 
 .presence-mood {
+  font-family: 'Sora', sans-serif;
   font-size: 10px;
+  font-weight: 400;
+  letter-spacing: 0.05em;
   color: var(--eva-text-dim);
   text-transform: capitalize;
   background: var(--eva-surface);
-  padding: 2px 8px;
-  border-radius: 8px;
+  backdrop-filter: blur(12px);
+  padding: 3px 10px;
+  border-radius: 10px;
+  border: 1px solid hsla(var(--eva-ice-hsl), 0.06);
 }
 
 .presence-enter-active, .presence-leave-active {
-  transition: all 0.3s ease;
+  transition: all 0.4s var(--ease-out-expo);
 }
 .presence-enter-from, .presence-leave-to {
   opacity: 0;

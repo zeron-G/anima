@@ -67,6 +67,7 @@ onMounted(() => {
   width: 100vw;
   height: 100vh;
   overflow: hidden;
+  position: relative;
 }
 
 .app-content {
@@ -78,14 +79,14 @@ onMounted(() => {
 /* Page transitions */
 .page-enter-active,
 .page-leave-active {
-  transition: opacity 0.3s ease, transform 0.3s ease;
+  transition: opacity 0.3s ease, transform 0.3s var(--ease-out-expo);
 }
 .page-enter-from {
   opacity: 0;
-  transform: translateY(10px);
+  transform: translateY(8px);
 }
 .page-leave-to {
   opacity: 0;
-  transform: translateY(-10px);
+  transform: translateY(-8px);
 }
 </style>

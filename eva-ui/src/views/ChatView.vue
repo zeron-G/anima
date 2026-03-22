@@ -76,12 +76,22 @@ onMounted(() => {
 
 <template>
   <div class="chat-view">
-    <!-- Status bar -->
-    <div class="chat-header glass">
-      <div class="header-info">
-        <div class="mood-indicator">
-          <div class="mood-dot" />
-          <span class="mood-label">{{ emotion.current.mood_label }}</span>
+    <!-- Header -->
+    <div class="chat-header">
+      <div class="header-content">
+        <div class="header-left">
+          <h2 class="header-title">Eva</h2>
+          <div class="header-divider" />
+          <div class="mood-indicator">
+            <div class="mood-dot" />
+            <span class="mood-label">{{ emotion.current.mood_label }}</span>
+          </div>
+        </div>
+        <div class="header-right">
+          <span class="engagement-label">engagement</span>
+          <div class="engagement-bar">
+            <div class="engagement-fill" :style="{ width: `${emotion.current.engagement * 100}%` }" />
+          </div>
         </div>
       </div>
     </div>
@@ -90,10 +100,13 @@ onMounted(() => {
     <div ref="messagesRef" class="messages-container" @scroll="onScroll">
       <div class="messages-inner">
         <div v-if="chat.messages.length === 0" class="empty-state">
-          <div class="empty-icon-circle">
-            <div class="empty-pulse" />
+          <div class="empty-orb-wrap">
+            <div class="empty-orb" />
+            <div class="empty-orb-ring" />
+            <div class="empty-orb-ring ring-2" />
           </div>
-          <p class="empty-text">和 Eva 说点什么吧</p>
+          <p class="empty-text">Start a conversation with Eva</p>
+          <p class="empty-hint">Enter to send / Shift+Enter for new line</p>
         </div>
 
         <MessageBubble
@@ -105,14 +118,18 @@ onMounted(() => {
         <!-- Scroll to bottom button -->
         <transition name="fade">
           <button v-if="userScrolled" class="scroll-btn" @click="userScrolled = false; scrollToBottom()">
-            &#x2193; 新消息
+            <!-- Down arrow SVG -->
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+              <path d="M12 5v14M5 12l7 7 7-7"/>
+            </svg>
+            <span>New messages</span>
           </button>
         </transition>
       </div>
     </div>
 
     <!-- Input area -->
-    <div class="input-area glass">
+    <div class="input-area">
       <div class="input-wrapper">
         <textarea
           ref="inputRef"
@@ -120,7 +137,7 @@ onMounted(() => {
           class="chat-input"
           :disabled="isStreaming"
           rows="1"
-          placeholder="和 Eva 说点什么... (Enter 发送, Shift+Enter 换行)"
+          placeholder="Message Eva..."
           @keydown="handleKeydown"
           @input="autoResize"
         />
@@ -130,8 +147,14 @@ onMounted(() => {
           :disabled="!inputText.trim() || isStreaming"
           @click="handleSend"
         >
-          <span v-if="isStreaming" class="sending-indicator">&#x25CF;&#x25CF;&#x25CF;</span>
-          <span v-else>&uarr;</span>
+          <!-- Send arrow SVG -->
+          <svg v-if="!isStreaming" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 19V5M5 12l7-7 7 7"/>
+          </svg>
+          <!-- Streaming dots -->
+          <span v-else class="sending-dots">
+            <span class="dot" /><span class="dot" /><span class="dot" />
+          </span>
         </button>
       </div>
     </div>
@@ -146,22 +169,42 @@ onMounted(() => {
   background: transparent;
 }
 
+/* ── Header ── */
 .chat-header {
   flex-shrink: 0;
-  padding: 12px 20px;
+  padding: 0 24px;
+  border-bottom: 1px solid hsla(var(--eva-ice-hsl), 0.06);
+  background: hsla(222, 30%, 6%, 0.4);
+  backdrop-filter: blur(16px);
+}
+
+.header-content {
+  max-width: 800px;
+  margin: 0 auto;
+  padding: 14px 0;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  border-radius: 0;
-  border-top: none;
-  border-left: none;
-  border-right: none;
 }
 
-.header-info {
+.header-left {
   display: flex;
   align-items: center;
   gap: 12px;
+}
+
+.header-title {
+  font-family: 'Sora', sans-serif;
+  font-size: 16px;
+  font-weight: 500;
+  color: var(--eva-text);
+  letter-spacing: 0.02em;
+}
+
+.header-divider {
+  width: 1px;
+  height: 16px;
+  background: hsla(var(--eva-ice-hsl), 0.12);
 }
 
 .mood-indicator {
@@ -171,24 +214,57 @@ onMounted(() => {
 }
 
 .mood-dot {
-  width: 8px;
-  height: 8px;
+  width: 6px;
+  height: 6px;
   border-radius: 50%;
   background: var(--eva-ice);
+  box-shadow: 0 0 8px hsla(var(--eva-ice-hsl), 0.4);
   animation: moodBreathe var(--breath-duration) ease-in-out infinite;
 }
 
 @keyframes moodBreathe {
-  0%, 100% { opacity: 0.6; transform: scale(1); }
-  50% { opacity: 1; transform: scale(1.3); }
+  0%, 100% { opacity: 0.5; }
+  50% { opacity: 1; }
 }
 
 .mood-label {
-  font-size: 13px;
+  font-family: 'DM Sans', sans-serif;
+  font-size: 12px;
   color: var(--eva-text-dim);
   text-transform: capitalize;
+  letter-spacing: 0.02em;
 }
 
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.engagement-label {
+  font-family: 'Sora', sans-serif;
+  font-size: 10px;
+  color: var(--eva-text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+}
+
+.engagement-bar {
+  width: 48px;
+  height: 3px;
+  border-radius: 2px;
+  background: hsla(var(--eva-ice-hsl), 0.1);
+  overflow: hidden;
+}
+
+.engagement-fill {
+  height: 100%;
+  border-radius: 2px;
+  background: linear-gradient(90deg, var(--eva-ice), hsla(var(--eva-pink-hsl), 0.7));
+  transition: width 1s ease;
+}
+
+/* ── Messages ── */
 .messages-container {
   flex: 1;
   overflow-y: auto;
@@ -203,73 +279,102 @@ onMounted(() => {
   justify-content: flex-end;
 }
 
+/* ── Empty State ── */
 .empty-state {
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  padding: 60px 0;
-  opacity: 0.4;
+  padding: 80px 0;
 }
 
-.empty-icon-circle {
-  width: 64px;
-  height: 64px;
-  border-radius: 50%;
-  border: 1px solid var(--eva-glass-border);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  margin-bottom: 16px;
+.empty-orb-wrap {
   position: relative;
+  width: 80px;
+  height: 80px;
+  margin-bottom: 24px;
 }
 
-.empty-pulse {
-  width: 24px;
-  height: 24px;
+.empty-orb {
+  position: absolute;
+  inset: 20px;
   border-radius: 50%;
-  background: var(--eva-ice);
-  opacity: 0.3;
-  animation: emptyPulse 3s ease-in-out infinite;
+  background: radial-gradient(circle at 35% 35%, hsla(var(--eva-ice-hsl), 0.6), hsla(200, 50%, 20%, 0.8));
+  animation: orbFloat 4s ease-in-out infinite;
 }
 
-@keyframes emptyPulse {
-  0%, 100% { transform: scale(0.8); opacity: 0.2; }
-  50% { transform: scale(1.1); opacity: 0.4; }
+.empty-orb-ring {
+  position: absolute;
+  inset: 8px;
+  border-radius: 50%;
+  border: 1px solid hsla(var(--eva-ice-hsl), 0.12);
+  animation: ringRotate 8s linear infinite;
+}
+
+.empty-orb-ring.ring-2 {
+  inset: 0;
+  border-color: hsla(var(--eva-pink-hsl), 0.08);
+  animation-duration: 12s;
+  animation-direction: reverse;
+}
+
+@keyframes orbFloat {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-6px); }
+}
+
+@keyframes ringRotate {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
 }
 
 .empty-text {
-  font-size: 16px;
-  color: var(--eva-text-dim);
+  font-family: 'Sora', sans-serif;
+  font-size: 15px;
+  font-weight: 400;
+  color: var(--eva-text-secondary);
+  margin-bottom: 6px;
 }
 
+.empty-hint {
+  font-size: 12px;
+  color: var(--eva-text-dim);
+  letter-spacing: 0.02em;
+}
+
+/* ── Scroll Button ── */
 .scroll-btn {
   position: sticky;
   bottom: 10px;
   align-self: center;
-  padding: 6px 16px;
-  border-radius: 16px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  border-radius: 20px;
   background: var(--eva-surface);
   backdrop-filter: blur(12px);
   border: 1px solid var(--eva-glass-border);
   color: var(--eva-ice);
-  font-size: 12px;
+  font-family: 'DM Sans', sans-serif;
+  font-size: 11px;
   cursor: pointer;
   z-index: 10;
-  transition: all 0.2s;
+  transition: all 0.25s var(--ease-out-expo);
 }
 
 .scroll-btn:hover {
-  background: hsla(200, 40%, 25%, 0.6);
+  background: hsla(var(--eva-ice-hsl), 0.1);
+  border-color: hsla(var(--eva-ice-hsl), 0.2);
 }
 
+/* ── Input Area ── */
 .input-area {
   flex-shrink: 0;
-  padding: 12px 20px;
-  border-radius: 0;
-  border-bottom: none;
-  border-left: none;
-  border-right: none;
+  padding: 12px 24px 16px;
+  background: hsla(222, 30%, 6%, 0.3);
+  backdrop-filter: blur(16px);
+  border-top: 1px solid hsla(var(--eva-ice-hsl), 0.06);
 }
 
 .input-wrapper {
@@ -278,55 +383,61 @@ onMounted(() => {
   gap: 10px;
   max-width: 800px;
   margin: 0 auto;
+  background: hsla(222, 25%, 10%, 0.5);
+  border: 1px solid hsla(var(--eva-ice-hsl), 0.08);
+  border-radius: var(--radius-lg);
+  padding: 4px 4px 4px 16px;
+  transition: border-color 0.35s ease, box-shadow 0.35s ease;
+}
+
+.input-wrapper:focus-within {
+  border-color: hsla(var(--eva-ice-hsl), 0.2);
+  box-shadow: 0 0 0 3px hsla(var(--eva-ice-hsl), 0.06), 0 0 20px hsla(var(--eva-ice-hsl), 0.05);
 }
 
 .chat-input {
   flex: 1;
-  background: hsla(220, 20%, 12%, 0.5);
-  border: 1px solid hsla(200, 30%, 30%, 0.2);
-  border-radius: 12px;
-  padding: 10px 14px;
+  background: transparent;
+  border: none;
+  padding: 10px 0;
   color: var(--eva-text);
+  font-family: 'DM Sans', sans-serif;
   font-size: 14px;
   line-height: 1.5;
   resize: none;
   outline: none;
-  transition: border-color 0.3s;
-  font-family: inherit;
   min-height: 42px;
   max-height: 150px;
 }
 
-.chat-input:focus {
-  border-color: hsla(200, 60%, 50%, 0.4);
-  box-shadow: 0 0 0 2px hsla(200, 60%, 50%, 0.1);
-}
-
 .chat-input::placeholder {
   color: var(--eva-text-dim);
-  opacity: 0.5;
+  opacity: 0.7;
 }
 
 .send-btn {
-  width: 40px;
-  height: 40px;
+  width: 38px;
+  height: 38px;
   border-radius: 50%;
   border: none;
-  background: hsla(200, 40%, 25%, 0.4);
+  background: hsla(var(--eva-ice-hsl), 0.08);
   color: var(--eva-text-dim);
-  font-size: 18px;
-  cursor: pointer;
-  transition: all 0.2s;
   display: flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
+  transition: all 0.25s var(--ease-out-expo);
 }
 
 .send-btn.active {
   background: var(--eva-ice);
   color: var(--eva-dark);
-  box-shadow: 0 0 15px hsla(200, 70%, 50%, 0.3);
+  box-shadow: 0 0 16px hsla(var(--eva-ice-hsl), 0.3);
+}
+
+.send-btn.active:hover {
+  box-shadow: 0 0 24px hsla(var(--eva-ice-hsl), 0.4);
+  transform: scale(1.05);
 }
 
 .send-btn:disabled {
@@ -334,18 +445,32 @@ onMounted(() => {
   cursor: not-allowed;
 }
 
-.sending-indicator {
-  font-size: 10px;
-  animation: pulse 1s infinite;
+/* Streaming dots */
+.sending-dots {
+  display: flex;
+  gap: 3px;
+  align-items: center;
 }
 
-@keyframes pulse {
-  0%, 100% { opacity: 0.3; }
-  50% { opacity: 1; }
+.sending-dots .dot {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--eva-ice);
+  animation: dotPulse 1.2s ease-in-out infinite;
 }
 
+.sending-dots .dot:nth-child(2) { animation-delay: 0.15s; }
+.sending-dots .dot:nth-child(3) { animation-delay: 0.3s; }
+
+@keyframes dotPulse {
+  0%, 60%, 100% { opacity: 0.2; transform: scale(0.8); }
+  30% { opacity: 1; transform: scale(1.1); }
+}
+
+/* ── Fade Transition ── */
 .fade-enter-active, .fade-leave-active {
-  transition: opacity 0.2s ease;
+  transition: opacity 0.25s ease;
 }
 .fade-enter-from, .fade-leave-to {
   opacity: 0;

@@ -2,6 +2,7 @@
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import client from '@/api/client'
+import EvaAvatar from '@/components/global/EvaAvatar.vue'
 
 const router = useRouter()
 const password = ref('')
@@ -54,45 +55,54 @@ onMounted(checkBackend)
 
 <template>
   <div class="login-view">
-    <div class="login-card glass">
-      <!-- Eva Logo -->
+    <!-- Background gradient accent -->
+    <div class="login-bg-accent" />
+
+    <div class="login-card glass-elevated">
+      <!-- Eva Logo / Avatar -->
       <div class="login-header">
-        <div class="eva-logo">
-          <div class="logo-orb breathing" />
-          <span class="logo-text">Eva</span>
+        <div class="logo-avatar-wrap">
+          <EvaAvatar :size="72" />
+          <div class="logo-ring" />
         </div>
-        <p class="login-subtitle">ANIMA — AI Life System</p>
+        <h1 class="logo-text">Eva</h1>
+        <p class="login-subtitle">ANIMA Life System</p>
       </div>
 
       <!-- Backend checking -->
       <div v-if="checking" class="login-status">
         <div class="spinner" />
-        <p>连接后端...</p>
+        <p class="status-msg">Connecting to backend...</p>
       </div>
 
       <!-- Backend not running -->
       <div v-else-if="!backendReady" class="login-status error-state">
-        <p class="status-title">Eva 后端未运行</p>
-        <p class="status-hint">请在终端执行：</p>
+        <p class="status-title">Backend Offline</p>
+        <p class="status-hint">Run in terminal:</p>
         <code class="status-code">python -m anima</code>
         <div class="retry-indicator">
           <div class="spinner small" />
-          <span>自动重试中...</span>
+          <span>Auto-retrying...</span>
         </div>
       </div>
 
       <!-- Auth form -->
       <div v-else-if="authRequired" class="login-form">
-        <input
-          v-model="password"
-          type="password"
-          placeholder="密码"
-          class="login-input"
-          @keydown="handleKeydown"
-          autofocus
-        />
+        <div class="input-group">
+          <input
+            v-model="password"
+            type="password"
+            placeholder="Password"
+            class="login-input"
+            @keydown="handleKeydown"
+            autofocus
+          />
+        </div>
         <button class="login-btn" @click="login">
-          进入 Eva 的世界
+          <span class="btn-text">Enter</span>
+          <svg class="btn-arrow" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M5 12h14M12 5l7 7-7 7"/>
+          </svg>
         </button>
         <p v-if="error" class="login-error">{{ error }}</p>
       </div>
@@ -106,47 +116,76 @@ onMounted(checkBackend)
   display: flex;
   align-items: center;
   justify-content: center;
-  background: radial-gradient(ellipse at center, hsla(200, 60%, 12%, 1) 0%, hsla(220, 25%, 6%, 1) 100%);
+  position: relative;
+  overflow: hidden;
+}
+
+.login-bg-accent {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(ellipse 50% 40% at 50% 40%, hsla(var(--eva-ice-hsl), 0.07) 0%, transparent 60%),
+    radial-gradient(ellipse 40% 30% at 30% 70%, hsla(var(--eva-pink-hsl), 0.04) 0%, transparent 50%);
+  pointer-events: none;
 }
 
 .login-card {
-  width: 380px;
-  padding: 40px 32px;
+  width: 400px;
+  padding: 48px 36px 40px;
   text-align: center;
+  position: relative;
+  z-index: 1;
 }
 
+/* ── Header / Logo ── */
 .login-header {
-  margin-bottom: 32px;
-}
-
-.eva-logo {
+  margin-bottom: 36px;
   display: flex;
+  flex-direction: column;
   align-items: center;
-  justify-content: center;
-  gap: 12px;
-  margin-bottom: 8px;
 }
 
-.logo-orb {
-  width: 32px;
-  height: 32px;
+.logo-avatar-wrap {
+  position: relative;
+  width: 72px;
+  height: 72px;
+  margin-bottom: 16px;
+}
+
+.logo-ring {
+  position: absolute;
+  inset: -4px;
   border-radius: 50%;
-  background: radial-gradient(circle at 30% 30%, var(--eva-ice), hsla(200, 60%, 30%, 0.6));
+  border: 1px solid hsla(var(--eva-ice-hsl), 0.15);
+  box-shadow: 0 0 20px hsla(var(--eva-ice-hsl), 0.1);
+  pointer-events: none;
+  animation: loginRingBreathe 4s ease-in-out infinite;
+}
+
+@keyframes loginRingBreathe {
+  0%, 100% { box-shadow: 0 0 15px hsla(var(--eva-ice-hsl), 0.08); }
+  50% { box-shadow: 0 0 30px hsla(var(--eva-ice-hsl), 0.18); }
 }
 
 .logo-text {
-  font-size: 32px;
-  font-weight: 200;
-  color: var(--eva-ice);
-  letter-spacing: 4px;
+  font-family: 'Sora', sans-serif;
+  font-size: 28px;
+  font-weight: 300;
+  color: var(--eva-text);
+  letter-spacing: 0.15em;
+  margin-bottom: 4px;
 }
 
 .login-subtitle {
-  font-size: 13px;
+  font-family: 'Sora', sans-serif;
+  font-size: 11px;
+  font-weight: 400;
   color: var(--eva-text-dim);
-  letter-spacing: 2px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
 }
 
+/* ── Status ── */
 .login-status {
   display: flex;
   flex-direction: column;
@@ -156,20 +195,27 @@ onMounted(checkBackend)
   font-size: 14px;
 }
 
+.status-msg {
+  font-size: 13px;
+}
+
 .status-title {
-  font-size: 16px;
+  font-family: 'Sora', sans-serif;
+  font-size: 15px;
+  font-weight: 500;
   color: var(--eva-text);
 }
 
 .status-hint {
-  font-size: 13px;
+  font-size: 12px;
 }
 
 .status-code {
   display: block;
-  padding: 8px 16px;
-  background: hsla(220, 20%, 10%, 0.5);
-  border-radius: 6px;
+  padding: 10px 20px;
+  background: hsla(222, 25%, 8%, 0.6);
+  border-radius: var(--radius-sm);
+  border: 1px solid hsla(var(--eva-ice-hsl), 0.06);
   font-family: 'JetBrains Mono', monospace;
   font-size: 13px;
   color: var(--eva-ice);
@@ -179,15 +225,15 @@ onMounted(checkBackend)
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 12px;
+  font-size: 11px;
   color: var(--eva-text-dim);
   opacity: 0.6;
 }
 
 .spinner {
-  width: 24px;
-  height: 24px;
-  border: 2px solid hsla(200, 60%, 50%, 0.2);
+  width: 22px;
+  height: 22px;
+  border: 2px solid hsla(var(--eva-ice-hsl), 0.12);
   border-top-color: var(--eva-ice);
   border-radius: 50%;
   animation: spin 1s linear infinite;
@@ -203,49 +249,82 @@ onMounted(checkBackend)
   to { transform: rotate(360deg); }
 }
 
+/* ── Auth Form ── */
 .login-form {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 14px;
+}
+
+.input-group {
+  position: relative;
 }
 
 .login-input {
   width: 100%;
-  padding: 12px 16px;
-  background: hsla(220, 20%, 12%, 0.5);
-  border: 1px solid hsla(200, 30%, 30%, 0.2);
-  border-radius: 10px;
+  padding: 14px 20px;
+  background: hsla(222, 25%, 10%, 0.5);
+  border: 1px solid hsla(var(--eva-ice-hsl), 0.08);
+  border-radius: var(--radius);
   color: var(--eva-text);
+  font-family: 'DM Sans', sans-serif;
   font-size: 15px;
   outline: none;
-  transition: border-color 0.3s;
+  transition: border-color 0.3s ease, box-shadow 0.3s ease;
   text-align: center;
   letter-spacing: 4px;
 }
 
 .login-input:focus {
-  border-color: hsla(200, 60%, 50%, 0.4);
+  border-color: hsla(var(--eva-ice-hsl), 0.25);
+  box-shadow: 0 0 0 3px hsla(var(--eva-ice-hsl), 0.06);
+}
+
+.login-input::placeholder {
+  color: var(--eva-text-dim);
+  letter-spacing: 0.05em;
+  opacity: 0.6;
 }
 
 .login-btn {
-  padding: 12px;
-  background: hsla(200, 50%, 35%, 0.5);
-  border: 1px solid hsla(200, 50%, 50%, 0.2);
-  border-radius: 10px;
-  color: var(--eva-ice);
-  font-size: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 14px;
+  background: hsla(var(--eva-ice-hsl), 0.12);
+  border: 1px solid hsla(var(--eva-ice-hsl), 0.15);
+  border-radius: var(--radius);
   cursor: pointer;
-  transition: all 0.3s;
-  letter-spacing: 2px;
+  transition: all 0.3s var(--ease-out-expo);
 }
 
 .login-btn:hover {
-  background: hsla(200, 50%, 40%, 0.6);
-  box-shadow: 0 0 20px hsla(200, 60%, 50%, 0.15);
+  background: hsla(var(--eva-ice-hsl), 0.18);
+  border-color: hsla(var(--eva-ice-hsl), 0.25);
+  box-shadow: 0 0 24px hsla(var(--eva-ice-hsl), 0.1);
+}
+
+.btn-text {
+  font-family: 'Sora', sans-serif;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--eva-ice);
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+}
+
+.btn-arrow {
+  color: var(--eva-ice);
+  transition: transform 0.25s var(--ease-out-expo);
+}
+
+.login-btn:hover .btn-arrow {
+  transform: translateX(3px);
 }
 
 .login-error {
-  font-size: 13px;
-  color: hsl(0, 60%, 60%);
+  font-size: 12px;
+  color: var(--eva-pink);
 }
 </style>
