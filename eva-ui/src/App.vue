@@ -1,11 +1,18 @@
 <script setup lang="ts">
 import { onMounted, watch } from 'vue'
 import { useEmotionStore } from './stores/emotionStore'
+import { useStatusStore } from './stores/statusStore'
+import { useThinkingStore } from './stores/thinkingStore'
+import { useChatStore } from './stores/chatStore'
 import { ws } from './api/websocket'
 import OrbitNav from './components/global/OrbitNav.vue'
 import ConnectionBadge from './components/global/ConnectionBadge.vue'
+import ThinkingStream from './components/global/ThinkingStream.vue'
 
 const emotion = useEmotionStore()
+const status = useStatusStore()
+const thinking = useThinkingStore()
+const chat = useChatStore()
 
 // Apply emotion CSS variables to root
 watch(() => emotion.cssVars, (vars) => {
@@ -22,7 +29,18 @@ onMounted(() => {
   // Route WS messages to stores
   ws.on('heartbeat', (msg) => {
     if (msg.data.emotion) emotion.update(msg.data.emotion)
+    status.update(msg.data)
   })
+  ws.on('stream', (msg) => {
+    chat.appendStream(msg.data.correlation_id, msg.data.text || '', msg.data.done || false)
+  })
+  ws.on('tool_call', (msg) => chat.addToolCall(msg.data))
+  ws.on('proactive', (msg) => chat.addProactive(msg.data))
+  ws.on('thinking', (msg) => thinking.add(msg.data))
+  ws.on('activity', (msg) => status.addActivity(msg.data))
+  ws.on('evolution', (msg) => status.updateEvolution(msg.data))
+  ws.on('emotion_shift', (msg) => emotion.shift(msg.data))
+  ws.on('node_event', (msg) => status.updateNode(msg.data))
 })
 </script>
 
@@ -36,6 +54,7 @@ onMounted(() => {
         </transition>
       </router-view>
     </main>
+    <ThinkingStream />
     <ConnectionBadge />
   </div>
 </template>
