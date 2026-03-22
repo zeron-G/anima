@@ -338,6 +338,12 @@ async def _update_personality(
     if file not in ("personality", "relationship"):
         return {"success": False, "error": "file must be 'personality' or 'relationship'"}
 
+    from anima.core.governance import get_governance
+    gov = get_governance()
+    allowed, reason = gov.check_personality_update(file)
+    if not allowed:
+        return {"success": False, "error": f"Governance denied: {reason}"}
+
     agent = agent_dir()
     target = agent / "identity" / f"{file}.md"
     if not target.exists():

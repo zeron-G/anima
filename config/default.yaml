@@ -35,8 +35,8 @@ perception:
 
 # ── LLM ──
 llm:
-  tier1: { model: "codex/gpt-5.3-codex", max_tokens: 16384, max_context: 200000 }
-  tier2: { model: "codex/gpt-5.3-codex", max_tokens: 16384, max_context: 200000 }
+  tier1: { model: "claude-opus-4-6", max_tokens: 16384, max_context: 200000 }
+  tier2: { model: "claude-sonnet-4-6", max_tokens: 16384, max_context: 200000 }
   # Model prefix routing:
   #   "codex/..."           → Codex OAuth (ChatGPT subscription, free)
   #   "claude-opus-4-6"     → Anthropic API (OAuth/API key)
@@ -132,6 +132,10 @@ channels:
 # ── Dashboard ──
 dashboard:
   port: 8420
+
+# ── Governance ──
+governance:
+  default_mode: "active"
 
 # ── System ──
 shutdown:

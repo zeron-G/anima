@@ -136,13 +136,18 @@ class _Layer:
 
 
 # The six layers in priority order.  Higher-priority layers are
-# allocated first; conversation is always last and gets the remainder.
+# allocated first using greedy fill; conversation is always last
+# and gets the remainder.
+#
+# hard_cap semantics:
+#   int value  → allocate min(actual_size, hard_cap, remaining)
+#   None       → greedy: allocate as much as available
 _LAYERS: list[_Layer] = [
     _Layer("identity",      min_tokens=300,  max_tokens=800),
     _Layer("rules",         min_tokens=300,  max_tokens=600),
+    _Layer("tools",         min_tokens=0,    max_tokens=None),
+    _Layer("memory",        min_tokens=200,  max_tokens=None),
     _Layer("context",       min_tokens=200,  max_tokens=1000),
-    _Layer("memory",        min_tokens=200,  max_tokens=2000),
-    _Layer("tools",         min_tokens=0,    max_tokens=1500),
     _Layer("conversation",  min_tokens=500,  max_tokens=None),
 ]
 
@@ -236,58 +241,42 @@ class TokenBudget:
     # -------------------------------------------------------------- #
 
     def _allocate(self, sections: dict[str, str]) -> dict[str, str]:
-        """Two-pass allocation: minimums first, then proportional fill."""
+        """Priority-ordered greedy fill allocation.
+
+        For each layer in priority order:
+          - bounded (hard cap): allocate min(actual_size, hard_cap, remaining)
+          - unbounded (greedy): allocate min(actual_size, remaining)
+        Conversation is always last and gets whatever remains.
+        """
         raw_sizes: dict[str, int] = {}
         for layer in _LAYERS:
             text = sections.get(layer.name, "")
             raw_sizes[layer.name] = count_tokens(text)
 
-        budget = self.available
-
-        # --- Pass 1: guarantee minimums for bounded layers ----------
-        alloc: dict[str, int] = {}
-        for layer in _LAYERS:
-            if layer.is_unbounded:
-                continue
-            needed = min(raw_sizes[layer.name], layer.min_tokens)
-            alloc[layer.name] = needed
-            budget -= needed
-
-        if budget < 0:
+        # Safety check: ensure total budget can cover minimum allocations
+        total_min = sum(layer.min_tokens for layer in _LAYERS)
+        if self.available < total_min:
             from anima.utils.errors import ContextTooSmallError
-            raise ContextTooSmallError(deficit=-budget, available=self.available)
+            raise ContextTooSmallError(deficit=total_min - self.available, available=self.available)
 
-        # --- Pass 2: distribute remaining budget proportionally -----
-        #     up to each layer's max (or raw size, whichever is less)
-        wants: dict[str, int] = {}
+        remaining = self.available
+        alloc: dict[str, int] = {}
+
+        # Greedy fill in priority order
         for layer in _LAYERS:
+            actual = raw_sizes[layer.name]
             if layer.is_unbounded:
-                continue
-            raw = raw_sizes[layer.name]
-            cap = layer.max_tokens  # type: ignore[assignment]
-            already = alloc.get(layer.name, 0)
-            want = min(raw, cap) - already  # how much more this layer wants
-            wants[layer.name] = max(want, 0)
-
-        total_want = sum(wants.values())
-        if total_want > 0 and budget > 0:
-            share = min(budget, total_want)
-            for name, want in wants.items():
-                extra = int(share * want / total_want) if total_want else 0
-                alloc[name] = alloc.get(name, 0) + extra
-                budget -= extra
-
-            # Distribute rounding remainder to the most demanding layer
-            if budget > 0 and wants:
-                most_wanted = max(wants, key=lambda n: wants[n])
-                give = min(budget, wants[most_wanted])
-                alloc[most_wanted] = alloc.get(most_wanted, 0) + give
-                budget -= give
-
-        # --- Pass 3: conversation gets everything that's left -------
-        conv_layer = _LAYER_INDEX["conversation"]
-        conv_alloc = max(budget, conv_layer.min_tokens)
-        alloc["conversation"] = min(conv_alloc, raw_sizes.get("conversation", conv_alloc))
+                # Greedy: take as much as available (up to actual size)
+                give = min(actual, remaining)
+            else:
+                # Bounded: respect hard cap
+                give = min(actual, layer.max_tokens, remaining)  # type: ignore[arg-type]
+            # Always guarantee at least the minimum if budget allows
+            give = max(give, min(layer.min_tokens, remaining))
+            alloc[layer.name] = give
+            remaining -= give
+            if remaining <= 0:
+                remaining = 0
 
         # --- Truncate each section to its allocation ----------------
         result: dict[str, str] = {}

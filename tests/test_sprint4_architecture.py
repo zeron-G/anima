@@ -298,14 +298,14 @@ class TestBackwardCompat:
 
 
 class TestDeadCodeCleanup:
-    """Verify dead code has been removed or redirected."""
+    """Verify dead code has been removed."""
 
-    def test_old_prompts_redirects(self):
-        from anima.llm.prompts import PromptBuilder
-        from anima.llm.prompt_compiler import PromptCompiler
-        assert PromptBuilder is PromptCompiler
+    def test_old_prompts_deleted(self):
+        from pathlib import Path
+        old = Path(__file__).parent.parent / "anima" / "llm" / "prompts.py"
+        assert not old.exists(), "anima/llm/prompts.py should be deleted"
 
-    def test_old_event_router_redirects(self):
-        from anima.core.event_router import EventRouter
-        from anima.core.event_routing import EventRouter as NewRouter
-        assert EventRouter is NewRouter
+    def test_old_event_router_deleted(self):
+        from pathlib import Path
+        old = Path(__file__).parent.parent / "anima" / "core" / "event_router.py"
+        assert not old.exists(), "anima/core/event_router.py should be deleted"
