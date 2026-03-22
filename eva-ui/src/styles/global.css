@@ -1,0 +1,91 @@
+@import "tailwindcss";
+
+/* ── Eva Design System: 赛博芭蕾 ── */
+
+:root {
+  /* Emotion-driven (updated by useEmotion composable) */
+  --eva-bg-h: 200;
+  --eva-bg-s: 70%;
+  --eva-bg-l: 12%;
+  --particle-speed: 1;
+  --breath-duration: 3s;
+  --glow-opacity: 0.2;
+  --pulse-intensity: 0;
+
+  /* Static design tokens */
+  --eva-ice: hsl(200, 80%, 65%);
+  --eva-pink: hsl(330, 70%, 65%);
+  --eva-purple: hsl(270, 60%, 55%);
+  --eva-silver: hsl(220, 10%, 75%);
+  --eva-dark: hsl(220, 25%, 8%);
+  --eva-surface: hsla(210, 30%, 15%, 0.6);
+  --eva-glass: hsla(210, 30%, 20%, 0.4);
+  --eva-glass-border: hsla(200, 60%, 40%, 0.15);
+  --eva-text: hsl(210, 20%, 92%);
+  --eva-text-dim: hsl(210, 15%, 55%);
+  --eva-glow: hsla(200, 80%, 65%, var(--glow-opacity));
+
+  --radius: 12px;
+  --radius-lg: 20px;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  background: hsl(var(--eva-bg-h), var(--eva-bg-s), var(--eva-bg-l));
+  color: var(--eva-text);
+  overflow: hidden;
+  height: 100vh;
+  transition: background 2s ease;
+}
+
+#app {
+  height: 100vh;
+  display: flex;
+}
+
+/* Glass morphism */
+.glass {
+  background: var(--eva-glass);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid var(--eva-glass-border);
+  border-radius: var(--radius);
+}
+
+.glass-surface {
+  background: var(--eva-surface);
+  backdrop-filter: blur(12px);
+  border: 1px solid var(--eva-glass-border);
+  border-radius: var(--radius);
+}
+
+/* Breathing glow effect */
+@keyframes breathe {
+  0%, 100% { box-shadow: 0 0 20px var(--eva-glow); }
+  50% { box-shadow: 0 0 40px var(--eva-glow), 0 0 60px hsla(200, 80%, 65%, 0.05); }
+}
+
+.breathing {
+  animation: breathe var(--breath-duration) ease-in-out infinite;
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: hsla(200, 40%, 40%, 0.3);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: hsla(200, 40%, 40%, 0.5);
+}

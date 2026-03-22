@@ -107,3 +107,4 @@ anima/dashboard/static/model/PurpleBird/
 ANIMA.bat
 create_shortcut.bat
 uv.lock
+eva-ui/node_modules
