@@ -203,17 +203,7 @@ class AgenticLoop:
             if event.type == EventType.SHUTDOWN:
                 break
 
-            # Preemption: if this is a low-priority internal event and the queue
-            # has a higher-priority event (e.g. USER_MESSAGE), skip this one to
-            # prevent internal events from starving user messages.
-            if (event.type in (EventType.SELF_THINKING, EventType.FILE_CHANGE,
-                               EventType.SYSTEM_ALERT, EventType.IDLE_TASK)):
-                front_priority = ctx.event_queue.peek_priority()
-                if front_priority is not None and front_priority > event.priority:
-                    log.info("Preempting %s (pri=%d) — higher priority event in queue (pri=%d)",
-                             event.type.name, event.priority, front_priority)
-                    continue
-
+            # Preemption is now handled by EventRoutingStage in the pipeline
             try:
                 await self._process_event(event)
             except Exception as e:

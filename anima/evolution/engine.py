@@ -74,6 +74,17 @@ class EvolutionEngine:
 
     async def submit_proposal(self, proposal: Proposal) -> str:
         """Submit a proposal through the pipeline. Returns final status."""
+        # Governance check — core module protection + failure cooldown
+        from anima.core.governance import get_governance
+        gov = get_governance()
+        allowed, reason = gov.check_evolution_proposal(
+            {"files": proposal.files, "title": proposal.title},
+            self._consecutive_failures,
+        )
+        if not allowed:
+            log.warning("Governance rejected evolution: %s", reason)
+            return "governance_rejected"
+
         # Rate limit check
         self._check_rate_limits()
         if time.time() < self._cooldown_until:

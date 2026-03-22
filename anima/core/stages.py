@@ -30,6 +30,7 @@ class EventRoutingStage(PipelineStage):
     """Stage 1: Route event, record user activity, save user message to memory.
 
     Wraps the '# Step 1: Route event' block from _process_event_traced.
+    Integrates governance: Self-Thinking loop detection and preemption.
     """
     name = "event_routing"
 
@@ -40,6 +41,16 @@ class EventRoutingStage(PipelineStage):
         event = pctx.event
         ctx = pctx.cognitive_ctx
         trace = pctx.trace
+
+        # Governance: preempt low-priority internal events if queue has higher-priority
+        if event.type in (EventType.SELF_THINKING, EventType.FILE_CHANGE,
+                          EventType.SYSTEM_ALERT, EventType.IDLE_TASK):
+            front_priority = ctx.event_queue.peek_priority()
+            if front_priority is not None and front_priority > event.priority:
+                log.info("Preempting %s (pri=%d) — higher priority in queue (pri=%d)",
+                         event.type.name, event.priority, front_priority)
+                pctx.handled = True
+                return pctx
 
         # Route the event
         with trace.span("event_routing") as s:
@@ -301,5 +312,20 @@ class ResponseHandlingStage(PipelineStage):
                 action=f"event:{event.type.name}",
                 details=pctx.user_message[:200],
             )
+
+        # Governance: Self-Thinking loop detection + drift accumulation
+        from anima.core.governance import get_governance
+        gov = get_governance()
+
+        if decision.is_self and event.type == EventType.SELF_THINKING:
+            action = "active" if pctx.tool_calls_made > 0 else "quiet"
+            gov.check_self_thinking_loop(action)
+
+        if not decision.is_self and pctx.content:
+            # Check drift on user-facing responses (SoulContainer already wrote drift.jsonl)
+            gov.load_recent_drift_scores(max_entries=5)
+            if gov._drift_scores:
+                latest = gov._drift_scores[-1] if gov._drift_scores else 0
+                gov.check_drift_accumulation(latest)
 
         return pctx
