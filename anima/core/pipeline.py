@@ -25,6 +25,7 @@ class PipelineContext:
     event: Event
     cognitive_ctx: CognitiveContext  # alias: ctx
     trace: Any = None               # TraceContext from the tracer
+    correlation_id: str = ""         # Correlation ID for structured logging
 
     # Populated by stages
     decision: Any = None           # RoutingDecision from EventRoutingStage
@@ -37,6 +38,9 @@ class PipelineContext:
     content: str = ""              # LLM response content
     tool_calls_made: int = 0
     loop_error: str | None = None
+
+    filtered: bool = False        # Set True if content safety filtered
+    filter_reason: str = ""        # Reason for filtering
 
     handled: bool = False          # Set True to stop pipeline
 

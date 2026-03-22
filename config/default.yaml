@@ -69,6 +69,13 @@ emotion:
     curiosity: 0.7
     concern: 0.2
 
+# ── Content Safety ──
+content_safety:
+  enabled: true
+  blocked_keywords: []       # regex patterns that block messages
+  warning_keywords: []       # regex patterns that log warnings
+  filter_output: true        # also check LLM responses
+
 # ── Tools ──
 tools:
   safety:
@@ -144,6 +151,7 @@ shutdown:
 logging:
   level: "INFO"
   file: "data/logs/anima.log"
+  json_file: false          # JSON format for file handler (structured logging)
 
 # ── MCP (Model Context Protocol) Servers ──
 # External tool servers connected via MCP stdio transport.

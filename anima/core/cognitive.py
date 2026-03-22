@@ -23,6 +23,7 @@ from anima.core.context import CognitiveContext
 from anima.core.event_queue import EventQueue
 from anima.core.event_routing import EventRouter
 from anima.core.pipeline import Pipeline, PipelineContext
+from anima.core.content_safety import ContentSafetyStage
 from anima.core.stages import (
     EventRoutingStage, EmotionPerceptionStage,
     MemoryRetrievalStage, PromptCompilationStage,
@@ -39,6 +40,7 @@ from anima.perception.snapshot_cache import SnapshotCache
 from anima.tools.executor import ToolExecutor
 from anima.tools.registry import ToolRegistry
 from anima.observability.tracer import get_tracer
+from anima.utils.log_context import set_correlation_id, clear_correlation_id
 from anima.utils.logging import get_logger
 
 log = get_logger("cognitive")
@@ -91,6 +93,7 @@ class AgenticLoop:
         self._pipeline = Pipeline([
             EventRoutingStage(self._router),
             EmotionPerceptionStage(),
+            ContentSafetyStage(),
             MemoryRetrievalStage(),
             PromptCompilationStage(self._orchestrator),
             ToolLoopStage(self._orchestrator),
@@ -224,8 +227,13 @@ class AgenticLoop:
 
     async def _process_event_traced(self, event: Event, ctx: CognitiveContext, trace) -> None:
         """Inner traced implementation — delegates to the composable Pipeline."""
-        pctx = PipelineContext(event=event, cognitive_ctx=ctx, trace=trace)
-        await self._pipeline.run(pctx)
+        set_correlation_id(event.id)
+        try:
+            pctx = PipelineContext(event=event, cognitive_ctx=ctx, trace=trace,
+                                   correlation_id=event.id)
+            await self._pipeline.run(pctx)
+        finally:
+            clear_correlation_id()
 
 
 # Backward-compatible alias

@@ -5,16 +5,37 @@ All handlers use UTF-8 encoding to prevent GBK emoji crashes on Windows.
 """
 
 import io
+import json as _json
 import logging
 import sys
 from logging.handlers import TimedRotatingFileHandler
 from pathlib import Path
 
 
+class JSONFormatter(logging.Formatter):
+    """Structured JSON log formatter with correlation_id support."""
+
+    def format(self, record: logging.LogRecord) -> str:
+        from anima.utils.log_context import get_correlation_id
+        entry = {
+            "ts": self.formatTime(record, self.datefmt),
+            "level": record.levelname,
+            "logger": record.name,
+            "msg": record.getMessage(),
+        }
+        cid = get_correlation_id()
+        if cid:
+            entry["cid"] = cid
+        if record.exc_info and record.exc_info[0]:
+            entry["exc"] = self.formatException(record.exc_info)
+        return _json.dumps(entry, ensure_ascii=False)
+
+
 def setup_logging(
     level: str = "INFO",
     log_file: str | None = None,
     console: bool = True,
+    json_file: bool = False,
 ) -> logging.Logger:
     logger = logging.getLogger("anima")
     logger.setLevel(getattr(logging, level.upper(), logging.INFO))
@@ -59,7 +80,8 @@ def setup_logging(
             backupCount=1,
             encoding="utf-8",
         )
-        fh.setFormatter(fmt)
+        file_fmt = JSONFormatter(datefmt="%Y-%m-%d %H:%M:%S") if json_file else fmt
+        fh.setFormatter(file_fmt)
         logger.addHandler(fh)
 
     return logger

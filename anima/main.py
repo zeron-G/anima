@@ -311,7 +311,6 @@ async def _init_heartbeat(config: dict, core: dict, llm: dict) -> dict:
     from anima.core.heartbeat import HeartbeatEngine
     from anima.perception.user_activity import UserActivityDetector
     from anima.core.idle_scheduler import IdleDetector, IdleScheduler
-    from anima.core.idle_scheduler import set_memory_decay as set_idle_memory_decay
     from anima.tools.builtin.env_tools import set_memory_store as set_env_store, set_idle_scheduler as set_idle_ref
     from anima.evolution.engine import EvolutionEngine
 
@@ -346,19 +345,16 @@ async def _init_heartbeat(config: dict, core: dict, llm: dict) -> dict:
         idle_detector=idle_detector,
         event_queue=core["event_queue"],
         config=idle_cfg,
+        memory_decay=llm["memory_decay"],
+        llm_router=llm["llm_router"],
+        memory_store=core["memory_store"],
+        self_audit=core.get("self_audit"),
     )
     heartbeat.set_idle_scheduler(idle_scheduler)
 
     # Wire env tools and idle tools
     set_env_store(core["memory_store"])
     set_idle_ref(idle_scheduler)
-
-    # Wire memory decay into idle scheduler for deep consolidation tasks
-    set_idle_memory_decay(llm["memory_decay"], llm["llm_router"], core["memory_store"])
-
-    # Wire self-audit into idle scheduler for direct tier 1-3 execution
-    from anima.core.idle_scheduler import set_self_audit as set_idle_audit
-    set_idle_audit(core.get("self_audit"))
 
     # ── Evolution engine v2 ──
     evolution_engine = EvolutionEngine()
@@ -376,40 +372,30 @@ async def _init_heartbeat(config: dict, core: dict, llm: dict) -> dict:
     }
 
 
-async def _init_network(config: dict, core: dict, llm: dict, heartbeat_deps: dict) -> dict:
-    """Initialize distributed network if enabled: gossip, sessions, channels, sync.
+async def _init_gossip(config: dict, core: dict, heartbeat_deps: dict) -> dict:
+    """Initialize gossip mesh, callbacks, task delegation, memory sync, split-brain detection.
 
-    Returns empty dict if network disabled.
+    Returns all gossip-related objects.
     """
     from anima.models.event import Event, EventType, EventPriority
+    from anima.network.node import NodeIdentity, NodeState
+    from anima.network.gossip import GossipMesh
+    from anima.network.discovery import get_local_ip
+    from anima.network.sync import MemorySync
+    from anima.network.split_brain import SplitBrainDetector
+    from anima.network.session_router import SessionRouter, TaskDelegate
+    from anima.tools.builtin.remote import set_gossip_mesh as set_remote_gossip
+    from anima.tools.builtin.remote import set_task_delegate as set_remote_task_delegate
 
-    # Active channels for response routing (populated if network enabled)
-    active_channels: dict[str, Any] = {}
-    # Futures for gossip-delegated task results: source_tag → Future
+    # Futures for gossip-delegated task results: source_tag -> Future
     gossip_task_futures: dict[str, asyncio.Future] = {}
-    # Output buffers for multi-segment gossip task responses: source_tag → [segments]
+    # Output buffers for multi-segment gossip task responses: source_tag -> [segments]
     gossip_task_buffers: dict[str, list[str]] = {}
     _task_lock = threading.Lock()
 
     event_queue = core["event_queue"]
     evolution_engine = heartbeat_deps["evolution_engine"]
     heartbeat = heartbeat_deps["heartbeat"]
-
-    gossip_mesh = None
-    if not get("network.enabled", False):
-        return {
-            "gossip_mesh": None,
-            "active_channels": active_channels,
-            "gossip_task_futures": gossip_task_futures,
-            "gossip_task_buffers": gossip_task_buffers,
-            "channels": [],
-        }
-
-    from anima.network.node import NodeIdentity, NodeState
-    from anima.network.gossip import GossipMesh
-    from anima.network.discovery import get_local_ip
-    from anima.network.sync import MemorySync
-    from anima.network.split_brain import SplitBrainDetector
 
     node_identity = NodeIdentity()
     node_state = NodeState(
@@ -431,7 +417,7 @@ async def _init_network(config: dict, core: dict, llm: dict, heartbeat_deps: dic
     if peers:
         gossip_mesh.configure_peers(peers)
 
-    # Gossip event callback → push to ANIMA event queue
+    # Gossip event callback -> push to ANIMA event queue
     def on_network_event(event_data):
         import asyncio
         try:
@@ -446,7 +432,6 @@ async def _init_network(config: dict, core: dict, llm: dict, heartbeat_deps: dic
             log.warning("Gossip network event forwarding failed: %s", e)
 
     # Session router
-    from anima.network.session_router import SessionRouter
     session_router = SessionRouter(node_identity.node_id)
     session_router.set_broadcast(gossip_mesh.broadcast_event)
 
@@ -577,13 +562,9 @@ async def _init_network(config: dict, core: dict, llm: dict, heartbeat_deps: dic
     evolution_engine.wire(gossip_mesh=gossip_mesh)
 
     # Wire gossip mesh to remote tools for task delegation
-    from anima.tools.builtin.remote import set_gossip_mesh as set_remote_gossip
     set_remote_gossip(gossip_mesh, node_identity.node_id)
 
     # ── TaskDelegate: full task protocol over gossip mesh ──
-    from anima.network.session_router import TaskDelegate
-    from anima.tools.builtin.remote import set_task_delegate as set_remote_task_delegate
-
     task_delegate = TaskDelegate(node_identity.node_id)
 
     async def _eva_task_handler(task):
@@ -665,8 +646,39 @@ async def _init_network(config: dict, core: dict, llm: dict, heartbeat_deps: dic
 
     asyncio.create_task(_periodic_network_tasks(), name="network_tasks")
 
-    # Start channels
+    log.info("Network gossip started: node=%s, port=%d, peers=%d",
+             node_identity.node_id, node_state.port, len(peers))
+
+    return {
+        "gossip_mesh": gossip_mesh,
+        "node_identity": node_identity,
+        "node_state": node_state,
+        "session_router": session_router,
+        "task_delegate": task_delegate,
+        "memory_sync": memory_sync,
+        "split_brain": split_brain,
+        "gossip_task_futures": gossip_task_futures,
+        "gossip_task_buffers": gossip_task_buffers,
+        "_task_lock": _task_lock,
+        "_cognitive_ref": _cognitive_ref,
+        "_cognitive_lock": _cognitive_lock,
+    }
+
+
+async def _init_channels(config: dict, core: dict, gossip_result: dict) -> dict:
+    """Initialize WebhookChannel and DiscordChannel.
+
+    Returns channels list + active_channels dict.
+    """
+    from anima.models.event import Event, EventType, EventPriority
+
+    event_queue = core["event_queue"]
+    session_router = gossip_result["session_router"]
+    gossip_mesh = gossip_result["gossip_mesh"]
+
+    active_channels: dict[str, Any] = {}
     channels = []
+
     # Webhook channel
     if get("channels.webhook.enabled", False):
         from anima.channels.webhook_channel import WebhookChannel
@@ -714,23 +726,40 @@ async def _init_network(config: dict, core: dict, llm: dict, heartbeat_deps: dic
         channels.append(dc)
         active_channels["discord"] = dc
 
-    log.info("Network enabled: node=%s, port=%d, peers=%d, channels=%d",
-             node_identity.node_id, node_state.port, len(peers), len(channels))
+    if channels:
+        log.info("Network channels started: %d", len(channels))
 
     return {
-        "gossip_mesh": gossip_mesh,
-        "session_router": session_router,
-        "task_delegate": task_delegate,
         "channels": channels,
-        "memory_sync": memory_sync,
-        "split_brain": split_brain,
         "active_channels": active_channels,
-        "gossip_task_futures": gossip_task_futures,
-        "gossip_task_buffers": gossip_task_buffers,
-        "_task_lock": _task_lock,
-        "_cognitive_ref": _cognitive_ref,
-        "_cognitive_lock": _cognitive_lock,
     }
+
+
+async def _init_network(config: dict, core: dict, llm: dict, heartbeat_deps: dict) -> dict:
+    """Initialize distributed network if enabled: gossip, sessions, channels, sync.
+
+    Thin coordinator that delegates to _init_gossip and _init_channels.
+    Returns dict with all network objects (None/empty values if network disabled).
+    """
+    if not get("network.enabled", False):
+        return {
+            "gossip_mesh": None,
+            "active_channels": {},
+            "gossip_task_futures": {},
+            "gossip_task_buffers": {},
+            "channels": [],
+            "session_router": None,
+            "task_delegate": None,
+            "memory_sync": None,
+            "split_brain": None,
+            "_task_lock": None,
+            "_cognitive_ref": None,
+            "_cognitive_lock": None,
+        }
+
+    gossip = await _init_gossip(config, core, heartbeat_deps)
+    channels = await _init_channels(config, core, gossip)
+    return {**gossip, **channels}
 
 
 async def _init_cognitive(config: dict, core: dict, llm: dict, heartbeat_deps: dict, network: dict) -> dict:
@@ -937,6 +966,7 @@ async def run() -> bool:
         level=get("logging.level", "INFO"),
         log_file=get("logging.file"),
         console=False,  # Interactive mode: logs go to file only, not terminal
+        json_file=get("logging.json_file", False),
     )
     log.info("ANIMA starting...")
 

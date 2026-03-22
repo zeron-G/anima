@@ -26,30 +26,6 @@ if TYPE_CHECKING:
 log = get_logger("idle_scheduler")
 
 
-# ── Module-level memory decay wiring ──
-# Set from main.py so idle tasks can trigger memory consolidation
-# without idle_scheduler importing MemoryDecay directly.
-
-_memory_decay = None
-_llm_router = None
-_memory_store = None
-_self_audit = None
-
-
-def set_memory_decay(decay, llm_router, store=None):
-    """Wire MemoryDecay + LLMRouter + MemoryStore for deep memory consolidation tasks."""
-    global _memory_decay, _llm_router, _memory_store
-    _memory_decay = decay
-    _llm_router = llm_router
-    _memory_store = store
-
-
-def set_self_audit(audit):
-    """Wire SelfAudit for direct tier 1-3 execution in idle tasks."""
-    global _self_audit
-    _self_audit = audit
-
-
 # ── Idle score helpers ──
 
 def compute_system_idle_score(snapshot: dict) -> float:
@@ -359,6 +335,10 @@ class IdleScheduler:
         idle_detector: IdleDetector,
         event_queue: EventQueue,
         config: dict | None = None,
+        memory_decay=None,
+        llm_router=None,
+        memory_store=None,
+        self_audit=None,
     ):
         cfg = config or {}
         self._detector = idle_detector
@@ -370,6 +350,11 @@ class IdleScheduler:
         self._hour_start: float = time.time()
         self._enabled = cfg.get("enabled", True)
         self._dispatch_count: int = 0
+        # Injected dependencies for idle tasks
+        self._memory_decay = memory_decay
+        self._llm_router = llm_router
+        self._memory_store = memory_store
+        self._self_audit = self_audit
         # Evolution engine reference (set externally)
         self._evolution_engine = None
 
@@ -541,9 +526,9 @@ class IdleScheduler:
     async def _run_decay_update(self, task_id: str) -> None:
         """Recompute decay scores for all memories. No LLM cost — pure math."""
         try:
-            if not _memory_decay or not _memory_store:
+            if not self._memory_decay or not self._memory_store:
                 return
-            updated = await _memory_decay.update_all_scores(_memory_store)
+            updated = await self._memory_decay.update_all_scores(self._memory_store)
             if updated > 0:
                 log.info("Decay scores updated: %d memories", updated)
         except Exception as e:
@@ -558,21 +543,21 @@ class IdleScheduler:
         Step 2: Consolidate stale memories (decay_score < threshold) into archives.
         """
         try:
-            if not _memory_decay or not _llm_router or not _memory_store:
+            if not self._memory_decay or not self._llm_router or not self._memory_store:
                 log.debug("Memory consolidation skipped — MemoryDecay/LLMRouter/MemoryStore not wired")
                 return
 
             # Step 1: Update all decay scores (MUST run before consolidation)
-            updated = await _memory_decay.update_all_scores(_memory_store)
+            updated = await self._memory_decay.update_all_scores(self._memory_store)
             log.info("Decay scores updated: %d memories recomputed", updated)
 
             # Step 2: Consolidate stale memories
-            budget_ok = _llm_router.check_budget(estimated_cost=0.005)
+            budget_ok = self._llm_router.check_budget(estimated_cost=0.005)
             if not budget_ok:
                 log.info("Memory consolidation skipped — LLM budget exceeded (decay scores still updated)")
                 return
             log.info("Running deep memory consolidation")
-            consolidated = await _memory_decay.consolidate(_memory_store, _llm_router, budget_ok)
+            consolidated = await self._memory_decay.consolidate(self._memory_store, self._llm_router, budget_ok)
             log.info("Memory consolidation completed: %d memories archived", consolidated or 0)
         except Exception as e:
             log.warning("Deep memory consolidation failed: %s", e)
@@ -582,12 +567,12 @@ class IdleScheduler:
     async def _run_audit(self, task: IdleTask) -> None:
         """Execute audit tier directly (no LLM cost)."""
         try:
-            if not _self_audit:
+            if not self._self_audit:
                 log.debug("Audit skipped — SelfAudit not wired")
                 return
             tier_map = {"audit.static": 1, "audit.tests": 2, "audit.deps": 3}
             tier = tier_map.get(task.handler, 1)
-            result = await _self_audit.run_tier(tier)
+            result = await self._self_audit.run_tier(tier)
             log.info("Audit tier %d completed: %s (passed=%s)",
                      tier, result.summary, result.passed)
         except Exception as e:
