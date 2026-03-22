@@ -21,44 +21,143 @@ function doInstall() {
 
 <template>
   <div class="config-card glass">
-    <div class="card-header">
+    <div class="card-header-row">
       <h3 class="card-title">Skills</h3>
-      <button class="add-btn" @click="showInstall = !showInstall">+ 安装</button>
+      <button class="add-btn" @click="showInstall = !showInstall">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+          <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+        </svg>
+        Install
+      </button>
     </div>
 
+    <!-- Install form -->
     <div v-if="showInstall" class="install-form">
-      <input v-model="installSource" placeholder="Git URL 或本地路径" class="field-input" @keydown.enter="doInstall" />
-      <button class="save-btn" @click="doInstall">安装</button>
+      <input
+        v-model="installSource"
+        placeholder="Git URL or local path..."
+        class="input-field"
+        @keydown.enter="doInstall"
+      />
+      <button class="btn-primary install-btn" @click="doInstall">Install</button>
     </div>
 
+    <!-- Skills list -->
     <div class="skills-list">
       <div v-for="skill in skills" :key="skill.name" class="skill-item">
         <div class="skill-info">
           <span class="skill-name">{{ skill.name }}</span>
-          <span class="skill-desc">{{ skill.description || '' }}</span>
+          <span v-if="skill.description" class="skill-desc">{{ skill.description }}</span>
         </div>
-        <button class="uninstall-btn" @click="emit('uninstall', skill.name)">卸载</button>
+        <button class="uninstall-btn" @click="emit('uninstall', skill.name)">Remove</button>
       </div>
-      <div v-if="!skills?.length" class="empty">无已安装 Skills</div>
+      <div v-if="!skills?.length" class="empty-skills">
+        No skills installed
+      </div>
     </div>
   </div>
 </template>
 
 <style scoped>
-.config-card { padding: 20px; }
-.card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
-.card-title { font-size: 15px; font-weight: 500; color: var(--eva-ice); }
-.add-btn { padding: 4px 12px; border-radius: 6px; border: 1px solid hsla(200, 50%, 50%, 0.2); background: transparent; color: var(--eva-ice); font-size: 12px; cursor: pointer; }
-.add-btn:hover { background: hsla(200, 40%, 25%, 0.3); }
-.install-form { display: flex; gap: 8px; margin-bottom: 12px; }
-.field-input { flex: 1; background: hsla(220, 20%, 10%, 0.5); border: 1px solid hsla(200, 30%, 30%, 0.2); border-radius: 8px; padding: 8px 12px; color: var(--eva-text); font-size: 13px; outline: none; }
-.save-btn { padding: 8px 14px; border-radius: 8px; border: 1px solid hsla(200, 50%, 50%, 0.2); background: hsla(200, 40%, 25%, 0.4); color: var(--eva-ice); font-size: 12px; cursor: pointer; }
-.skills-list { display: flex; flex-direction: column; gap: 6px; }
-.skill-item { display: flex; justify-content: space-between; align-items: center; padding: 8px 10px; border-radius: 6px; background: hsla(220, 20%, 12%, 0.3); }
-.skill-info { display: flex; flex-direction: column; }
-.skill-name { font-size: 13px; color: var(--eva-text); font-weight: 500; }
-.skill-desc { font-size: 11px; color: var(--eva-text-dim); }
-.uninstall-btn { font-size: 11px; color: hsl(0, 50%, 55%); background: none; border: none; cursor: pointer; opacity: 0.5; }
-.uninstall-btn:hover { opacity: 1; }
-.empty { color: var(--eva-text-dim); font-size: 13px; text-align: center; padding: 12px; }
+.config-card { padding: var(--space-lg); }
+
+.card-header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--space-lg);
+}
+
+.card-header-row .card-title { margin-bottom: 0; }
+
+.add-btn {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid rgba(var(--accent-rgb), 0.15);
+  background: transparent;
+  color: var(--accent);
+  font-size: 12px;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.add-btn:hover {
+  background: rgba(var(--accent-rgb), 0.08);
+}
+
+.install-form {
+  display: flex;
+  gap: 8px;
+  margin-bottom: var(--space-md);
+}
+
+.install-btn {
+  padding: 8px 16px;
+  font-size: 12px;
+  flex-shrink: 0;
+}
+
+.skills-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.skill-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  background: rgba(var(--accent-rgb), 0.02);
+  border: 1px solid var(--border);
+  transition: border-color var(--transition-fast);
+}
+
+.skill-item:hover {
+  border-color: var(--border-hover);
+}
+
+.skill-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.skill-name {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text);
+}
+
+.skill-desc {
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.uninstall-btn {
+  font-size: 11px;
+  color: var(--text-dim);
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 4px;
+  transition: all var(--transition-fast);
+}
+
+.uninstall-btn:hover {
+  color: var(--error);
+  background: rgba(248, 113, 113, 0.08);
+}
+
+.empty-skills {
+  color: var(--text-dim);
+  font-size: 13px;
+  text-align: center;
+  padding: var(--space-lg);
+}
 </style>

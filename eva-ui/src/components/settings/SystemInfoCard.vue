@@ -9,6 +9,7 @@ const emit = defineEmits<{
 }>()
 
 function formatUptime(s: number) {
+  if (!s) return '--'
   const h = Math.floor(s / 3600)
   const m = Math.floor((s % 3600) / 60)
   return `${h}h ${m}m`
@@ -17,32 +18,141 @@ function formatUptime(s: number) {
 
 <template>
   <div class="config-card glass">
-    <h3 class="card-title">系统信息</h3>
-    <div class="info-grid">
-      <div class="info-row"><span class="info-label">版本</span><span class="info-value">{{ info.version }}</span></div>
-      <div class="info-row"><span class="info-label">Agent</span><span class="info-value">{{ info.agent_name }}</span></div>
-      <div class="info-row"><span class="info-label">运行时间</span><span class="info-value">{{ formatUptime(info.uptime_s) }}</span></div>
-      <div class="info-row"><span class="info-label">Python</span><span class="info-value">{{ info.python_version }}</span></div>
-      <div class="info-row"><span class="info-label">ChromaDB</span><span class="info-value" :class="{ ok: info.chromadb }">{{ info.chromadb ? '✓' : '✗' }}</span></div>
+    <h3 class="card-title">System</h3>
+
+    <div class="info-list">
+      <div class="info-row">
+        <span class="info-label">Version</span>
+        <span class="info-value mono">{{ info.version || '--' }}</span>
+      </div>
+      <div class="info-row">
+        <span class="info-label">Agent</span>
+        <span class="info-value">{{ info.agent_name || '--' }}</span>
+      </div>
+      <div class="info-row">
+        <span class="info-label">Uptime</span>
+        <span class="info-value mono">{{ formatUptime(info.uptime_s) }}</span>
+      </div>
+      <div class="info-row">
+        <span class="info-label">Python</span>
+        <span class="info-value mono">{{ info.python_version || '--' }}</span>
+      </div>
+      <div class="info-row">
+        <span class="info-label">ChromaDB</span>
+        <span class="info-value">
+          <span class="status-indicator" :class="info.chromadb ? 'ok' : 'off'" />
+          {{ info.chromadb ? 'Active' : 'Inactive' }}
+        </span>
+      </div>
     </div>
-    <div class="action-bar">
-      <button class="action-btn restart" @click="emit('restart')">重启</button>
-      <button class="action-btn shutdown" @click="emit('shutdown')">关闭</button>
+
+    <div class="action-row">
+      <button class="action-btn restart" @click="emit('restart')">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
+          <polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
+        </svg>
+        Restart
+      </button>
+      <button class="action-btn shutdown" @click="emit('shutdown')">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
+          <path d="M18.36 6.64a9 9 0 1 1-12.73 0"/><line x1="12" y1="2" x2="12" y2="12"/>
+        </svg>
+        Shutdown
+      </button>
     </div>
   </div>
 </template>
 
 <style scoped>
-.config-card { padding: 20px; }
-.card-title { font-size: 15px; font-weight: 500; color: var(--eva-ice); margin-bottom: 16px; }
-.info-grid { margin-bottom: 16px; }
-.info-row { display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid hsla(200, 20%, 20%, 0.15); font-size: 13px; }
-.info-label { color: var(--eva-text-dim); }
-.info-value { color: var(--eva-text); font-family: 'JetBrains Mono', monospace; }
-.info-value.ok { color: hsl(140, 50%, 55%); }
-.action-bar { display: flex; gap: 8px; justify-content: flex-end; }
-.action-btn { padding: 8px 16px; border-radius: 8px; font-size: 13px; cursor: pointer; border: 1px solid; }
-.action-btn.restart { border-color: hsla(200, 50%, 50%, 0.2); background: hsla(200, 40%, 25%, 0.4); color: var(--eva-ice); }
-.action-btn.shutdown { border-color: hsla(0, 40%, 40%, 0.2); background: hsla(0, 30%, 20%, 0.4); color: hsl(0, 50%, 60%); }
-.action-btn:hover { opacity: 0.9; }
+.config-card { padding: var(--space-lg); }
+
+.info-list {
+  display: flex;
+  flex-direction: column;
+  margin-bottom: var(--space-lg);
+}
+
+.info-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+}
+
+.info-row:last-child { border-bottom: none; }
+
+.info-label {
+  color: var(--text-secondary);
+}
+
+.info-value {
+  color: var(--text);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.info-value.mono {
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.status-indicator {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+}
+
+.status-indicator.ok {
+  background: var(--success);
+  box-shadow: 0 0 6px rgba(52, 211, 153, 0.4);
+}
+
+.status-indicator.off {
+  background: var(--text-dim);
+}
+
+.action-row {
+  display: flex;
+  gap: 8px;
+}
+
+.action-btn {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 9px 16px;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  font-family: var(--font-heading);
+  letter-spacing: 0.5px;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.action-btn.restart {
+  border: 1px solid rgba(var(--accent-rgb), 0.15);
+  background: rgba(var(--accent-rgb), 0.06);
+  color: var(--accent);
+}
+
+.action-btn.restart:hover {
+  background: rgba(var(--accent-rgb), 0.12);
+  border-color: rgba(var(--accent-rgb), 0.25);
+}
+
+.action-btn.shutdown {
+  border: 1px solid rgba(248, 113, 113, 0.15);
+  background: rgba(248, 113, 113, 0.06);
+  color: var(--error);
+}
+
+.action-btn.shutdown:hover {
+  background: rgba(248, 113, 113, 0.12);
+  border-color: rgba(248, 113, 113, 0.25);
+}
 </style>

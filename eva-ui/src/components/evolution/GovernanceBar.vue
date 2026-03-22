@@ -8,14 +8,14 @@ const emit = defineEmits<{
 }>()
 
 const modes = ['active', 'cautious', 'minimal'] as const
-const modeLabels: Record<string, string> = { active: '完全自主', cautious: '保守', minimal: '被动' }
-const modeColors: Record<string, string> = { active: '#44cc66', cautious: '#ddaa44', minimal: '#cc4444' }
+const modeLabels: Record<string, string> = { active: 'Autonomous', cautious: 'Cautious', minimal: 'Passive' }
+const modeColors: Record<string, string> = { active: '#34d399', cautious: '#fbbf24', minimal: '#f87171' }
 </script>
 
 <template>
   <div class="governance-bar glass">
     <div class="bar-left">
-      <span class="bar-label">治理模式</span>
+      <span class="bar-label">Governance</span>
       <div class="mode-selector">
         <button v-for="m in modes" :key="m"
                 class="mode-btn"
@@ -34,13 +34,13 @@ const modeColors: Record<string, string> = { active: '#44cc66', cautious: '#ddaa
 </template>
 
 <style scoped>
-.governance-bar { display: flex; justify-content: space-between; align-items: center; padding: 12px 20px; }
+.governance-bar { display: flex; justify-content: space-between; align-items: center; padding: 12px var(--space-lg); }
 .bar-left { display: flex; align-items: center; gap: 12px; }
-.bar-label { font-size: 13px; color: var(--eva-text-dim); }
+.bar-label { font-family: var(--font-heading); font-size: 11px; letter-spacing: 1.5px; text-transform: uppercase; color: var(--text-dim); }
 .mode-selector { display: flex; gap: 4px; }
-.mode-btn { padding: 4px 12px; border-radius: 6px; border: 1px solid hsla(200, 20%, 30%, 0.3); background: transparent; color: var(--eva-text-dim); font-size: 12px; cursor: pointer; transition: all 0.2s; }
-.mode-btn:hover { background: hsla(200, 20%, 20%, 0.3); }
-.mode-btn.active { background: hsla(200, 20%, 15%, 0.4); }
+.mode-btn { padding: 5px 14px; border-radius: var(--radius-sm); border: 1px solid var(--border); background: transparent; color: var(--text-dim); font-family: var(--font-heading); font-size: 11px; letter-spacing: 0.5px; cursor: pointer; transition: all 0.2s; }
+.mode-btn:hover { background: rgba(255,255,255,0.03); }
+.mode-btn.active { background: rgba(255,255,255,0.04); }
 .bar-right { display: flex; gap: 16px; }
-.stat { font-size: 11px; color: var(--eva-text-dim); }
+.stat { font-family: var(--font-mono); font-size: 11px; color: var(--text-dim); }
 </style>

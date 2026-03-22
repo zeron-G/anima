@@ -5,7 +5,6 @@ import { useThinkingStore } from '@/stores/thinkingStore'
 const thinking = useThinkingStore()
 const expanded = ref(false)
 
-/* SVG-based axis indicators instead of emoji */
 const axisSvg: Record<string, string> = {
   human: `<circle cx="8" cy="5" r="2.5" stroke="currentColor" stroke-width="1.3" fill="none"/><path d="M3 16v-1a5 5 0 0 1 10 0v1" stroke="currentColor" stroke-width="1.3" fill="none" stroke-linecap="round"/>`,
   self: `<circle cx="8" cy="8" r="5" stroke="currentColor" stroke-width="1.3" fill="none"/><circle cx="8" cy="8" r="1.5" fill="currentColor" opacity="0.5"/>`,
@@ -13,9 +12,9 @@ const axisSvg: Record<string, string> = {
 }
 
 const axisLabels: Record<string, string> = {
-  human: 'Human Axis',
-  self: 'Self Axis',
-  world: 'World Axis',
+  human: 'Human',
+  self: 'Self',
+  world: 'World',
 }
 
 function formatTime(ts: number) {
@@ -32,9 +31,9 @@ function formatTime(ts: number) {
         <circle cx="7" cy="7" r="2" fill="currentColor" opacity="0.6"/>
         <circle cx="11" cy="4" r="2.5" fill="currentColor" opacity="0.3"/>
       </svg>
-      <svg class="stream-axis-icon" width="16" height="16" viewBox="0 0 16 16" v-html="axisSvg[thinking.latest.axis] || axisSvg.self" />
+      <svg class="stream-axis" width="16" height="16" viewBox="0 0 16 16" v-html="axisSvg[thinking.latest.axis] || axisSvg.self" />
       <span class="stream-text">{{ thinking.latest.summary.slice(0, 80) }}{{ thinking.latest.summary.length > 80 ? '...' : '' }}</span>
-      <svg class="stream-toggle" :class="{ 'is-expanded': expanded }" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+      <svg class="stream-chevron" :class="{ rotated: expanded }" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
         <path d="M6 9l6 6 6-6"/>
       </svg>
     </div>
@@ -43,7 +42,7 @@ function formatTime(ts: number) {
     <transition name="expand">
       <div v-if="expanded" class="stream-history">
         <div v-for="(entry, i) in [...thinking.entries].reverse().slice(0, 5)" :key="i" class="history-entry">
-          <div class="entry-axis-wrap">
+          <div class="entry-axis">
             <svg class="entry-axis-icon" width="14" height="14" viewBox="0 0 16 16" v-html="axisSvg[entry.axis] || axisSvg.self" />
             <span class="entry-axis-label">{{ axisLabels[entry.axis] || entry.axis }}</span>
           </div>
@@ -60,12 +59,12 @@ function formatTime(ts: number) {
 .thinking-stream {
   position: fixed;
   bottom: 0;
-  left: 60px;
+  left: 64px;
   right: 0;
   z-index: 90;
-  background: hsla(222, 30%, 6%, 0.92);
+  background: rgba(5, 5, 8, 0.92);
   backdrop-filter: blur(20px);
-  border-top: 1px solid hsla(var(--eva-ice-hsl), 0.06);
+  border-top: 1px solid var(--border);
   transition: all 0.3s ease;
 }
 
@@ -73,33 +72,33 @@ function formatTime(ts: number) {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 8px 16px;
+  padding: 8px 20px;
   cursor: pointer;
   font-size: 13px;
-  color: var(--eva-text-dim);
-  transition: color 0.2s;
+  color: var(--text-dim);
+  transition: color var(--transition-fast);
 }
 
 .stream-bar:hover {
-  color: var(--eva-text-secondary);
+  color: var(--text-secondary);
 }
 
-.stream-icon { opacity: 0.5; flex-shrink: 0; }
-.stream-axis-icon { opacity: 0.6; flex-shrink: 0; color: var(--eva-ice); }
+.stream-icon { opacity: 0.4; flex-shrink: 0; }
+.stream-axis { opacity: 0.6; flex-shrink: 0; color: var(--accent); }
 .stream-text { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-.stream-toggle {
+.stream-chevron {
   opacity: 0.3;
   flex-shrink: 0;
   transition: transform 0.25s ease;
 }
 
-.stream-toggle.is-expanded {
+.stream-chevron.rotated {
   transform: rotate(180deg);
 }
 
 .stream-history {
-  padding: 0 16px 12px;
+  padding: 0 20px 12px;
   max-height: 200px;
   overflow-y: auto;
 }
@@ -107,57 +106,62 @@ function formatTime(ts: number) {
 .history-entry {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
   padding: 6px 0;
   font-size: 12px;
-  border-bottom: 1px solid hsla(var(--eva-ice-hsl), 0.04);
+  border-bottom: 1px solid var(--border);
 }
 
-.entry-axis-wrap {
+.history-entry:last-child { border-bottom: none; }
+
+.entry-axis {
   display: flex;
   align-items: center;
   gap: 4px;
-  min-width: 100px;
+  min-width: 80px;
   flex-shrink: 0;
 }
 
 .entry-axis-icon {
-  color: var(--eva-ice);
+  color: var(--accent);
   opacity: 0.6;
 }
 
 .entry-axis-label {
-  color: var(--eva-ice);
-  font-family: 'Sora', sans-serif;
-  font-size: 11px;
+  color: var(--accent);
+  font-family: var(--font-heading);
+  font-size: 10px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
   white-space: nowrap;
 }
 
 .entry-summary {
   flex: 1;
-  color: var(--eva-text-dim);
+  color: var(--text-dim);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .entry-action {
-  padding: 1px 6px;
+  padding: 2px 8px;
   border-radius: 4px;
-  font-family: 'Sora', sans-serif;
+  font-family: var(--font-heading);
   font-size: 10px;
   text-transform: uppercase;
-  letter-spacing: 0.05em;
+  letter-spacing: 0.5px;
 }
 
-.entry-action.quiet { color: var(--eva-text-dim); }
-.entry-action.updated { color: hsl(150, 50%, 55%); background: hsla(150, 40%, 20%, 0.25); }
-.entry-action.proposed { color: var(--eva-purple); background: hsla(270, 40%, 25%, 0.25); }
+.entry-action.quiet { color: var(--text-dim); }
+.entry-action.updated { color: var(--success); background: rgba(52, 211, 153, 0.1); }
+.entry-action.proposed { color: var(--violet); background: rgba(var(--violet-rgb), 0.1); }
 
 .entry-time {
-  color: var(--eva-text-dim);
+  color: var(--text-dim);
   opacity: 0.35;
   font-size: 11px;
+  font-family: var(--font-mono);
   white-space: nowrap;
 }
 

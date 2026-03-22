@@ -15,39 +15,50 @@ const emit = defineEmits<{
   (e: 'delete', id: string): void
 }>()
 
+/* Scene type SVG icons (no emojis) */
 const sceneIcons: Record<string, string> = {
-  greeting: '\uD83D\uDC4B',
-  technical: '\uD83D\uDCBB',
-  emotional: '\uD83D\uDC97',
-  disagreement: '\uD83E\uDD14',
-  casual: '\u2615',
-  task_report: '\uD83D\uDCCB',
+  greeting: `<path d="M7 11v-1a5 5 0 0 1 10 0v1" stroke="currentColor" stroke-width="1.5" fill="none"/><circle cx="12" cy="6" r="3" stroke="currentColor" stroke-width="1.5" fill="none"/>`,
+  technical: `<rect x="3" y="4" width="18" height="14" rx="2" stroke="currentColor" stroke-width="1.5" fill="none"/><path d="M8 10l3 3 5-5" stroke="currentColor" stroke-width="1.5" fill="none"/>`,
+  emotional: `<path d="M12 21c-4-3-8-6.5-8-10.5a5 5 0 0 1 8-4 5 5 0 0 1 8 4c0 4-4 7.5-8 10.5z" stroke="currentColor" stroke-width="1.5" fill="none"/>`,
+  disagreement: `<circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.5" fill="none"/><path d="M12 8v4m0 4h.01" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round"/>`,
+  casual: `<path d="M18 8h1a4 4 0 0 1 0 8h-1M2 8h16v9a4 4 0 0 1-4 4H6a4 4 0 0 1-4-4V8zm4-5v3m4-3v3m4-3v3" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round"/>`,
+  task_report: `<rect x="5" y="2" width="14" height="20" rx="2" stroke="currentColor" stroke-width="1.5" fill="none"/><line x1="9" y1="7" x2="15" y2="7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><line x1="9" y1="11" x2="15" y2="11" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><line x1="9" y1="15" x2="13" y2="15" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>`,
 }
+
+const defaultIcon = `<circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.5" fill="none"/><path d="M8 12h8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>`
 </script>
 
 <template>
   <div class="golden-manager">
     <div v-for="reply in replies" :key="reply.id" class="golden-card glass">
-      <div class="card-header">
-        <span class="scene-badge">{{ sceneIcons[reply.scene] || '\uD83D\uDCAC' }} {{ reply.scene }}</span>
+      <div class="card-top">
+        <div class="scene-badge">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" v-html="sceneIcons[reply.scene] || defaultIcon" />
+          <span>{{ reply.scene }}</span>
+        </div>
         <span class="score-badge">{{ (reply.score * 100).toFixed(0) }}%</span>
       </div>
+
       <div class="card-exchange">
-        <div class="exchange-user">
-          <span class="role-label">User:</span>
-          {{ reply.user }}
+        <div class="exchange-row user-row">
+          <span class="role-tag">User</span>
+          <span class="exchange-text">{{ reply.user }}</span>
         </div>
-        <div class="exchange-eva">
-          <span class="role-label">Eva:</span>
-          {{ reply.eva }}
+        <div class="exchange-row eva-row">
+          <span class="role-tag eva">Eva</span>
+          <span class="exchange-text">{{ reply.eva }}</span>
         </div>
       </div>
-      <div class="card-footer">
-        <span class="card-date">{{ reply.added }} · {{ reply.source }}</span>
-        <button class="delete-btn" @click="emit('delete', reply.id)">删除</button>
+
+      <div class="card-bottom">
+        <span class="card-meta">{{ reply.added }} / {{ reply.source }}</span>
+        <button class="remove-btn" @click="emit('delete', reply.id)">Remove</button>
       </div>
     </div>
-    <div v-if="replies.length === 0" class="empty">暂无 golden replies</div>
+
+    <div v-if="replies.length === 0" class="empty-state">
+      No golden replies saved yet
+    </div>
   </div>
 </template>
 
@@ -59,82 +70,105 @@ const sceneIcons: Record<string, string> = {
 }
 
 .golden-card {
-  padding: 12px;
+  padding: var(--space-md);
 }
 
-.card-header {
+.card-top {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 8px;
+  margin-bottom: var(--space-md);
 }
 
 .scene-badge {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   font-size: 12px;
-  padding: 2px 8px;
-  border-radius: 10px;
-  background: hsla(270, 30%, 25%, 0.3);
-  color: var(--eva-purple);
+  padding: 3px 10px;
+  border-radius: 100px;
+  background: rgba(var(--violet-rgb), 0.08);
+  border: 1px solid rgba(var(--violet-rgb), 0.12);
+  color: var(--violet);
 }
 
 .score-badge {
+  font-family: var(--font-mono);
   font-size: 12px;
-  color: hsl(140, 50%, 55%);
-  font-weight: 600;
+  color: var(--success);
+  font-weight: 500;
 }
 
 .card-exchange {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.exchange-row {
+  display: flex;
+  gap: 8px;
   font-size: 13px;
   line-height: 1.5;
 }
 
-.exchange-user {
-  color: var(--eva-text-dim);
-  margin-bottom: 4px;
+.role-tag {
+  flex-shrink: 0;
+  padding: 1px 8px;
+  border-radius: 4px;
+  font-family: var(--font-heading);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-dim);
+  align-self: flex-start;
+  margin-top: 2px;
 }
 
-.exchange-eva {
-  color: var(--eva-text);
+.role-tag.eva {
+  background: rgba(var(--accent-rgb), 0.08);
+  color: var(--accent);
 }
 
-.role-label {
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--eva-ice);
-  margin-right: 4px;
-}
+.user-row .exchange-text { color: var(--text-secondary); }
+.eva-row .exchange-text { color: var(--text); }
 
-.card-footer {
+.card-bottom {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-top: 8px;
+  margin-top: var(--space-md);
+  padding-top: var(--space-sm);
+  border-top: 1px solid var(--border);
 }
 
-.card-date {
+.card-meta {
   font-size: 10px;
-  color: var(--eva-text-dim);
-  opacity: 0.5;
+  color: var(--text-dim);
 }
 
-.delete-btn {
+.remove-btn {
   font-size: 11px;
-  color: hsl(0, 50%, 55%);
+  color: var(--text-dim);
   background: none;
   border: none;
   cursor: pointer;
-  opacity: 0.5;
-  transition: opacity 0.2s;
+  padding: 4px 8px;
+  border-radius: 4px;
+  transition: all var(--transition-fast);
 }
 
-.delete-btn:hover {
-  opacity: 1;
+.remove-btn:hover {
+  color: var(--error);
+  background: rgba(248, 113, 113, 0.08);
 }
 
-.empty {
+.empty-state {
   text-align: center;
-  color: var(--eva-text-dim);
-  padding: 20px;
+  color: var(--text-dim);
+  padding: var(--space-xl);
   font-size: 13px;
 }
 </style>
