@@ -9,7 +9,7 @@ from pathlib import Path
 
 from aiohttp import web, WSMsgType
 
-from anima.config import project_root
+from anima.config import get, project_root
 from anima.dashboard.hub import DashboardHub
 from anima.dashboard.page import DASHBOARD_HTML
 from anima.models.event import Event, EventType, EventPriority
@@ -25,6 +25,7 @@ class DashboardServer:
         self._hub = hub
         self._host = host
         self._port = port
+        self._auth_token = get("dashboard.auth.token", "")
         self._app = web.Application(client_max_size=0)  # No upload size limit
         self._ws_clients: list[web.WebSocketResponse] = []
         self._runner: web.AppRunner | None = None
@@ -45,6 +46,11 @@ class DashboardServer:
         self._app.router.add_get("/api/voice/{filename}", self._handle_voice_file)
         # Trace endpoint — returns recent cognitive loop traces for debugging
         self._app.router.add_get("/api/traces", self._handle_traces)
+        # v1 API endpoints
+        self._app.router.add_post("/v1/chat", self._handle_v1_chat)
+        self._app.router.add_get("/v1/status", self._handle_v1_status)
+        self._app.router.add_get("/v1/emotion", self._handle_v1_emotion)
+        self._app.router.add_get("/v1/memory/search", self._handle_v1_memory_search)
         # Static files for Live2D model + SDK
         static_dir = Path(__file__).parent / "static"
         if static_dir.exists():
@@ -75,6 +81,21 @@ class DashboardServer:
             await self._runner.cleanup()
         log.info("Dashboard stopped.")
 
+    # ── Auth ──
+
+    def _check_auth(self, request) -> bool:
+        """Check if request is authenticated. Returns True if auth passes."""
+        if not self._auth_token:
+            return True  # Auth disabled
+        # Check Authorization header
+        auth = request.headers.get("Authorization", "")
+        if auth == f"Bearer {self._auth_token}":
+            return True
+        # Check query param (for WebSocket)
+        if request.query.get("token") == self._auth_token:
+            return True
+        return False
+
     # ── Routes ──
 
     async def _handle_index(self, request: web.Request) -> web.Response:
@@ -87,6 +108,8 @@ class DashboardServer:
         return web.Response(text="Desktop frontend not found", status=404)
 
     async def _handle_ws(self, request: web.Request) -> web.WebSocketResponse:
+        if not self._check_auth(request):
+            return web.json_response({"error": "unauthorized"}, status=401)
         ws = web.WebSocketResponse()
         await ws.prepare(request)
         self._ws_clients.append(ws)
@@ -106,6 +129,8 @@ class DashboardServer:
         return ws
 
     async def _handle_chat(self, request: web.Request) -> web.Response:
+        if not self._check_auth(request):
+            return web.json_response({"error": "unauthorized"}, status=401)
         try:
             data = await request.json()
         except (UnicodeDecodeError, ValueError):
@@ -135,6 +160,8 @@ class DashboardServer:
 
     async def _handle_chat_stream(self, request: web.Request) -> web.StreamResponse:
         """SSE streaming chat — sends events as Eva processes the message."""
+        if not self._check_auth(request):
+            return web.json_response({"error": "unauthorized"}, status=401)
         try:
             data = await request.json()
         except (UnicodeDecodeError, ValueError):
@@ -197,6 +224,8 @@ class DashboardServer:
 
     async def _handle_chat_upload(self, request: web.Request) -> web.Response:
         """Handle file upload with chat message."""
+        if not self._check_auth(request):
+            return web.json_response({"error": "unauthorized"}, status=401)
         reader = await request.multipart()
         text = ""
         saved = []
@@ -230,6 +259,8 @@ class DashboardServer:
         return web.json_response({"ok": True, "files": len(saved)})
 
     async def _handle_control(self, request: web.Request) -> web.Response:
+        if not self._check_auth(request):
+            return web.json_response({"error": "unauthorized"}, status=401)
         data = await request.json()
         action = data.get("action", "")
 
@@ -267,6 +298,8 @@ class DashboardServer:
         return web.json_response({"error": f"unknown action: {action}"}, status=400)
 
     async def _handle_config(self, request: web.Request) -> web.Response:
+        if not self._check_auth(request):
+            return web.json_response({"error": "unauthorized"}, status=401)
         data = await request.json()
         key = data.get("key", "")
         value = data.get("value")
@@ -285,6 +318,8 @@ class DashboardServer:
 
     async def _handle_upload(self, request: web.Request) -> web.Response:
         """Handle file upload via multipart form data."""
+        if not self._check_auth(request):
+            return web.json_response({"error": "unauthorized"}, status=401)
         uploads_dir = project_root() / "data" / "uploads"
         uploads_dir.mkdir(parents=True, exist_ok=True)
 
@@ -326,6 +361,8 @@ class DashboardServer:
 
     async def _handle_list_uploads(self, request: web.Request) -> web.Response:
         """List files in the uploads directory."""
+        if not self._check_auth(request):
+            return web.json_response({"error": "unauthorized"}, status=401)
         uploads_dir = project_root() / "data" / "uploads"
         if not uploads_dir.exists():
             return web.json_response({"files": []})
@@ -339,6 +376,8 @@ class DashboardServer:
 
     async def _handle_tts(self, request: web.Request) -> web.Response:
         """Synthesize text to speech. Returns URL to audio file."""
+        if not self._check_auth(request):
+            return web.json_response({"error": "unauthorized"}, status=401)
         try:
             data = await request.json()
             text = data.get("text", "").strip()
@@ -369,6 +408,8 @@ class DashboardServer:
 
     async def _handle_debug(self, request: web.Request) -> web.Response:
         """Receive debug logs from frontend."""
+        if not self._check_auth(request):
+            return web.json_response({"error": "unauthorized"}, status=401)
         data = await request.json()
         level = data.get("level", "info").upper()
         msg = data.get("msg", "")
@@ -379,6 +420,8 @@ class DashboardServer:
 
     async def _handle_stt(self, request: web.Request) -> web.Response:
         """Transcribe uploaded audio via local Whisper."""
+        if not self._check_auth(request):
+            return web.json_response({"error": "unauthorized"}, status=401)
         try:
             import tempfile
             reader = await request.multipart()
@@ -419,6 +462,8 @@ class DashboardServer:
 
     async def _handle_voice_file(self, request: web.Request) -> web.Response:
         """Serve a generated voice audio file."""
+        if not self._check_auth(request):
+            return web.json_response({"error": "unauthorized"}, status=401)
         from anima.config import data_dir
         filename = request.match_info["filename"]
         # Security: only serve from voice dir, no path traversal
@@ -444,6 +489,8 @@ class DashboardServer:
         to display tool-use timelines, LLM call latencies, and
         event processing history.
         """
+        if not self._check_auth(request):
+            return web.json_response({"error": "unauthorized"}, status=401)
         limit = int(request.query.get("limit", "50"))
         since = float(request.query.get("since", "0"))
 
@@ -452,6 +499,62 @@ class DashboardServer:
             traces = self._hub.get_traces(limit=limit, since=since)
 
         return web.json_response({"traces": traces, "count": len(traces)})
+
+    # ── v1 API ──
+
+    async def _handle_v1_chat(self, request: web.Request) -> web.Response:
+        if not self._check_auth(request):
+            return web.json_response({"error": "unauthorized"}, status=401)
+        try:
+            data = await request.json()
+        except Exception:
+            return web.json_response({"error": "invalid json"}, status=400)
+        message = data.get("message", "")
+        if not message:
+            return web.json_response({"error": "message required"}, status=400)
+
+        # Push to event queue (same as existing /api/chat)
+        correlation_id = f"v1_{id(request)}_{int(time.time())}"
+        await self._hub.event_queue.put(Event(
+            type=EventType.USER_MESSAGE,
+            payload={"text": message},
+            priority=EventPriority.NORMAL,
+            source="api_v1",
+        ))
+        return web.json_response({"status": "queued", "correlation_id": correlation_id})
+
+    async def _handle_v1_status(self, request: web.Request) -> web.Response:
+        if not self._check_auth(request):
+            return web.json_response({"error": "unauthorized"}, status=401)
+        snapshot = self._hub.get_full_snapshot()
+        return web.json_response({
+            "status": "running",
+            "uptime_s": snapshot.get("uptime", 0),
+            "emotion": snapshot.get("emotion", {}),
+            "queue_depth": snapshot.get("queue_depth", 0),
+            "idle": snapshot.get("idle", {}),
+            "llm": snapshot.get("llm_status", {}),
+        })
+
+    async def _handle_v1_emotion(self, request: web.Request) -> web.Response:
+        if not self._check_auth(request):
+            return web.json_response({"error": "unauthorized"}, status=401)
+        snapshot = self._hub.get_full_snapshot()
+        return web.json_response(snapshot.get("emotion", {}))
+
+    async def _handle_v1_memory_search(self, request: web.Request) -> web.Response:
+        if not self._check_auth(request):
+            return web.json_response({"error": "unauthorized"}, status=401)
+        query = request.query.get("q", "")
+        limit = int(request.query.get("limit", "5"))
+        if not query:
+            return web.json_response({"error": "q parameter required"}, status=400)
+        results = await self._hub._memory_store.search_memories_async(query=query, limit=limit)
+        # Strip internal fields, return clean JSON
+        clean = [{"id": r.get("id"), "content": r.get("content", "")[:500],
+                  "type": r.get("type"), "importance": r.get("importance"),
+                  "created_at": r.get("created_at")} for r in results]
+        return web.json_response({"results": clean, "count": len(clean)})
 
     # ── WebSocket push loop ──
 

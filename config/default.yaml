@@ -131,6 +131,10 @@ channels:
     enabled: false      # Enable in local/env.yaml
     token: ""           # Set via DISCORD_BOT_TOKEN env var
     allowed_users: []
+  telegram:
+    enabled: false      # Enable in local/env.yaml
+    token: ""           # Set via TELEGRAM_BOT_TOKEN env var
+    allowed_users: []   # Telegram user IDs (integers)
   webhook:
     enabled: false
     port: 9421
@@ -139,6 +143,8 @@ channels:
 # ── Dashboard ──
 dashboard:
   port: 8420
+  auth:
+    token: ""     # Set in local/env.yaml for security
 
 # ── Governance ──
 governance:

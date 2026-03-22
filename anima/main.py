@@ -726,6 +726,30 @@ async def _init_channels(config: dict, core: dict, gossip_result: dict) -> dict:
         channels.append(dc)
         active_channels["discord"] = dc
 
+    # Telegram channel
+    if get("channels.telegram.enabled", False):
+        from anima.channels.telegram_channel import TelegramChannel
+        tg = TelegramChannel(
+            token=get("channels.telegram.token", ""),
+            allowed_users=get("channels.telegram.allowed_users", []),
+        )
+
+        async def on_telegram_message(data):
+            session_id = data.get("source", "telegram:unknown")
+            if session_router.try_lock(session_id, channel="telegram", user_id=data.get("user", "")):
+                await event_queue.put(Event(
+                    type=EventType.USER_MESSAGE,
+                    payload=data,
+                    priority=EventPriority.HIGH,
+                    source="telegram",
+                ))
+                await gossip_mesh.broadcast_event(data)
+
+        tg.set_message_handler(on_telegram_message)
+        await tg.start()
+        channels.append(tg)
+        active_channels["telegram"] = tg
+
     if channels:
         log.info("Network channels started: %d", len(channels))
 
@@ -901,6 +925,16 @@ def _wire_callbacks(cognitive, terminal, dashboard_hub, agent_manager, heartbeat
                     loop.create_task(dc.send(source, text))
                 except RuntimeError as e:
                     log.debug("Discord response routing skipped (no running loop): %s", e)
+
+        if source and source.startswith("telegram:"):
+            tg = active_channels.get("telegram")
+            if tg:
+                import asyncio
+                try:
+                    loop = asyncio.get_running_loop()
+                    loop.create_task(tg.send(source, text))
+                except RuntimeError as e:
+                    log.debug("Telegram response routing skipped (no running loop): %s", e)
 
     cognitive.set_output_callback(on_agent_output)
 
