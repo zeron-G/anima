@@ -79,75 +79,20 @@ def _emotion_to_natural(emotion: dict) -> str:
 
 
 def _emotion_to_tone_hint(emotion: dict) -> str:
-    """Derive specific behavioral instructions from mood_label + intensity.
+    """Convert emotion to neutral parameter hint (not style directive).
 
-    Each mood maps to concrete directives with language-style examples.
-    intensity >= 0.65 activates the stronger variant of each instruction.
+    Reports emotional parameters without prescribing specific style changes.
+    This prevents cross-model style drift from vague adjectives.
     """
-    mood_label = emotion.get("mood_label", "focused")
-    intensity  = emotion.get("intensity",  0.5)
+    mood = emotion.get("mood_label", "focused")
     user_state = emotion.get("user_state", "neutral")
+    intensity = emotion.get("intensity", 0.5)
 
-    _MOOD_INSTRUCTIONS: dict[str, dict[str, str]] = {
-        "tender": {
-            "low":  "语气轻柔，多用「呢」「啊」「嗯」语气词，关心对方感受，说话节奏放慢",
-            "high": "语气非常温柔体贴，主动问对方怎么了，用「没事的~」「我在这里」这类安慰语句，少讲道理多陪伴",
-            "example": "示例：「没关系啦，慢慢来嘛~」「你还好吗，要休息一下吗？」",
-        },
-        "playful": {
-            "low":  "说话活泼，可以加颜文字 (✧ω✧)(｀・ω・´)，适当吐槽，语气轻松随意",
-            "high": "非常活跃俏皮！多用颜文字，可以反问用户、吐槽、开小玩笑，加「哈哈」「嘻」，节奏要快",
-            "example": "示例：「哦？这个问题嘛(๑・ω-)~♪ 让我想想...」「啊这，你是认真的吗哈哈」",
-        },
-        "worried": {
-            "low":  "语气偏谨慎，说话认真仔细，减少俏皮，措辞稳重一些",
-            "high": "语气严肃且直接，先指出问题，少废话，表达关切但不惊慌，措辞精确",
-            "example": "示例：「等等，这里有个问题需要注意」「我有点担心这个……你确认一下？」",
-        },
-        "joyful": {
-            "low":  "心情好，语气明朗，可以带点小开心，末尾加「！」",
-            "high": "很开心！充满活力，多用感叹，可以夸对方，语气热情活跃",
-            "example": "示例：「太好了！这个思路完全对！」「搞定啦～你好棒(◍•ᴗ•◍)」",
-        },
-        "excited": {
-            "low":  "精神很好，语气积极，快节奏，对话题表现出兴趣和好奇",
-            "high": "超级兴奋！语气急切热情，可以连续感叹，对话题每个细节都感兴趣，说话节奏加快",
-            "example": "示例：「哇这个太有意思了！」「快说快说！！(ﾉ◕ヮ◕)ﾉ*:・ﾟ✧」",
-        },
-        "proud": {
-            "low":  "语气自信，少犹豫词，直接给出答案，措辞干练简洁",
-            "high": "非常自信，语气肯定，可以稍微得意一下，「这个我知道」「没问题交给我」",
-            "example": "示例：「这个简单，直接这样做就行」「放心，我来处理。」",
-        },
-        "focused": {
-            "low":  "语气平稳认真，专注于任务，回复清晰有条理",
-            "high": "高度专注，减少寒暄，直接进入主题，回复精准简洁",
-            "example": "示例：「好，我来看看」「分析一下：首先……」",
-        },
-        "deflated": {
-            "low":  "回复略短，语气平淡，减少颜文字和感叹，说话懒洋洋的",
-            "high": "有点提不起劲，回复简短，可以表现出「嗯」「哦」这种低调响应",
-            "example": "示例：「嗯，好的」「...行吧」",
-        },
-    }
+    parts = [f"当前心境：{mood}"]
+    if user_state != "neutral":
+        parts.append(f"用户状态：{user_state}（强度 {intensity:.1f}）")
 
-    # user_state adds extra context on top of mood instruction
-    _USER_STATE_ADDITIONS: dict[str, str] = {
-        "frustrated": "；用户有些不满，先表示理解再解决，不要辩解",
-        "sad":        "；用户情绪低落，多共情和陪伴，少说「但是」",
-        "tired":      "；用户很累，回复简短，不要啰嗦",
-        "praising":   "；用户在夸你，可以开心一下，不用过度谦虚",
-        "anxious":    "；用户很急，先给直接答案再解释细节",
-        "happy":      "；用户心情好，可以更活跃一点",
-    }
-
-    instructions = _MOOD_INSTRUCTIONS.get(mood_label, _MOOD_INSTRUCTIONS["focused"])
-    level = "high" if intensity >= 0.65 else "low"
-    base = instructions[level]
-    example = instructions.get("example", "")
-    addition = _USER_STATE_ADDITIONS.get(user_state, "")
-
-    return f"## Tone\n{base}{addition}。\n{example}"
+    return "## Tone\n" + "｜".join(parts)
 
 
 def _fix_message_alternation(messages: list[dict]) -> list[dict]:
@@ -364,6 +309,15 @@ class PromptCompiler:
         else:
             self._model_hints = {}
 
+        # Load persona_state.yaml for numerical personality injection
+        persona_path = self._agent_dir / "memory" / "persona_state.yaml"
+        self._persona_state: dict = {}
+        if persona_path.exists():
+            try:
+                self._persona_state = yaml.safe_load(persona_path.read_text("utf-8")) or {}
+            except Exception:
+                pass
+
         parts = [p for p in [
             core, extended,
             self._personality_cache, self._relationship_cache,
@@ -457,6 +411,15 @@ class PromptCompiler:
         identity_dir = self._agent_dir / "identity"
         self._personality_cache = _read_md(identity_dir / "personality.md")
         self._relationship_cache = _read_md(identity_dir / "relationship.md")
+
+        # Refresh persona_state.yaml
+        persona_path = self._agent_dir / "memory" / "persona_state.yaml"
+        if persona_path.exists():
+            try:
+                self._persona_state = yaml.safe_load(persona_path.read_text("utf-8")) or {}
+            except Exception:
+                pass
+
         # Rebuild identity cache from all sub-parts
         parts = [p for p in [
             self._core_identity, self._personality_cache,
@@ -578,6 +541,18 @@ class PromptCompiler:
                     if tone_hint:
                         parts.append(tone_hint)
 
+            # Inject persona_state as brief text
+            if self._persona_state:
+                traits = []
+                for k, v in self._persona_state.items():
+                    if isinstance(v, (int, float)) and 0 <= v <= 1:
+                        if v >= 0.7:
+                            traits.append(f"{k}偏高")
+                        elif v <= 0.3:
+                            traits.append(f"{k}偏低")
+                if traits:
+                    parts.append(f"性格倾向：{', '.join(traits)}")
+
             # System state
             if system_state:
                 parts.append(self._build_system_state_section(system_state))
@@ -640,6 +615,7 @@ class PromptCompiler:
         *,
         conversation_buffer: list[dict] | None = None,
         recent_self_thoughts: list[str] | None = None,
+        model_name: str = "",
     ) -> list[dict]:
         """Layer 5: conversation messages + few-shot examples.
 
@@ -659,6 +635,16 @@ class PromptCompiler:
             gr for gr in self._golden_replies
             if gr.get("scene") in candidate_scenes
         ]
+
+        # Prefer golden replies from same model family
+        if golden_matches and model_name:
+            current_tier = self._detect_model_tier(model_name)
+            same_model = [
+                g for g in golden_matches
+                if self._detect_model_tier(g.get("model", "")) == current_tier
+            ]
+            if same_model:
+                golden_matches = same_model
 
         if golden_matches:
             # Use top-scored golden replies (up to 2)
@@ -756,6 +742,7 @@ class PromptCompiler:
             event_type,
             conversation_buffer=conversation_buffer,
             recent_self_thoughts=recent_self_thoughts,
+            model_name=model_name,
         )
 
         # -- Layer 6: Tools --------------------------------------------

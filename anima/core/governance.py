@@ -10,9 +10,10 @@ Consolidates scattered governance checks into one module:
 
 from __future__ import annotations
 
+import json
 import time
 
-from anima.config import get
+from anima.config import get, data_dir
 from anima.utils.logging import get_logger
 
 log = get_logger("governance")
@@ -86,12 +87,32 @@ class GovernanceEngine:
                 return False  # Should reduce activity
         return True
 
+    def load_recent_drift_scores(self, max_entries: int = 20) -> None:
+        """Load recent drift scores from drift.jsonl."""
+        drift_path = data_dir() / "logs" / "drift.jsonl"
+        if not drift_path.exists():
+            return
+        try:
+            lines = drift_path.read_text(encoding="utf-8").strip().split("\n")
+            recent = lines[-max_entries:] if len(lines) > max_entries else lines
+            self._drift_scores = []
+            for line in recent:
+                if line.strip():
+                    entry = json.loads(line)
+                    self._drift_scores.append(entry.get("drift_score", 0))
+        except Exception:
+            pass
+
     def check_drift_accumulation(self, drift_score: float) -> bool:
         """Check if style drift is accumulating dangerously.
 
         If 5 consecutive responses have drift_score > 0.5,
         trigger style fallback (return False).
         """
+        # Bootstrap from drift.jsonl if no scores loaded yet
+        if not self._drift_scores:
+            self.load_recent_drift_scores()
+
         self._drift_scores.append(drift_score)
         if len(self._drift_scores) > 10:
             self._drift_scores.pop(0)
