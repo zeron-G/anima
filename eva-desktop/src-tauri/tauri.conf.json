@@ -1,0 +1,44 @@
+{
+  "$schema": "https://raw.githubusercontent.com/nicoverbruggen/tauri-v2-docs/main/src/schemas/config.schema.json",
+  "productName": "Eva",
+  "version": "0.2.0",
+  "identifier": "com.anima.eva",
+  "build": {
+    "frontendDist": "../../eva-ui/dist",
+    "devUrl": "http://localhost:5173",
+    "beforeDevCommand": "cd ../../eva-ui && npm run dev",
+    "beforeBuildCommand": "cd ../../eva-ui && npm run build"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "Eva \u2014 ANIMA",
+        "width": 1280,
+        "height": 800,
+        "minWidth": 480,
+        "minHeight": 600,
+        "decorations": true,
+        "transparent": false,
+        "center": true
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; connect-src 'self' http://localhost:* ws://localhost:*; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob:; script-src 'self' 'unsafe-eval'"
+    },
+    "trayIcon": {
+      "iconPath": "icons/icon.png",
+      "iconAsTemplate": true
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ]
+  }
+}

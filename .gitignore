@@ -108,3 +108,5 @@ ANIMA.bat
 create_shortcut.bat
 uv.lock
 eva-ui/node_modules
+eva-desktop/src-tauri/target
+eva-desktop/node_modules
