@@ -46,12 +46,10 @@ class DashboardServer:
         self._app.router.add_get("/api/voice/{filename}", self._handle_voice_file)
         # Trace endpoint — returns recent cognitive loop traces for debugging
         self._app.router.add_get("/api/traces", self._handle_traces)
-        # v1 API endpoints
-        self._app.router.add_post("/v1/chat", self._handle_v1_chat)
-        self._app.router.add_get("/v1/status", self._handle_v1_status)
-        self._app.router.add_get("/v1/emotion", self._handle_v1_emotion)
-        self._app.router.add_get("/v1/memory/search", self._handle_v1_memory_search)
-        self._app.router.add_get("/v1/sessions", self._handle_v1_sessions)
+        # v1 API — structured RESTful endpoints for Vue SPA / Tauri / external clients
+        from anima.api.router import APIRouter
+        api = APIRouter(hub)
+        api.register(self._app)
         # Static files for Live2D model + SDK
         static_dir = Path(__file__).parent / "static"
         if static_dir.exists():
