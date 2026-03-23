@@ -506,15 +506,15 @@ class EvolutionEngine:
 
     def _deploy_via_pr(self, proposal: Proposal, branch: str,
                        cwd: str = "") -> tuple[bool, str]:
-        """Push evo/* branch and create PR. Auto-merge if low risk."""
+        """Push evo/* branch, create PR, always merge, always clean up.
+
+        The 6-layer pipeline IS the review — no human reviews pending PRs.
+        """
         root = cwd or str(project_root())
+        main_root = str(project_root())
         try:
-            push = _sp.run(
-                ["git", "push", "-u", "origin", branch],
-                cwd=root, capture_output=True, text=True, timeout=30,
-            )
-            if push.returncode != 0:
-                raise RuntimeError(f"Push failed: {push.stderr}")
+            _sp.run(["git", "push", "-u", "origin", branch],
+                    cwd=root, capture_output=True, text=True, timeout=30, check=True)
 
             body = (
                 f"## Evolution: {proposal.title}\n\n"
@@ -524,38 +524,39 @@ class EvolutionEngine:
                 f"**Files:** {', '.join(proposal.files[:10])}"
             )
             pr = _sp.run(
-                ["gh", "pr", "create",
-                 "--base", "master", "--head", branch,
-                 "--title", f"evo: {proposal.title}",
-                 "--body", body],
+                ["gh", "pr", "create", "--base", "master", "--head", branch,
+                 "--title", f"evo: {proposal.title}", "--body", body],
                 cwd=root, capture_output=True, text=True, timeout=30,
             )
             if pr.returncode != 0:
-                raise RuntimeError(f"PR creation failed: {pr.stderr}")
-
+                raise RuntimeError(f"PR failed: {pr.stderr}")
             pr_url = pr.stdout.strip()
 
-            if len(proposal.files) <= 3 and proposal.risk == "low":
-                merge = _sp.run(
-                    ["gh", "pr", "merge", "--merge", "--delete-branch"],
-                    cwd=root, capture_output=True, text=True, timeout=30,
-                )
-                if merge.returncode == 0:
-                    main_root = str(project_root())
-                    _sp.run(["git", "checkout", "master"],
-                            cwd=main_root, capture_output=True, timeout=15)
-                    _sp.run(["git", "pull", "origin", "master"],
-                            cwd=main_root, capture_output=True, timeout=30)
-                    return True, f"Auto-merged: {pr_url}"
-                else:
-                    log.warning("Auto-merge failed: %s", merge.stderr)
+            # Always merge + delete branch (try merge, then squash)
+            merged = False
+            for strategy in ["--merge", "--squash"]:
+                r = _sp.run(["gh", "pr", "merge", strategy, "--delete-branch"],
+                            cwd=root, capture_output=True, text=True, timeout=30)
+                if r.returncode == 0:
+                    merged = True
+                    break
 
+            if merged:
+                _sp.run(["git", "checkout", "master"], cwd=main_root, capture_output=True, timeout=15)
+                _sp.run(["git", "pull", "origin", "master"], cwd=main_root, capture_output=True, timeout=30)
+                log.info("Merged + cleaned: %s", pr_url)
+                return True, f"Merged: {pr_url}"
+
+            # All merge strategies failed — close PR and clean up
+            _sp.run(["gh", "pr", "close", "--delete-branch"], cwd=root, capture_output=True, timeout=15)
             _sp.run(["git", "checkout", "master"], cwd=root, capture_output=True, timeout=15)
-            return True, f"PR created (awaiting review): {pr_url}"
+            return False, "Merge failed (conflict?), PR closed"
 
         except Exception as e:
+            # Clean up on any failure
             _sp.run(["git", "checkout", "master"], cwd=root, capture_output=True, timeout=15)
-            _sp.run(["git", "branch", "-D", branch], cwd=root, capture_output=True, timeout=15)
+            _sp.run(["git", "push", "origin", "--delete", branch], cwd=main_root, capture_output=True, timeout=15)
+            _sp.run(["git", "branch", "-D", branch], cwd=main_root, capture_output=True, timeout=15)
             return False, str(e)
 
     def _create_safety_tag(self, proposal) -> str:
