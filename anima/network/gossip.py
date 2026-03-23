@@ -137,6 +137,7 @@ class GossipMesh:
         # Seen-cache for deduplication: msg_id → timestamp, expires after 60s
         self._seen_msgs: collections.OrderedDict = collections.OrderedDict()
         self._seen_ttl: float = 60.0  # seconds before a seen entry expires
+        self._seen_max_entries: int = 5000  # hard cap to prevent unbounded growth
 
         # Event loop reference captured at start() time so the gossip thread
         # can safely post callbacks via call_soon_threadsafe.
@@ -296,6 +297,9 @@ class GossipMesh:
                 "alive_count": alive_count,
                 "pending_events": len(self._incoming_events),
                 "pending_task_msgs": len(self._outbound_task_msgs),
+                "seen_cache_size": len(self._seen_msgs),
+                "seen_cache_ttl": self._seen_ttl,
+                "seen_cache_max_entries": self._seen_max_entries,
             }
 
     # ── Thread ──
@@ -441,6 +445,9 @@ class GossipMesh:
                                     self._seen_msgs.popitem(last=False)
                                 else:
                                     break
+                            # Hard cap: evict oldest entries when over capacity
+                            while len(self._seen_msgs) > self._seen_max_entries:
+                                self._seen_msgs.popitem(last=False)
 
                         if rmsg.type == "gossip":
                             self._handle_gossip(rmsg, sub, connected_peers)
