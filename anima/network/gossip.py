@@ -7,7 +7,6 @@ issues. The gossip loop runs in a daemon thread.
 from __future__ import annotations
 
 import asyncio
-import collections
 import math
 import threading
 import time
@@ -133,8 +132,10 @@ class GossipMesh:
         self._last_reconnect_per_peer: dict[str, float] = {}  # node_id → last reconnect attempt ts
         self._started_at: float = time.time()
 
-        # LRU cache of recently seen message IDs for deduplication (max 1000)
-        self._seen_msgs: collections.OrderedDict = collections.OrderedDict()
+        # Dedup cache: message_id → expire_at (timestamp)
+        self.DEDUPE_TTL_SEC: float = 300.0
+        self.MAX_DEDUPE_SIZE: int = 50_000
+        self._seen_msgs: dict[str, float] = {}
 
         # Event loop reference captured at start() time so the gossip thread
         # can safely post callbacks via call_soon_threadsafe.
@@ -428,11 +429,10 @@ class GossipMesh:
                             if rmsg.ttl <= 0:
                                 continue
                             rmsg.ttl -= 1
+                            self._prune_dedupe_cache(time.time())
                             if rmsg.id in self._seen_msgs:
                                 continue
-                            self._seen_msgs[rmsg.id] = True
-                            if len(self._seen_msgs) > 1000:
-                                self._seen_msgs.popitem(last=False)
+                            self._seen_msgs[rmsg.id] = time.time() + self.DEDUPE_TTL_SEC
 
                         if rmsg.type == "gossip":
                             self._handle_gossip(rmsg, sub, connected_peers)
@@ -664,6 +664,20 @@ class GossipMesh:
             msg.payload.get("task_id"),
             msg.payload.get("elapsed_time", 0),
         )
+
+    def _prune_dedupe_cache(self, now: float) -> None:
+        """Remove expired entries and enforce MAX_DEDUPE_SIZE."""
+        # 1. Remove expired
+        expired = [mid for mid, exp in self._seen_msgs.items() if exp <= now]
+        for mid in expired:
+            del self._seen_msgs[mid]
+
+        # 2. If still over capacity, evict oldest 10%
+        if len(self._seen_msgs) > self.MAX_DEDUPE_SIZE:
+            by_expiry = sorted(self._seen_msgs, key=self._seen_msgs.__getitem__)
+            evict_count = max(1, len(self._seen_msgs) // 10)
+            for mid in by_expiry[:evict_count]:
+                del self._seen_msgs[mid]
 
     def _check_failures(self) -> None:
         pending_callbacks: list[tuple] = []
