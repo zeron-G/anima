@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import time
 
 from aiohttp import web
 
@@ -124,7 +123,7 @@ async def history(request: web.Request) -> web.Response:
     session_id = request.query.get("session_id", "")
 
     # Get from memory store
-    memories = hub.memory_store.get_recent_memories(limit=limit * page, type="chat")
+    memories = hub.memory_store.get_recent_memories(limit=limit * page, type="chat", source=session_id or None)
     start = (page - 1) * limit
     page_items = memories[start:start + limit]
 

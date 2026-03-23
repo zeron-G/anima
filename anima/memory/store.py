@@ -515,33 +515,37 @@ class MemoryStore:
             self._search_memories_sync, query, type, limit,
         )
 
-    def _get_recent_memories_sync(self, limit: int, type: str | None) -> list[dict]:
+    def _get_recent_memories_sync(self, limit: int, type: str | None, source: str | None = None) -> list[dict]:
         """Sync inner — runs in thread."""
+        clauses: list[str] = []
+        params: list = []
         if type:
-            rows = self._conn.execute(
-                "SELECT * FROM episodic_memories WHERE type = ? ORDER BY created_at DESC LIMIT ?",
-                (type, limit),
-            ).fetchall()
-        else:
-            rows = self._conn.execute(
-                "SELECT * FROM episodic_memories ORDER BY created_at DESC LIMIT ?",
-                (limit,),
-            ).fetchall()
+            clauses.append("type = ?")
+            params.append(type)
+        if source:
+            clauses.append("source = ?")
+            params.append(source)
+        where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
+        params.append(limit)
+        rows = self._conn.execute(
+            f"SELECT * FROM episodic_memories{where} ORDER BY created_at DESC LIMIT ?",
+            params,
+        ).fetchall()
         return [dict(r) for r in rows]
 
-    def get_recent_memories_sync(self, limit: int = 10, type: str | None = None) -> list[dict]:
+    def get_recent_memories_sync(self, limit: int = 10, type: str | None = None, source: str | None = None) -> list[dict]:
         """Sync version — for use from sync callers (e.g. load_conversation_from_db)."""
-        return self._get_recent_memories_sync(limit, type)
+        return self._get_recent_memories_sync(limit, type, source=source)
 
     # Keep backward-compat name pointing to sync for callers that haven't migrated
-    def get_recent_memories(self, limit: int = 10, type: str | None = None) -> list[dict]:
+    def get_recent_memories(self, limit: int = 10, type: str | None = None, source: str | None = None) -> list[dict]:
         """Sync backward-compat shim (prefer async get_recent_memories_async)."""
-        return self._get_recent_memories_sync(limit, type)
+        return self._get_recent_memories_sync(limit, type, source=source)
 
-    async def get_recent_memories_async(self, limit: int = 10, type: str | None = None) -> list[dict]:
+    async def get_recent_memories_async(self, limit: int = 10, type: str | None = None, source: str | None = None) -> list[dict]:
         """Get most recent memories (non-blocking)."""
         return await asyncio.to_thread(
-            self._get_recent_memories_sync, limit, type,
+            self._get_recent_memories_sync, limit, type, source,
         )
 
     # ------------------------------------------------------------------ #
