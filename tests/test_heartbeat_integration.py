@@ -88,8 +88,16 @@ async def test_heartbeat_integration_file_detection(tmp_path):
     assert not event_queue.empty(), "Event queue should have FILE_CHANGE event"
 
     # --- Phase 4: Cognitive cycle processes the event ---
-    event = await event_queue.get_timeout(timeout=1.0)
-    assert event is not None, "Should get an event"
+    # May get SYSTEM_ALERT before FILE_CHANGE if disk >95%
+    event = None
+    for _ in range(5):
+        evt = await event_queue.get_timeout(timeout=1.0)
+        if evt is None:
+            break
+        if evt.type == EventType.FILE_CHANGE:
+            event = evt
+            break
+    assert event is not None, "Should get a FILE_CHANGE event"
     assert event.type == EventType.FILE_CHANGE, f"Expected FILE_CHANGE, got {event.type}"
     changes = event.payload.get("changes", [])
     print(f"[cognitive] Processing FILE_CHANGE with {len(changes)} changes:")
@@ -175,11 +183,11 @@ async def test_heartbeat_integration_emotion_decay():
     """Verify emotion decay works correctly over multiple ticks."""
     emotion = EmotionState(baseline={"engagement": 0.5, "confidence": 0.6, "curiosity": 0.7, "concern": 0.2})
 
-    # Spike emotions
+    # Spike emotions (clamp is ±0.30, so +0.4 becomes +0.30 → 0.5+0.30=0.8)
     emotion.adjust(engagement=0.4, concern=0.5)
     print(f"After spike: {emotion.to_dict()}")
-    assert emotion.engagement == pytest.approx(0.9, abs=0.01)
-    assert emotion.concern == pytest.approx(0.7, abs=0.01)
+    assert emotion.engagement == pytest.approx(0.8, abs=0.01)
+    assert emotion.concern == pytest.approx(0.5, abs=0.01)  # 0.2 + clamp(0.5→0.30) = 0.5
 
     # Decay 10 times
     for _ in range(10):

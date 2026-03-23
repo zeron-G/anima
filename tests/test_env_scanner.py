@@ -162,7 +162,7 @@ async def test_store_env_catalog():
     """Test the actual MemoryStore env_catalog methods."""
     from anima.memory.store import MemoryStore
     import tempfile
-    with tempfile.TemporaryDirectory() as tmpdir:
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
         db_path = os.path.join(tmpdir, "test.db")
         store = await MemoryStore.create(db_path)
 
