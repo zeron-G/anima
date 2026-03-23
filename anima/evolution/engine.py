@@ -78,7 +78,7 @@ class EvolutionEngine:
         from anima.core.governance import get_governance
         gov = get_governance()
         allowed, reason = gov.check_evolution_proposal(
-            {"files": proposal.files, "title": proposal.title},
+            {"files": proposal.files, "title": proposal.title, "human_confirmed": getattr(proposal, 'human_confirmed', False)},
             self._consecutive_failures,
         )
         if not allowed:
