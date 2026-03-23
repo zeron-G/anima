@@ -211,25 +211,10 @@ class ResponseHandler:
             else:
                 self.last_proactive_result = f"[上次]: {summary}"
 
-        # If flagged to notify user (e.g. agent status update, proactive outreach)
+        # If flagged to notify user (e.g. agent status update), also output to chat
         if event.payload and event.payload.get("notify_user") and content.strip():
-            # Apply Soul Container post-processing for user-facing messages
-            output_content = content
-            if ctx.prompt_compiler and hasattr(ctx.prompt_compiler, "post_process"):
-                try:
-                    output_content = ctx.prompt_compiler.post_process(content)
-                except Exception:
-                    pass
-            await self._output(ctx, output_content, current_source="")
-            await self._save_chat(ctx, "assistant", output_content)
-
-            # Push as typed proactive message for frontend ProactiveTag display
-            proactive_type = (event.payload or {}).get("proactive_type", "self_thinking")
-            ctx.emit_status({
-                "stage": "proactive",
-                "detail": output_content[:200],
-                "proactive_type": proactive_type,
-            })
+            await self._output(ctx, content, current_source="")
+            await self._save_chat(ctx, "assistant", content)
 
     async def _handle_user_response(
         self,

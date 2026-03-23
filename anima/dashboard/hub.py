@@ -39,6 +39,7 @@ class DashboardHub:
         self.idle_scheduler = None
         self.session_manager = None
         self.config: dict = {}
+        self._server = None  # Set by DashboardServer after init
         self._start_time = time.time()
         self._chat_history: list[dict] = []
         self._activity_log: list[dict] = []
@@ -195,6 +196,17 @@ class DashboardHub:
                 queue.put_nowait(msg)
             except Exception:
                 pass  # Queue full or client disconnected
+
+    def push_typed_event(self, event_type: str, data: dict) -> None:
+        """Push a typed event to all WS clients (proactive, evolution, etc.)."""
+        msg = {"type": event_type, "data": data}
+        if self._server:
+            import asyncio
+            for ws in list(self._server._ws_clients):
+                try:
+                    asyncio.ensure_future(ws.send_json(msg))
+                except Exception:
+                    pass
 
     def add_chat_message(self, role: str, content: str) -> None:
         entry = {

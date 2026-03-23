@@ -78,6 +78,10 @@ async def _init_core(config: dict) -> dict:
     for tool in get_evolution_tools():
         tool_registry.register(tool)
 
+    # Register message_user tool (proactive outreach)
+    from anima.tools.builtin.message_user import get_message_user_tool
+    tool_registry.register(get_message_user_tool())
+
     # Register audit tools + issue tracker
     from anima.core.issue_tracker import IssueTracker
     from anima.core.self_audit import SelfAudit
@@ -964,6 +968,11 @@ def _wire_callbacks(cognitive, terminal, dashboard_hub, agent_manager, heartbeat
                     log.debug("Telegram response routing skipped (no running loop): %s", e)
 
     cognitive.set_output_callback(on_agent_output)
+
+    # Wire message_user tool to output pipeline
+    from anima.tools.builtin.message_user import set_output_callback as set_msg_output, set_dashboard_hub as set_msg_hub
+    set_msg_output(on_agent_output)
+    set_msg_hub(dashboard_hub)
 
     # H-03: Wire streaming callback for real-time text output
     def on_stream_chunk(chunk: str, event_type: str = "text") -> None:

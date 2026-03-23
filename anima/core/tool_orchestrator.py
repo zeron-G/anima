@@ -35,6 +35,7 @@ _SELF_THINKING_TOOLS = frozenset({
     "update_feelings", "list_jobs",
     "read_email", "env_search", "list_directory",
     "update_user_profile",
+    "message_user",  # Eva can choose to message user during any self-thinking
 })
 
 # Evolution cycle gets read/analysis tools PLUS evolution-specific tools
@@ -50,18 +51,21 @@ _EVOLUTION_CYCLE_TOOLS = frozenset({
 _HUMAN_AXIS_TOOLS = frozenset({
     "read_file", "update_user_profile", "update_feelings",
     "save_note", "get_datetime", "update_personality",
+    "message_user",
 })
 
 _SELF_AXIS_TOOLS = frozenset({
     "read_file", "save_note", "get_datetime",
     "update_feelings", "update_personality", "mark_golden_reply",
     "glob_search", "update_user_profile",
+    "message_user",
 })
 
 _WORLD_AXIS_TOOLS = frozenset({
     "read_file", "system_info", "get_datetime",
     "read_email", "env_search", "list_directory",
     "glob_search", "grep_search", "save_note", "update_feelings",
+    "message_user",
 })
 
 _STARTUP_TOOLS = frozenset({

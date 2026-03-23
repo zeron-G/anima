@@ -21,6 +21,7 @@ class DashboardServer:
 
     def __init__(self, hub: DashboardHub, host: str = "0.0.0.0", port: int = 8420) -> None:
         self._hub = hub
+        hub._server = self  # Back-reference for push_typed_event
         self._host = host
         self._port = port
         self._auth_token = get("dashboard.auth.token", "")
