@@ -30,12 +30,13 @@ MAX_TURNS = 50  # Maximum tool-use loop iterations
 # usage and preventing the LLM from invoking inappropriate tools.
 
 _SELF_THINKING_TOOLS = frozenset({
-    "read_file", "system_info", "search",
+    "read_file", "write_file", "edit_file", "system_info", "search",
     "glob_search", "grep_search", "save_note", "get_datetime",
     "update_feelings", "list_jobs",
     "read_email", "env_search", "list_directory",
     "update_user_profile",
-    "message_user",  # Eva can choose to message user during any self-thinking
+    "message_user",
+    "shell",  # Can investigate AND fix issues, not just observe
 })
 
 # Evolution cycle gets read/analysis tools PLUS evolution-specific tools
@@ -62,10 +63,11 @@ _SELF_AXIS_TOOLS = frozenset({
 })
 
 _WORLD_AXIS_TOOLS = frozenset({
-    "read_file", "system_info", "get_datetime",
+    "read_file", "write_file", "edit_file", "system_info", "get_datetime",
     "read_email", "env_search", "list_directory",
     "glob_search", "grep_search", "save_note", "update_feelings",
     "message_user",
+    "shell",  # Eva needs to ACT on issues she finds, not just report them
 })
 
 _STARTUP_TOOLS = frozenset({

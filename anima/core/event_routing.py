@@ -109,12 +109,14 @@ SELF_AXIS_CURATE_EXAMPLES = (
 
 WORLD_AXIS_PROMPT = (
     "[INTERNAL: SELF_THINKING — World Axis (环境观察)]\n"
-    "Observe the environment and system health. Steps:\n"
+    "Observe the environment and system health. You have shell access — FIX problems, don't just report them.\n"
     "1. system_info — check CPU/memory/disk\n"
-    "2. get_datetime — note the time (adjust behavior for late night)\n"
-    "3. Check if anything needs attention (errors in logs, disk space, etc.)\n"
-    "4. If you find a real issue that 主人 should know about, use message_user() to tell them.\n"
-    "5. If everything is normal, stay quiet. DO NOT output '系统正常'."
+    "2. get_datetime — note the time\n"
+    "3. If disk is high: use shell to find what's taking space (du/dir), then clean temp files, caches, etc.\n"
+    "4. If errors in logs: investigate root cause with shell/read_file, attempt a fix\n"
+    "5. Only use message_user() to tell 主人 AFTER you've already tried to fix it yourself.\n"
+    "6. If everything is normal, stay quiet. DO NOT output '系统正常'.\n"
+    "IMPORTANT: Do NOT just observe and report. Investigate, diagnose, and fix. Like Claude Code would."
 )
 
 WORLD_AXIS_LATE_NIGHT = (
