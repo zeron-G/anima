@@ -133,8 +133,11 @@ class GossipMesh:
         self._last_reconnect_per_peer: dict[str, float] = {}  # node_id → last reconnect attempt ts
         self._started_at: float = time.time()
 
-        # LRU cache of recently seen message IDs for deduplication (max 1000)
+        # Dedup cache: message_id → receive timestamp.  Entries older than
+        # _SEEN_TTL are purged; size also hard-capped at 2000 as a safety net.
         self._seen_msgs: collections.OrderedDict = collections.OrderedDict()
+        self._SEEN_TTL: float = 120.0  # seconds
+        self._SEEN_MAX: int = 2000
 
         # Event loop reference captured at start() time so the gossip thread
         # can safely post callbacks via call_soon_threadsafe.
@@ -430,8 +433,17 @@ class GossipMesh:
                             rmsg.ttl -= 1
                             if rmsg.id in self._seen_msgs:
                                 continue
-                            self._seen_msgs[rmsg.id] = True
-                            if len(self._seen_msgs) > 1000:
+                            now_recv = time.time()
+                            self._seen_msgs[rmsg.id] = now_recv
+                            # Purge expired entries (oldest first)
+                            while self._seen_msgs:
+                                oldest_id, oldest_ts = next(iter(self._seen_msgs.items()))
+                                if now_recv - oldest_ts > self._SEEN_TTL:
+                                    self._seen_msgs.popitem(last=False)
+                                else:
+                                    break
+                            # Hard cap as safety net
+                            while len(self._seen_msgs) > self._SEEN_MAX:
                                 self._seen_msgs.popitem(last=False)
 
                         if rmsg.type == "gossip":
