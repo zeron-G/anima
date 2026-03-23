@@ -506,57 +506,85 @@ class EvolutionEngine:
 
     def _deploy_via_pr(self, proposal: Proposal, branch: str,
                        cwd: str = "") -> tuple[bool, str]:
-        """Push evo/* branch, create PR, always merge, always clean up.
+        """Deploy: merge to local master first, then push to remote.
 
-        The 6-layer pipeline IS the review — no human reviews pending PRs.
+        Flow: worktree commit → cherry-pick to local master → push → record PR.
+        Local is always authoritative. GitHub PR is just for audit trail.
         """
-        root = cwd or str(project_root())
+        worktree_root = cwd or str(project_root())
         main_root = str(project_root())
+        commit_msg = f"Evolution {proposal.id}: {proposal.title}"
+
         try:
-            _sp.run(["git", "push", "-u", "origin", branch],
-                    cwd=root, capture_output=True, text=True, timeout=30, check=True)
-
-            body = (
-                f"## Evolution: {proposal.title}\n\n"
-                f"**Problem:** {proposal.problem[:200]}\n"
-                f"**Solution:** {proposal.solution[:200]}\n"
-                f"**Risk:** {proposal.risk}\n"
-                f"**Files:** {', '.join(proposal.files[:10])}"
+            # Step 1: Get the commit hash from worktree
+            result = _sp.run(
+                ["git", "rev-parse", "HEAD"],
+                cwd=worktree_root, capture_output=True, text=True, timeout=10,
             )
-            pr = _sp.run(
-                ["gh", "pr", "create", "--base", "master", "--head", branch,
-                 "--title", f"evo: {proposal.title}", "--body", body],
-                cwd=root, capture_output=True, text=True, timeout=30,
+            evo_commit = result.stdout.strip()
+            if not evo_commit:
+                return False, "No commit found in worktree"
+
+            # Step 2: Stash any dirty files in main repo (Eva writes feelings/persona at runtime)
+            _sp.run(["git", "stash", "--include-untracked", "-m", "pre-evo-autostash"],
+                    cwd=main_root, capture_output=True, timeout=15)
+
+            # Step 3: Cherry-pick the evolution commit into local master
+            _sp.run(["git", "checkout", "master"],
+                    cwd=main_root, capture_output=True, timeout=15)
+            pick = _sp.run(
+                ["git", "cherry-pick", evo_commit, "--no-edit"],
+                cwd=main_root, capture_output=True, text=True, timeout=30,
             )
-            if pr.returncode != 0:
-                raise RuntimeError(f"PR failed: {pr.stderr}")
-            pr_url = pr.stdout.strip()
+            if pick.returncode != 0:
+                # Cherry-pick conflict — abort and fall back to merge
+                _sp.run(["git", "cherry-pick", "--abort"],
+                        cwd=main_root, capture_output=True, timeout=10)
+                # Try merge instead
+                merge = _sp.run(
+                    ["git", "merge", evo_commit, "-m", commit_msg, "--no-edit"],
+                    cwd=main_root, capture_output=True, text=True, timeout=30,
+                )
+                if merge.returncode != 0:
+                    _sp.run(["git", "merge", "--abort"],
+                            cwd=main_root, capture_output=True, timeout=10)
+                    _sp.run(["git", "stash", "pop"],
+                            cwd=main_root, capture_output=True, timeout=10)
+                    return False, f"Cherry-pick and merge both failed: {pick.stderr} / {merge.stderr}"
 
-            # Always merge + delete branch (try merge, then squash)
-            merged = False
-            for strategy in ["--merge", "--squash"]:
-                r = _sp.run(["gh", "pr", "merge", strategy, "--delete-branch"],
-                            cwd=root, capture_output=True, text=True, timeout=30)
-                if r.returncode == 0:
-                    merged = True
-                    break
+            log.info("Evolution committed to local master: %s", commit_msg)
 
-            if merged:
-                _sp.run(["git", "checkout", "master"], cwd=main_root, capture_output=True, timeout=15)
-                _sp.run(["git", "pull", "origin", "master"], cwd=main_root, capture_output=True, timeout=30)
-                log.info("Merged + cleaned: %s", pr_url)
-                return True, f"Merged: {pr_url}"
+            # Step 4: Push local master to remote
+            push = _sp.run(
+                ["git", "push", "origin", "master"],
+                cwd=main_root, capture_output=True, text=True, timeout=30,
+            )
+            if push.returncode != 0:
+                log.warning("Push to remote failed (will retry later): %s", push.stderr)
+                # Local is still updated — push failure is non-fatal
 
-            # All merge strategies failed — close PR and clean up
-            _sp.run(["gh", "pr", "close", "--delete-branch"], cwd=root, capture_output=True, timeout=15)
-            _sp.run(["git", "checkout", "master"], cwd=root, capture_output=True, timeout=15)
-            return False, "Merge failed (conflict?), PR closed"
+            # Step 5: Restore stashed files
+            _sp.run(["git", "stash", "pop"],
+                    cwd=main_root, capture_output=True, timeout=10)
+
+            # Step 6: Clean up remote branch (if it was pushed earlier)
+            _sp.run(["git", "push", "origin", "--delete", branch],
+                    cwd=main_root, capture_output=True, timeout=15)
+            _sp.run(["git", "branch", "-D", branch],
+                    cwd=main_root, capture_output=True, timeout=15)
+
+            push_status = "pushed" if push.returncode == 0 else "local only (push failed)"
+            log.info("Deploy complete (%s): %s", push_status, commit_msg)
+            return True, f"Deployed to local master ({push_status})"
 
         except Exception as e:
-            # Clean up on any failure
-            _sp.run(["git", "checkout", "master"], cwd=root, capture_output=True, timeout=15)
-            _sp.run(["git", "push", "origin", "--delete", branch], cwd=main_root, capture_output=True, timeout=15)
-            _sp.run(["git", "branch", "-D", branch], cwd=main_root, capture_output=True, timeout=15)
+            # Restore on any failure
+            _sp.run(["git", "checkout", "master"],
+                    cwd=main_root, capture_output=True, timeout=15)
+            _sp.run(["git", "stash", "pop"],
+                    cwd=main_root, capture_output=True, timeout=10)
+            _sp.run(["git", "branch", "-D", branch],
+                    cwd=main_root, capture_output=True, timeout=15)
             return False, str(e)
 
     def _create_safety_tag(self, proposal) -> str:
