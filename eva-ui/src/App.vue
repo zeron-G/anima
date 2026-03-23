@@ -7,7 +7,6 @@ import { useChatStore } from './stores/chatStore'
 import { ws } from './api/websocket'
 import OrbitNav from './components/global/OrbitNav.vue'
 import ConnectionBadge from './components/global/ConnectionBadge.vue'
-import EvaPresence from './components/global/EvaPresence.vue'
 import ThinkingStream from './components/global/ThinkingStream.vue'
 
 const emotion = useEmotionStore()
@@ -56,7 +55,6 @@ onMounted(() => {
       </router-view>
     </main>
     <ThinkingStream />
-    <EvaPresence />
     <ConnectionBadge />
   </div>
 </template>
@@ -79,7 +77,7 @@ onMounted(() => {
 /* Page transitions */
 .page-enter-active,
 .page-leave-active {
-  transition: opacity 0.3s ease, transform 0.3s var(--ease-out-expo);
+  transition: opacity 0.3s ease, transform 0.3s var(--ease);
 }
 .page-enter-from {
   opacity: 0;

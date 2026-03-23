@@ -63,7 +63,7 @@ class GovernanceEngine:
         }
         files = proposal.get("files", [])
         core_touched = [f for f in files if f in _CORE_MODULES]
-        if core_touched:
+        if core_touched and not proposal.get("human_confirmed"):
             return False, f"Core module change requires human confirmation: {core_touched}"
         if recent_failures >= 3:
             return False, f"Too many recent failures ({recent_failures}), extended cooldown"

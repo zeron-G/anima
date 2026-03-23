@@ -17,6 +17,8 @@ class EvaWebSocket {
   public connected = ref(false)
   private _lastChatHistory: any[] = []
   private _lastActivityTs: number = 0
+  /** Track correlation IDs already seen via typed protocol to avoid legacy duplication */
+  private _seenCorrelationIds: Set<string> = new Set()
 
   connect() {
     const base = import.meta.env.VITE_WS_BASE || window.location.host
@@ -35,21 +37,30 @@ class EvaWebSocket {
         const raw = JSON.parse(event.data)
 
         if (raw.type) {
-          // Typed event (new protocol)
+          // Typed event (new protocol) — track correlation IDs to avoid legacy duplication
+          if (raw.type === 'stream' && raw.data?.correlation_id) {
+            this._seenCorrelationIds.add(raw.data.correlation_id)
+          }
           this.dispatch(raw as WSMessage)
         } else if (raw.emotion || raw.uptime_s !== undefined) {
           // Full snapshot (legacy protocol) — convert to typed events
           this.dispatch({ type: 'heartbeat', data: raw })
 
-          // Extract chat history updates
+          // Extract chat history updates (skip messages already seen via typed protocol)
           if (raw.chat_history) {
             this._lastChatHistory = this._lastChatHistory || []
             const newMsgs = raw.chat_history.slice(this._lastChatHistory.length)
             for (const msg of newMsgs) {
               if (msg.role === 'agent' || msg.role === 'assistant') {
+                const cid = `ws_${msg.timestamp || Date.now()}`
+                // Skip if this message was already delivered via typed stream events
+                if (this._seenCorrelationIds.size > 0) {
+                  // Typed protocol is active — legacy chat_history is redundant
+                  continue
+                }
                 this.dispatch({
                   type: 'stream',
-                  data: { correlation_id: `ws_${msg.timestamp || Date.now()}`, text: msg.content, done: true }
+                  data: { correlation_id: cid, text: msg.content, done: true }
                 })
               }
             }

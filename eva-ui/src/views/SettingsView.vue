@@ -49,7 +49,7 @@ async function handleInstallSkill(source: string) {
 }
 
 async function handleUninstallSkill(name: string) {
-  if (!confirm(`确定卸载 ${name}？`)) return
+  if (!confirm('Uninstall this skill?')) return
   try {
     await api.uninstallSkill(name)
     skills.value = skills.value.filter(s => s.name !== name)
@@ -59,12 +59,12 @@ async function handleUninstallSkill(name: string) {
 }
 
 async function handleRestart() {
-  if (!confirm('确定重启 Eva？')) return
+  if (!confirm('Restart Eva? Active connections will be interrupted.')) return
   await api.restart()
 }
 
 async function handleShutdown() {
-  if (!confirm('确定关闭 Eva？')) return
+  if (!confirm('Shutdown Eva? This will stop the backend process.')) return
   await api.shutdown()
 }
 
@@ -72,21 +72,74 @@ onMounted(loadData)
 </script>
 
 <template>
-  <div class="settings-view">
-    <h2 class="page-title">控制中枢</h2>
-    <div class="settings-grid">
-      <LLMConfigCard :config="config" @update="handleConfigUpdate" />
-      <HeartbeatCard :config="config" />
-      <UsageCard :usage="usage" />
-      <SkillsCard :skills="skills" @install="handleInstallSkill" @uninstall="handleUninstallSkill" />
-      <SystemInfoCard :info="systemInfo" @restart="handleRestart" @shutdown="handleShutdown" />
+  <div class="page-view settings-view">
+    <div class="page-header">
+      <div class="section-label">Configuration</div>
+      <h1 class="page-title">Command Center</h1>
+      <p class="page-subtitle">Manage models, API endpoints, heartbeat intervals, and system settings.</p>
+    </div>
+
+    <div v-if="loading" class="loading-state">
+      <div class="spinner" />
+    </div>
+
+    <div v-else class="settings-layout">
+      <!-- Primary column: LLM + Heartbeat -->
+      <div class="settings-primary">
+        <LLMConfigCard :config="config" @update="handleConfigUpdate" />
+        <HeartbeatCard :config="config" @update="handleConfigUpdate" />
+      </div>
+
+      <!-- Secondary column: Usage + System + Skills -->
+      <div class="settings-secondary">
+        <UsageCard :usage="usage" />
+        <SystemInfoCard :info="systemInfo" @restart="handleRestart" @shutdown="handleShutdown" />
+        <SkillsCard :skills="skills" @install="handleInstallSkill" @uninstall="handleUninstallSkill" />
+      </div>
     </div>
   </div>
 </template>
 
 <style scoped>
-.settings-view { height: 100%; padding: 24px; overflow-y: auto; }
-.page-title { font-size: 22px; font-weight: 300; color: var(--eva-ice); margin-bottom: 24px; letter-spacing: 2px; }
-.settings-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); gap: 16px; }
-@media (max-width: 800px) { .settings-grid { grid-template-columns: 1fr; } }
+.settings-view {
+  padding: var(--space-2xl) var(--space-2xl) var(--space-3xl);
+}
+
+.loading-state {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 80px 0;
+}
+
+.spinner {
+  width: 24px;
+  height: 24px;
+  border: 2px solid rgba(var(--accent-rgb), 0.12);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.settings-layout {
+  display: grid;
+  grid-template-columns: 1.2fr 1fr;
+  gap: var(--space-lg);
+  max-width: 1200px;
+}
+
+.settings-primary,
+.settings-secondary {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-lg);
+}
+
+@media (max-width: 960px) {
+  .settings-layout {
+    grid-template-columns: 1fr;
+  }
+}
 </style>

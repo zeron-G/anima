@@ -37,14 +37,16 @@ const events = computed<GrowthEvent[]>(() => {
     <div class="timeline-scroll">
       <div class="timeline-track">
         <div v-for="(evt, i) in events" :key="i" class="timeline-node" :title="evt.reason">
-          <div class="node-dot" />
+          <div class="node-marker">
+            <div class="node-dot" />
+          </div>
           <div class="node-info">
             <span class="node-date">{{ evt.date }}</span>
             <span class="node-change">{{ evt.change }}</span>
           </div>
         </div>
         <div v-if="events.length === 0" class="timeline-empty">
-          尚无成长记录
+          No growth events recorded
         </div>
       </div>
     </div>
@@ -59,15 +61,14 @@ const events = computed<GrowthEvent[]>(() => {
 
 .timeline-scroll {
   overflow-x: auto;
-  padding: 16px 0;
+  padding: var(--space-md) 0;
 }
 
 .timeline-track {
   display: flex;
   align-items: flex-start;
-  gap: 0;
   min-width: max-content;
-  padding: 0 20px;
+  padding: 0 var(--space-lg);
   position: relative;
 }
 
@@ -75,61 +76,67 @@ const events = computed<GrowthEvent[]>(() => {
   content: '';
   position: absolute;
   top: 8px;
-  left: 20px;
-  right: 20px;
-  height: 2px;
-  background: hsla(200, 30%, 30%, 0.2);
+  left: var(--space-lg);
+  right: var(--space-lg);
+  height: 1px;
+  background: linear-gradient(90deg, var(--accent), rgba(var(--accent-rgb), 0.05));
 }
 
 .timeline-node {
   display: flex;
   flex-direction: column;
   align-items: center;
-  min-width: 120px;
+  min-width: 130px;
   cursor: pointer;
   position: relative;
 }
 
-.node-dot {
-  width: 12px;
-  height: 12px;
-  border-radius: 50%;
-  background: var(--eva-ice);
-  border: 2px solid var(--eva-dark);
+.node-marker {
+  position: relative;
   z-index: 1;
-  transition: transform 0.2s;
+}
+
+.node-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: 2px solid var(--accent);
+  background: var(--bg);
+  transition: all var(--transition-fast);
 }
 
 .timeline-node:hover .node-dot {
-  transform: scale(1.4);
-  box-shadow: 0 0 10px var(--eva-ice);
+  background: var(--accent);
+  box-shadow: 0 0 12px rgba(var(--accent-rgb), 0.4);
+  transform: scale(1.3);
 }
 
 .node-info {
-  margin-top: 8px;
+  margin-top: 10px;
   text-align: center;
-  max-width: 100px;
+  max-width: 110px;
 }
 
 .node-date {
   display: block;
+  font-family: var(--font-mono);
   font-size: 10px;
-  color: var(--eva-text-dim);
+  color: var(--text-dim);
+  margin-bottom: 2px;
 }
 
 .node-change {
   display: block;
   font-size: 11px;
-  color: var(--eva-text);
-  margin-top: 2px;
+  color: var(--text-secondary);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .timeline-empty {
-  color: var(--eva-text-dim);
+  color: var(--text-dim);
   font-size: 13px;
-  padding: 20px;
+  padding: var(--space-lg);
 }
 </style>

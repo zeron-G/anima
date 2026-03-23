@@ -21,21 +21,21 @@ const dimensions = computed(() => {
 })
 
 const colors: Record<string, string> = {
-  warmth: '#ee6688',
-  assertiveness: '#66bbee',
-  playfulness: '#ee88aa',
-  formality: '#8899aa',
-  curiosity: '#aa77dd',
-  independence: '#66aaee',
+  warmth: '#e040a0',
+  assertiveness: '#00e5c8',
+  playfulness: '#f0c860',
+  formality: '#8899bb',
+  curiosity: '#8040ff',
+  independence: '#00b8a0',
 }
 
 const labels: Record<string, string> = {
-  warmth: '温暖',
-  assertiveness: '主张',
-  playfulness: '活泼',
-  formality: '正式',
-  curiosity: '好奇',
-  independence: '独立',
+  warmth: 'Warmth',
+  assertiveness: 'Assert',
+  playfulness: 'Playful',
+  formality: 'Formal',
+  curiosity: 'Curious',
+  independence: 'Indep',
 }
 
 function draw() {
@@ -45,16 +45,16 @@ function draw() {
 
   const width = 300, height = 300
   const cx = width / 2, cy = height / 2
-  const maxR = 120
+  const maxR = 115
 
   const g = svg.append('g').attr('transform', `translate(${cx},${cy})`)
 
-  // Background circles
+  // Background rings
   for (let r = 0.25; r <= 1; r += 0.25) {
     g.append('circle')
       .attr('r', maxR * r)
       .attr('fill', 'none')
-      .attr('stroke', 'hsla(200, 30%, 30%, 0.15)')
+      .attr('stroke', 'rgba(232,230,240,0.04)')
       .attr('stroke-width', 1)
   }
 
@@ -63,16 +63,40 @@ function draw() {
 
   const angleStep = (Math.PI * 2) / n
 
-  // Petals
+  // Axis lines
+  dimensions.value.forEach((_, i) => {
+    const angle = i * angleStep - Math.PI / 2
+    g.append('line')
+      .attr('x1', 0).attr('y1', 0)
+      .attr('x2', Math.cos(angle) * maxR)
+      .attr('y2', Math.sin(angle) * maxR)
+      .attr('stroke', 'rgba(232,230,240,0.04)')
+      .attr('stroke-width', 1)
+  })
+
+  // Filled shape (connecting all tips)
+  const shapePoints = dimensions.value.map((dim, i) => {
+    const angle = i * angleStep - Math.PI / 2
+    const r = dim.value * maxR
+    return `${Math.cos(angle) * r},${Math.sin(angle) * r}`
+  }).join(' ')
+
+  g.append('polygon')
+    .attr('points', shapePoints)
+    .attr('fill', 'rgba(0, 229, 200, 0.06)')
+    .attr('stroke', 'rgba(0, 229, 200, 0.15)')
+    .attr('stroke-width', 1)
+
+  // Petals + tips
   dimensions.value.forEach((dim, i) => {
     const angle = i * angleStep - Math.PI / 2
     const r = dim.value * maxR
     const tipX = Math.cos(angle) * r
     const tipY = Math.sin(angle) * r
-    const labelR = maxR + 20
+    const labelR = maxR + 24
 
-    // Petal shape (elongated ellipse approximation)
-    const petalWidth = 18
+    // Petal shape
+    const petalWidth = 16
     const perpAngle = angle + Math.PI / 2
 
     const path = d3.path()
@@ -90,21 +114,22 @@ function draw() {
 
     g.append('path')
       .attr('d', path.toString())
-      .attr('fill', colors[dim.key] || '#66aaee')
-      .attr('opacity', 0.4)
-      .attr('stroke', colors[dim.key] || '#66aaee')
+      .attr('fill', colors[dim.key] || '#00e5c8')
+      .attr('opacity', 0.25)
+      .attr('stroke', colors[dim.key] || '#00e5c8')
       .attr('stroke-width', 1)
-      .attr('stroke-opacity', 0.6)
+      .attr('stroke-opacity', 0.5)
 
     // Tip dot (draggable)
     g.append('circle')
       .attr('cx', tipX)
       .attr('cy', tipY)
-      .attr('r', 6)
-      .attr('fill', colors[dim.key] || '#66aaee')
-      .attr('stroke', 'white')
+      .attr('r', 5)
+      .attr('fill', colors[dim.key] || '#00e5c8')
+      .attr('stroke', 'rgba(232,230,240,0.3)')
       .attr('stroke-width', 1.5)
       .attr('cursor', 'pointer')
+      .attr('filter', 'drop-shadow(0 0 4px rgba(0,229,200,0.3))')
       .call(d3.drag<SVGCircleElement, unknown>()
         .on('drag', (event) => {
           const dx = event.x, dy = event.y
@@ -120,8 +145,10 @@ function draw() {
       .attr('y', Math.sin(angle) * labelR)
       .attr('text-anchor', 'middle')
       .attr('dominant-baseline', 'middle')
-      .attr('fill', 'var(--eva-text-dim)')
-      .attr('font-size', '11px')
+      .attr('fill', 'rgba(232,230,240,0.35)')
+      .attr('font-family', 'Sora, sans-serif')
+      .attr('font-size', '10px')
+      .attr('letter-spacing', '1px')
       .text(`${labels[dim.key] || dim.key} ${(dim.value * 100).toFixed(0)}%`)
   })
 }

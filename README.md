@@ -9,6 +9,9 @@ ANIMA is not a chatbot — it's an autonomous AI life entity with its own heartb
 ## Quick Start
 
 ```bash
+# One-click launch (Windows)
+ANIMA.bat                                   # Auto-detects conda/venv
+
 # Backend
 python -m anima              # Desktop app (PyWebView)
 python -m anima --headless   # Backend only (API + WebSocket)
@@ -102,16 +105,16 @@ eva-ui/                         # Vue SPA frontend
 ├── src/
 │   ├── views/                  # 7 pages
 │   │   ├── ChatView.vue        # Streaming chat + tool chain
-│   │   ├── SoulscapeView.vue   # Emotion orb + persona petals
+│   │   ├── SoulscapeView.vue   # VRM + Live2D avatar + persona petals
 │   │   ├── EvolutionView.vue   # DNA helix + governance
 │   │   ├── MemoryView.vue      # Star field + search
 │   │   ├── NetworkView.vue     # Node topology + channels
-│   │   ├── SettingsView.vue    # Config cards
+│   │   ├── SettingsView.vue    # LLM/API/heartbeat config
 │   │   └── LoginView.vue       # Auth + backend detection
 │   ├── three/                  # Three.js 3D scenes
 │   ├── api/                    # Axios + WebSocket client
 │   ├── stores/                 # Pinia state management
-│   └── components/             # 25+ Vue components
+│   └── components/             # 30+ Vue components
 
 eva-desktop/                    # Tauri v2 desktop shell
 ├── src-tauri/

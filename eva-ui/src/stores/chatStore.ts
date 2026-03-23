@@ -26,24 +26,28 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   function appendStream(correlationId: string, text: string, done: boolean) {
-    // Find or create streaming message
-    let msg = messages.value.find(m => m.id === correlationId && m.streaming)
-    if (!msg) {
-      msg = {
-        id: correlationId,
-        role: 'assistant',
-        content: '',
-        timestamp: Date.now() / 1000,
-        streaming: true,
+    // Find existing message by correlationId (streaming or finished)
+    let msg = messages.value.find(m => m.id === correlationId)
+    if (msg) {
+      // Already finished — skip duplicate "done" dispatches
+      if (!msg.streaming) return
+      msg.content += text
+      if (done) {
+        msg.streaming = false
+        isStreaming.value = false
       }
-      messages.value.push(msg)
-      isStreaming.value = true
+      return
     }
-    msg.content += text
-    if (done) {
-      msg.streaming = false
-      isStreaming.value = false
+    // Create new streaming message
+    msg = {
+      id: correlationId,
+      role: 'assistant',
+      content: text,
+      timestamp: Date.now() / 1000,
+      streaming: !done,
     }
+    messages.value.push(msg)
+    isStreaming.value = !done
   }
 
   function addToolCall(data: any) {
@@ -55,11 +59,17 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   function addProactive(data: any) {
+    // Deduplicate: skip if same content was added within the last 5 seconds
+    const ts = data.timestamp || Date.now() / 1000
+    const isDupe = messages.value.some(
+      m => m.proactive && m.content === data.text && Math.abs(m.timestamp - ts) < 5
+    )
+    if (isDupe) return
     messages.value.push({
-      id: `proactive_${Date.now()}`,
+      id: `proactive_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
       role: 'assistant',
       content: data.text,
-      timestamp: data.timestamp || Date.now() / 1000,
+      timestamp: ts,
       proactive: { source: data.source },
     })
   }

@@ -28,13 +28,23 @@ onMounted(loadData)
 </script>
 
 <template>
-  <div class="network-view">
+  <div class="page-view network-view">
+    <div class="page-header">
+      <div class="section-label">Live topology</div>
+      <h1 class="page-title">Network</h1>
+      <p class="page-subtitle">Visualize distributed cognitive nodes exchanging signals across the neural mesh.</p>
+    </div>
+
     <div class="network-grid">
       <!-- Main: Topology -->
       <div class="network-main glass">
-        <h3 class="section-title">节点拓扑</h3>
+        <h3 class="card-title">Node Topology</h3>
         <div v-if="!networkEnabled" class="disabled-notice">
-          分布式网络未启用
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" class="notice-icon">
+            <circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/>
+          </svg>
+          <p>Distributed network is not enabled</p>
+          <p class="notice-hint">Enable in config: network.enabled = true</p>
         </div>
         <NodeTopology v-else :nodes="nodes" @select="(n: any) => selectedNode = n" />
       </div>
@@ -42,26 +52,31 @@ onMounted(loadData)
       <!-- Right: Node detail -->
       <div class="network-sidebar" v-if="selectedNode">
         <div class="node-detail glass">
-          <h3 class="section-title">节点详情</h3>
-          <div class="detail-row">
-            <span class="detail-label">ID</span>
-            <span class="detail-value">{{ selectedNode.node_id }}</span>
-          </div>
-          <div class="detail-row">
-            <span class="detail-label">主机名</span>
-            <span class="detail-value">{{ selectedNode.hostname }}</span>
-          </div>
-          <div class="detail-row">
-            <span class="detail-label">IP</span>
-            <span class="detail-value">{{ selectedNode.ip }}</span>
-          </div>
-          <div class="detail-row">
-            <span class="detail-label">状态</span>
-            <span class="detail-value" :class="selectedNode.status">{{ selectedNode.status }}</span>
-          </div>
-          <div class="detail-row">
-            <span class="detail-label">负载</span>
-            <span class="detail-value">{{ (selectedNode.current_load * 100).toFixed(0) }}%</span>
+          <h3 class="card-title">Node Details</h3>
+          <div class="detail-list">
+            <div class="detail-row">
+              <span class="detail-label">ID</span>
+              <span class="detail-value mono">{{ selectedNode.node_id }}</span>
+            </div>
+            <div class="detail-row">
+              <span class="detail-label">Hostname</span>
+              <span class="detail-value">{{ selectedNode.hostname }}</span>
+            </div>
+            <div class="detail-row">
+              <span class="detail-label">IP</span>
+              <span class="detail-value mono">{{ selectedNode.ip }}</span>
+            </div>
+            <div class="detail-row">
+              <span class="detail-label">Status</span>
+              <span class="detail-value">
+                <span class="status-dot" :class="selectedNode.status === 'alive' ? 'success' : selectedNode.status === 'dead' ? 'error' : 'warning'" />
+                {{ selectedNode.status }}
+              </span>
+            </div>
+            <div class="detail-row">
+              <span class="detail-label">Load</span>
+              <span class="detail-value mono">{{ ((selectedNode.current_load || 0) * 100).toFixed(0) }}%</span>
+            </div>
           </div>
         </div>
       </div>
@@ -69,25 +84,78 @@ onMounted(loadData)
 
     <!-- Bottom: Channels -->
     <div class="channels-section glass">
-      <h3 class="section-title">渠道状态</h3>
+      <h3 class="card-title">Channels</h3>
       <ChannelCards :channels="channels" />
     </div>
   </div>
 </template>
 
 <style scoped>
-.network-view { height: 100%; display: flex; flex-direction: column; padding: 16px; gap: 16px; overflow-y: auto; }
-.network-grid { display: grid; grid-template-columns: 1fr 300px; gap: 16px; flex: 1; min-height: 0; }
-.network-main { padding: 16px; }
-.network-sidebar { display: flex; flex-direction: column; gap: 16px; }
-.section-title { font-size: 14px; font-weight: 500; color: var(--eva-ice); margin-bottom: 12px; letter-spacing: 1px; }
-.disabled-notice { text-align: center; padding: 40px; color: var(--eva-text-dim); font-size: 14px; }
-.node-detail { padding: 16px; }
-.detail-row { display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid hsla(200, 20%, 20%, 0.2); font-size: 13px; }
-.detail-label { color: var(--eva-text-dim); }
-.detail-value { color: var(--eva-text); }
-.detail-value.alive { color: #44cc66; }
-.detail-value.dead { color: #cc4444; }
-.channels-section { padding: 16px; flex-shrink: 0; }
-@media (max-width: 900px) { .network-grid { grid-template-columns: 1fr; } }
+.network-view {
+  gap: var(--space-lg);
+}
+
+.network-grid {
+  display: grid;
+  grid-template-columns: 1fr 300px;
+  gap: var(--space-lg);
+  flex: 1;
+  min-height: 0;
+}
+
+.network-main { padding: var(--space-lg); }
+
+.disabled-notice {
+  text-align: center;
+  padding: 60px 20px;
+  color: var(--text-secondary);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-sm);
+}
+
+.notice-icon { color: var(--text-dim); margin-bottom: var(--space-sm); }
+.notice-hint { font-size: 12px; color: var(--text-dim); font-family: var(--font-mono); }
+
+.network-sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-lg);
+}
+
+.node-detail { padding: var(--space-lg); }
+
+.detail-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.detail-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+}
+
+.detail-row:last-child { border-bottom: none; }
+
+.detail-label { color: var(--text-secondary); }
+
+.detail-value {
+  color: var(--text);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.detail-value.mono { font-family: var(--font-mono); font-size: 12px; }
+
+.channels-section { padding: var(--space-lg); flex-shrink: 0; }
+
+@media (max-width: 900px) {
+  .network-grid { grid-template-columns: 1fr; }
+}
 </style>

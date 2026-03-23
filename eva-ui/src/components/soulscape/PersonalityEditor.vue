@@ -29,7 +29,7 @@ async function save() {
 <template>
   <div class="editor-panel glass">
     <div class="editor-header">
-      <h3>{{ title }}</h3>
+      <h3 class="editor-title">{{ title }}</h3>
       <span class="char-count" :class="{ over: maxLength && charCount > maxLength }">
         {{ charCount }}{{ maxLength ? `/${maxLength}` : '' }}
       </span>
@@ -37,20 +37,20 @@ async function save() {
     <textarea
       v-model="editContent"
       class="editor-textarea"
-      :placeholder="`编辑 ${title}...`"
+      :placeholder="`Edit ${title}...`"
     />
-    <button class="save-btn" @click="save" :disabled="saving">
-      {{ saving ? '保存中...' : '保存' }}
+    <button class="save-btn btn-primary" @click="save" :disabled="saving">
+      {{ saving ? 'Saving...' : 'Save' }}
     </button>
   </div>
 </template>
 
 <style scoped>
 .editor-panel {
-  padding: 16px;
+  padding: var(--space-lg);
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: var(--space-md);
 }
 
 .editor-header {
@@ -59,60 +59,50 @@ async function save() {
   align-items: center;
 }
 
-.editor-header h3 {
-  font-size: 15px;
-  font-weight: 500;
-  color: var(--eva-text);
+.editor-title {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 400;
+  color: var(--text);
 }
 
 .char-count {
+  font-family: var(--font-mono);
   font-size: 11px;
-  color: var(--eva-text-dim);
+  color: var(--text-dim);
 }
 
 .char-count.over {
-  color: hsl(0, 60%, 60%);
+  color: var(--error);
 }
 
 .editor-textarea {
   flex: 1;
-  min-height: 200px;
-  background: hsla(220, 20%, 10%, 0.5);
-  border: 1px solid hsla(200, 30%, 30%, 0.2);
-  border-radius: 8px;
-  padding: 12px;
-  color: var(--eva-text);
+  min-height: 180px;
+  background: rgba(10, 10, 20, 0.5);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 14px;
+  color: var(--text);
   font-size: 13px;
-  line-height: 1.6;
-  font-family: inherit;
+  line-height: 1.7;
+  font-family: var(--font-body);
   resize: vertical;
   outline: none;
-  transition: border-color 0.3s;
+  transition: border-color var(--transition-fast);
 }
 
 .editor-textarea:focus {
-  border-color: hsla(200, 60%, 50%, 0.4);
+  border-color: rgba(var(--accent-rgb), 0.25);
+}
+
+.editor-textarea::placeholder {
+  color: var(--text-dim);
 }
 
 .save-btn {
   align-self: flex-end;
-  padding: 8px 20px;
-  border-radius: 8px;
-  border: 1px solid hsla(200, 50%, 50%, 0.2);
-  background: hsla(200, 40%, 25%, 0.4);
-  color: var(--eva-ice);
-  font-size: 13px;
-  cursor: pointer;
-  transition: all 0.2s;
-}
-
-.save-btn:hover {
-  background: hsla(200, 40%, 30%, 0.5);
-  box-shadow: 0 0 12px hsla(200, 60%, 50%, 0.15);
-}
-
-.save-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
+  padding: 8px 24px;
+  font-size: 12px;
 }
 </style>

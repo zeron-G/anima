@@ -1,22 +1,23 @@
 <script setup lang="ts">
+/* EvaPresence — removed VRM dependency for performance.
+   The avatar is now a lightweight CSS-only mood indicator,
+   visible only on non-chat pages. */
 import { computed } from 'vue'
 import { useEmotionStore } from '@/stores/emotionStore'
 import { useRoute } from 'vue-router'
-import EvaAvatar from './EvaAvatar.vue'
 
 const emotion = useEmotionStore()
 const route = useRoute()
 
-// Hide on chat page (Eva is in the chat itself there)
-const visible = computed(() => route.name !== 'chat')
+const visible = computed(() => route.name !== 'chat' && route.name !== 'login')
 </script>
 
 <template>
   <Transition name="presence">
     <div v-if="visible" class="eva-presence">
-      <div class="presence-avatar-wrap">
-        <EvaAvatar :size="56" />
-        <div class="presence-ring" />
+      <div class="presence-orb">
+        <div class="orb-core" />
+        <div class="orb-ring" />
       </div>
       <div class="presence-mood">{{ emotion.current.mood_label }}</div>
     </div>
@@ -27,62 +28,69 @@ const visible = computed(() => route.name !== 'chat')
 .eva-presence {
   position: fixed;
   bottom: 40px;
-  right: 16px;
+  right: 20px;
   z-index: 80;
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 6px;
   cursor: pointer;
-  transition: all 0.35s var(--ease-out-expo);
+  transition: all 0.35s var(--ease);
 }
 
 .eva-presence:hover {
   transform: translateY(-2px);
 }
 
-.eva-presence:hover .presence-ring {
-  border-color: hsla(var(--eva-ice-hsl), 0.3);
-  box-shadow: 0 0 24px hsla(var(--eva-ice-hsl), 0.15);
-}
-
-.presence-avatar-wrap {
+.presence-orb {
   position: relative;
-  width: 56px;
-  height: 56px;
+  width: 40px;
+  height: 40px;
 }
 
-.presence-ring {
+.orb-core {
   position: absolute;
-  inset: -3px;
+  inset: 10px;
   border-radius: 50%;
-  border: 1px solid hsla(var(--eva-ice-hsl), 0.15);
-  box-shadow: 0 0 16px hsla(var(--eva-ice-hsl), var(--glow-opacity));
-  animation: ringBreathe var(--breath-duration) ease-in-out infinite;
-  pointer-events: none;
+  background: radial-gradient(circle at 35% 35%, var(--accent), rgba(0, 140, 120, 0.7));
+  box-shadow: 0 0 16px rgba(var(--accent-rgb), 0.3);
+  animation: orbPulse var(--breath-duration) ease-in-out infinite;
 }
 
-@keyframes ringBreathe {
-  0%, 100% { box-shadow: 0 0 12px hsla(var(--eva-ice-hsl), 0.08); }
-  50% { box-shadow: 0 0 24px hsla(var(--eva-ice-hsl), 0.18); }
+.orb-ring {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: 1px solid rgba(var(--accent-rgb), 0.15);
+  animation: ringGlow var(--breath-duration) ease-in-out infinite;
+}
+
+@keyframes orbPulse {
+  0%, 100% { transform: scale(0.95); box-shadow: 0 0 12px rgba(var(--accent-rgb), 0.2); }
+  50% { transform: scale(1.05); box-shadow: 0 0 24px rgba(var(--accent-rgb), 0.4); }
+}
+
+@keyframes ringGlow {
+  0%, 100% { box-shadow: 0 0 8px rgba(var(--accent-rgb), 0.05); }
+  50% { box-shadow: 0 0 16px rgba(var(--accent-rgb), 0.15); }
 }
 
 .presence-mood {
-  font-family: 'Sora', sans-serif;
-  font-size: 10px;
+  font-family: var(--font-heading);
+  font-size: 9px;
   font-weight: 400;
-  letter-spacing: 0.05em;
-  color: var(--eva-text-dim);
-  text-transform: capitalize;
-  background: var(--eva-surface);
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  background: var(--surface);
   backdrop-filter: blur(12px);
   padding: 3px 10px;
-  border-radius: 10px;
-  border: 1px solid hsla(var(--eva-ice-hsl), 0.06);
+  border-radius: 100px;
+  border: 1px solid var(--border);
 }
 
 .presence-enter-active, .presence-leave-active {
-  transition: all 0.4s var(--ease-out-expo);
+  transition: all 0.4s var(--ease);
 }
 .presence-enter-from, .presence-leave-to {
   opacity: 0;

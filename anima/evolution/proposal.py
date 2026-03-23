@@ -62,6 +62,7 @@ class Proposal:
     implementation_branch: str = ""
     retry_count: int = 0
     max_retries: int = 3
+    human_confirmed: bool = False
 
     def to_dict(self) -> dict:
         return {
@@ -151,6 +152,7 @@ def create_proposal(
     priority: int = 3,
     complexity: str = "small",
     node_id: str = "local",
+    human_confirmed: bool = False,
 ) -> Proposal:
     """Create a new evolution proposal."""
     ts = time.strftime("%Y%m%d")
@@ -167,4 +169,5 @@ def create_proposal(
         risk=risk,
         complexity=complexity,
         proposer_node=node_id,
+        human_confirmed=human_confirmed,
     )

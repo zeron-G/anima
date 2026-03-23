@@ -19,6 +19,8 @@ export default defineConfig({
         ws: true,
       },
       '/api': 'http://localhost:8420',
+      '/static': 'http://localhost:8420',
+      '/desktop': 'http://localhost:8420',
     },
   },
   build: {

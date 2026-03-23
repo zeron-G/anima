@@ -51,16 +51,31 @@ onMounted(loadData)
 </script>
 
 <template>
-  <div class="memory-view">
-    <!-- Top bar: search + filters -->
+  <div class="page-view memory-view">
+    <div class="page-header">
+      <div class="section-label">Knowledge base</div>
+      <h1 class="page-title">Memory</h1>
+      <p class="page-subtitle">Search, explore, and visualize stored memories across all knowledge domains.</p>
+    </div>
+
+    <!-- Search toolbar -->
     <div class="memory-toolbar glass">
-      <input v-model="searchQuery" @keydown.enter="handleSearch"
-             placeholder="搜索记忆..." class="search-input" />
-      <select v-model="typeFilter" class="type-select" @change="handleSearch">
-        <option value="">全部类型</option>
+      <div class="search-wrap">
+        <svg class="search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
+          <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+        </svg>
+        <input
+          v-model="searchQuery"
+          @keydown.enter="handleSearch"
+          placeholder="Search memories..."
+          class="search-input"
+        />
+      </div>
+      <select v-model="typeFilter" class="type-select input-field" @change="handleSearch">
+        <option value="">All types</option>
         <option v-for="t in types.filter(Boolean)" :key="t" :value="t">{{ t }}</option>
       </select>
-      <button class="search-btn" @click="handleSearch">搜索</button>
+      <button class="btn-primary search-btn" @click="handleSearch">Search</button>
     </div>
 
     <div class="memory-grid">
@@ -79,15 +94,91 @@ onMounted(loadData)
 </template>
 
 <style scoped>
-.memory-view { height: 100%; display: flex; flex-direction: column; padding: 16px; gap: 16px; }
-.memory-toolbar { display: flex; gap: 8px; padding: 10px 16px; align-items: center; }
-.search-input { flex: 1; background: hsla(220, 20%, 10%, 0.5); border: 1px solid hsla(200, 30%, 30%, 0.2); border-radius: 8px; padding: 8px 12px; color: var(--eva-text); font-size: 13px; outline: none; }
-.search-input:focus { border-color: hsla(200, 60%, 50%, 0.4); }
-.type-select { background: hsla(220, 20%, 12%, 0.5); border: 1px solid hsla(200, 30%, 30%, 0.2); border-radius: 8px; padding: 8px; color: var(--eva-text); font-size: 13px; outline: none; }
-.search-btn { padding: 8px 16px; border-radius: 8px; border: 1px solid hsla(200, 50%, 50%, 0.2); background: hsla(200, 40%, 25%, 0.4); color: var(--eva-ice); font-size: 13px; cursor: pointer; }
-.search-btn:hover { background: hsla(200, 40%, 30%, 0.5); }
-.memory-grid { flex: 1; display: grid; grid-template-columns: 1fr 320px; gap: 16px; min-height: 0; }
-.memory-main { min-height: 400px; }
-.memory-sidebar { display: flex; flex-direction: column; gap: 16px; overflow-y: auto; }
-@media (max-width: 900px) { .memory-grid { grid-template-columns: 1fr; } }
+.memory-view {
+  gap: var(--space-lg);
+}
+
+.memory-toolbar {
+  display: flex;
+  gap: 10px;
+  padding: 10px var(--space-md);
+  align-items: center;
+}
+
+.search-wrap {
+  flex: 1;
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.search-icon {
+  position: absolute;
+  left: 12px;
+  color: var(--text-dim);
+  pointer-events: none;
+}
+
+.search-input {
+  width: 100%;
+  padding: 10px 14px 10px 38px;
+  background: rgba(10, 10, 20, 0.5);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font-size: 13px;
+  outline: none;
+  transition: border-color var(--transition-fast);
+}
+
+.search-input:focus {
+  border-color: rgba(var(--accent-rgb), 0.25);
+}
+
+.search-input::placeholder {
+  color: var(--text-dim);
+}
+
+.type-select {
+  width: 140px;
+  padding: 10px 12px;
+  appearance: none;
+  cursor: pointer;
+  background-image: url("data:image/svg+xml,%3Csvg width='10' height='6' viewBox='0 0 10 6' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%23666' stroke-width='1.5' stroke-linecap='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  padding-right: 28px;
+}
+
+.search-btn {
+  padding: 10px 20px;
+  font-size: 12px;
+  flex-shrink: 0;
+}
+
+.memory-grid {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 1fr 320px;
+  gap: var(--space-lg);
+  min-height: 0;
+}
+
+.memory-main {
+  min-height: 400px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  overflow: hidden;
+}
+
+.memory-sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-lg);
+  overflow-y: auto;
+}
+
+@media (max-width: 900px) {
+  .memory-grid { grid-template-columns: 1fr; }
+}
 </style>
