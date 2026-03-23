@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import collections
 import math
+import random
 import threading
 import time
 from collections import defaultdict
@@ -730,9 +731,10 @@ class GossipMesh:
             if not ip or not port:
                 continue
 
-            # Exponential backoff check
+            # Exponential backoff + random jitter to prevent reconnect storms
             fail_count = self._reconnect_fail_counts.get(nid, 0)
-            backoff = min(self.RECONNECT_INTERVAL * (2 ** fail_count), 300.0)
+            base_backoff = min(self.RECONNECT_INTERVAL * (2 ** fail_count), 300.0)
+            backoff = base_backoff * random.uniform(0.8, 1.2)
             last_attempt = self._last_reconnect_per_peer.get(nid, 0.0)
             if (now - last_attempt) < backoff:
                 continue
