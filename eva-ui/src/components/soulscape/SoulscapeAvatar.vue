@@ -14,6 +14,9 @@ import { useEmotionStore } from '@/stores/emotionStore'
 
 type Mode = 'vrm' | 'live2d'
 
+// Backend base URL — needed for Tauri where frontend origin != backend origin
+const API_BASE = import.meta.env.VITE_API_BASE || ''
+
 const emotion = useEmotionStore()
 
 const containerRef = ref<HTMLDivElement>()
@@ -179,7 +182,7 @@ async function initVrm() {
   // Load model
   const loader = new GLTFLoader()
   loader.register((parser: any) => new VRMLoaderPlugin(parser))
-  const gltf = await loader.loadAsync('/desktop/static/model/flare/Flare.vrm')
+  const gltf = await loader.loadAsync(`${API_BASE}/desktop/static/model/flare/Flare.vrm`)
   vrm = gltf.userData.vrm
   if (!vrm) throw new Error('No VRM data')
 
@@ -248,7 +251,7 @@ async function initLive2d() {
   if (!l2dCanvasRef.value || !containerRef.value) return
 
   // Load SDKs from CDN (same as old frontend)
-  await loadScript('/static/live2dcubismcore.min.js')
+  await loadScript(`${API_BASE}/static/live2dcubismcore.min.js`)
   await loadScript('https://cdn.jsdelivr.net/npm/pixi.js@7.x/dist/pixi.min.js')
   await loadScript('https://cdn.jsdelivr.net/npm/pixi-live2d-display@0.4.0/dist/cubism4.min.js')
 
@@ -269,7 +272,7 @@ async function initLive2d() {
     resizeTo: containerRef.value,
   })
 
-  const model = await PIXI.live2d.Live2DModel.from('/static/model/PurpleBird/PurpleBird.model3.json', { autoInteract: false })
+  const model = await PIXI.live2d.Live2DModel.from(`${API_BASE}/static/model/PurpleBird/PurpleBird.model3.json`, { autoInteract: false })
   l2dApp.stage.addChild(model)
   l2dModel = model
 

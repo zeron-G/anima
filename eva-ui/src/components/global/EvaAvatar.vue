@@ -4,6 +4,8 @@ import * as THREE from 'three'
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import { VRMLoaderPlugin, VRMUtils } from '@pixiv/three-vrm'
 
+const API_BASE = import.meta.env.VITE_API_BASE || ''
+
 const props = defineProps<{
   size?: number
   showFull?: boolean
@@ -47,7 +49,7 @@ onMounted(async () => {
   loader.register((parser: any) => new VRMLoaderPlugin(parser))
 
   try {
-    const gltf = await loader.loadAsync('/desktop/static/model/flare/Flare.vrm')
+    const gltf = await loader.loadAsync(`${API_BASE}/desktop/static/model/flare/Flare.vrm`)
     vrm = gltf.userData.vrm
     if (vrm) {
       VRMUtils.rotateVRM0(vrm)
