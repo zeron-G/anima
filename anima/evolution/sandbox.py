@@ -138,14 +138,16 @@ class TestRunner:
             return True, "No files to check"
 
         errors = []
+        # Use working dir as valid root (supports both main repo and worktree)
+        valid_root = Path(self._cwd).resolve()
         for f in changed_files:
             if not f.endswith(".py"):
                 continue
             # Resolve relative path — try as-is, then with anima/ prefix
             fpath = Path(self._cwd) / f
-            # Validate path is within project root (prevent traversal)
+            # Validate path is within working directory (prevent traversal)
             try:
-                validate_path_within(fpath, project_root())
+                validate_path_within(fpath, valid_root)
             except Exception:
                 log.warning("Path traversal blocked in sandbox: %s", f)
                 continue
