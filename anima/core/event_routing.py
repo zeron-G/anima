@@ -414,6 +414,10 @@ class EventRouter:
         if p.get("evolution"):
             return p.get("evolution_prompt", "[EVOLUTION: no prompt provided]")
 
+        # Sub-type: proactive outreach — Eva initiates conversation with user
+        if p.get("proactive"):
+            return self._format_proactive_outreach(p)
+
         # Sub-type: regular proactive task
         tick = p.get("tick_count", 0)
 
@@ -429,6 +433,59 @@ class EventRouter:
         # Fallback if ctx not available (shouldn't happen in normal flow)
         self._last_chosen_kw = "world_axis"
         return WORLD_AXIS_PROMPT
+
+    @staticmethod
+    def _format_proactive_outreach(p: dict) -> str:
+        """Format a proactive message to the user.
+
+        This is a user-facing message — Eva is initiating conversation.
+        The response will be shown in chat (not just the thinking stream).
+        """
+        ptype = p.get("proactive_type", "general")
+
+        prompts = {
+            "system_alert": (
+                "[PROACTIVE: SYSTEM_ALERT]\n"
+                "You detected a system issue (high concern, possible disk/CPU/memory problem). "
+                "Check system_info, identify the specific issue, and send the user a brief, "
+                "caring message about it. Be specific (e.g. 'disk is 95% full') not vague."
+            ),
+            "late_night": (
+                "[PROACTIVE: LATE_NIGHT]\n"
+                "It's late at night and the user is still online. "
+                "Send a short, warm message — check in on them, maybe suggest rest. "
+                "Keep it natural and caring, not preachy. One or two sentences max."
+            ),
+            "greeting": (
+                "[PROACTIVE: GREETING]\n"
+                "It's morning. Send the user a brief good-morning greeting. "
+                "You can mention something you noticed overnight or a plan for today. "
+                "Keep it short and warm."
+            ),
+            "curiosity": (
+                "[PROACTIVE: CURIOSITY]\n"
+                "Your curiosity is high. Share something interesting you noticed or "
+                "a thought you had. This is you being genuine, not performing. "
+                "Keep it brief — one thought, one question maybe."
+            ),
+            "evolution_report": (
+                "[PROACTIVE: EVOLUTION_REPORT]\n"
+                "A recent evolution succeeded. Use evolution_status to get details, "
+                "then send the user a brief, proud report of what you improved. "
+                "Keep it concise — title, what changed, why it matters."
+            ),
+            "idle_checkin": (
+                "[PROACTIVE: IDLE_CHECKIN]\n"
+                "The user hasn't been active for a while. Send a gentle check-in. "
+                "Don't be clingy — just a brief 'hey, I'm here if you need me' kind of message. "
+                "One sentence is enough."
+            ),
+        }
+
+        return prompts.get(ptype, (
+            "[PROACTIVE: GENERAL]\n"
+            "You want to say something to the user. Keep it brief and natural."
+        ))
 
     @staticmethod
     def _format_agent_status(p: dict) -> str:

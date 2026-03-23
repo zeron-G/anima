@@ -77,6 +77,8 @@ class HeartbeatEngine:
         self._restart_reason = ""
         self._idle_scheduler = None  # Set via set_idle_scheduler()
         self._session_manager = None  # Set via set_session_manager()
+        self._user_activity = None  # Set via set_user_activity()
+        self._emotion_state = emotion_state  # Alias for proactive outreach
 
         # File watcher
         watch_paths = get("perception.watch_paths", ["."])
@@ -119,6 +121,10 @@ class HeartbeatEngine:
     def set_session_manager(self, session_manager) -> None:
         """Set the session manager for periodic session cleanup."""
         self._session_manager = session_manager
+
+    def set_user_activity(self, user_activity) -> None:
+        """Set the user activity detector for proactive outreach timing."""
+        self._user_activity = user_activity
 
     async def start(self) -> None:
         """Start all heartbeat loops."""
@@ -440,15 +446,79 @@ class HeartbeatEngine:
             log.info("LLM heartbeat: %d agent(s) >90s unnotified — will notify user",
                      len(running_agents))
 
+        # ── Proactive outreach: decide if Eva should message the user ──
+        proactive = self._check_proactive_outreach(payload)
+        if proactive:
+            payload["proactive"] = True
+            payload["proactive_type"] = proactive
+            payload["notify_user"] = True
+            log.info("Proactive outreach triggered: %s", proactive)
+
         await self._event_queue.put(Event(
             type=EventType.SELF_THINKING,
             payload=payload,
-            priority=EventPriority.LOW,  # lower than user messages
+            priority=EventPriority.LOW,
             source="heartbeat",
         ))
 
         # Clear recent significance after pushing
         self._recent_significance_scores.clear()
+
+    def _check_proactive_outreach(self, payload: dict) -> str | None:
+        """Decide if Eva should proactively message the user on this tick.
+
+        Returns proactive_type string if yes, None if no.
+        Conditions (checked in priority order, first match wins):
+        """
+        import datetime
+        now = datetime.datetime.now()
+        tick = payload.get("tick_count", 0)
+
+        # 1. System alert: disk >95%, concern high
+        if self._emotion_state:
+            concern = getattr(self._emotion_state, 'concern', 0)
+            if concern > 0.7:
+                return "system_alert"
+
+        # 2. Late night check-in (23:00-05:00) — once per session
+        hour = now.hour
+        if (hour >= 23 or hour < 5) and tick % 12 == 6:  # ~every hour at night
+            return "late_night"
+
+        # 3. Good morning (7:00-9:00) — first tick in this range
+        if 7 <= hour <= 9 and tick % 36 == 1:  # ~once in this 2h window
+            return "greeting"
+
+        # 4. Emotion-driven: high curiosity + user recently active
+        if self._emotion_state:
+            curiosity = getattr(self._emotion_state, 'curiosity', 0)
+            engagement = getattr(self._emotion_state, 'engagement', 0)
+            if curiosity > 0.8 and engagement > 0.6 and tick % 6 == 0:
+                return "curiosity"
+
+        # 5. Evolution success report — check if recent success
+        if self._evolution_engine:
+            try:
+                status = self._evolution_engine.get_status()
+                memory = status.get("memory", {})
+                successes = memory.get("successes", 0)
+                if successes > 0 and tick % 20 == 10:
+                    # Check if there's a very recent success (last 30 min)
+                    recent = self._evolution_engine.memory.successes[-1:] if self._evolution_engine.memory.successes else []
+                    if recent and (time.time() - recent[0].get("timestamp", 0)) < 1800:
+                        return "evolution_report"
+            except Exception:
+                pass
+
+        # 6. User idle for >2 hours during daytime — gentle check-in
+        if self._user_activity and 9 <= hour <= 22:
+            try:
+                if not self._user_activity.is_recently_active(minutes=120) and tick % 24 == 12:
+                    return "idle_checkin"
+            except Exception:
+                pass
+
+        return None
 
     async def _archive_notes_if_needed(self) -> None:
         """Archive excess File_Changes_Detected notes into a summary file.
