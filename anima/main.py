@@ -842,6 +842,7 @@ async def _init_cognitive(config: dict, core: dict, llm: dict, heartbeat_deps: d
     # Wire evolution engine with reload manager (created later via cognitive)
     heartbeat_deps["evolution_engine"].wire(
         reload_manager=cognitive.reload_manager, agent_manager=core["agent_manager"],
+        event_queue=core["event_queue"],
     )
 
     # Allow network callbacks to reference cognitive (for evolution_deployed handler)
