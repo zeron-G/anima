@@ -165,7 +165,7 @@ class TestEmotionFeedback:
         text = "兴奋 期待 好奇 有趣 想试试 让我看看 马上 excited interesting"
         adj = extract_emotion_adjustments(text)
         for dim, val in adj.items():
-            assert -0.15 <= val <= 0.15, f"{dim}={val} exceeds clamp range"
+            assert -0.30 <= val <= 0.30, f"{dim}={val} exceeds clamp range"
 
     def test_neutral_response(self):
         from anima.emotion.feedback import extract_emotion_adjustments

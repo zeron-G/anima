@@ -58,10 +58,14 @@ async def test_heartbeat_detects_file_changes(heartbeat_deps, tmp_path):
     # Next tick should detect change
     await hb._on_script_tick()
 
-    # Check if FILE_CHANGE event was queued
-    if not eq.empty():
+    # Check if FILE_CHANGE event was queued (may have SYSTEM_ALERT first if disk >95%)
+    found_file_change = False
+    while not eq.empty():
         evt = await eq.get()
-        assert evt.type == EventType.FILE_CHANGE
+        if evt.type == EventType.FILE_CHANGE:
+            found_file_change = True
+            break
+    assert found_file_change, "Expected FILE_CHANGE event in queue"
 
 
 @pytest.mark.asyncio
