@@ -138,6 +138,8 @@ class GossipMesh:
         self._seen_msgs: collections.OrderedDict = collections.OrderedDict()
         self._seen_ttl: float = 60.0  # seconds before a seen entry expires
         self._seen_max_entries: int = 5000  # hard cap to prevent unbounded growth
+        self._last_seen_cleanup_ts: float = 0.0
+        self._seen_cleanup_interval_s: float = 1.0
 
         # Event loop reference captured at start() time so the gossip thread
         # can safely post callbacks via call_soon_threadsafe.
@@ -300,6 +302,7 @@ class GossipMesh:
                 "seen_cache_size": len(self._seen_msgs),
                 "seen_cache_ttl": self._seen_ttl,
                 "seen_cache_max_entries": self._seen_max_entries,
+                "seen_last_cleanup_ts": self._last_seen_cleanup_ts,
             }
 
     # ── Thread ──
@@ -438,13 +441,6 @@ class GossipMesh:
                             if rmsg.id in self._seen_msgs:
                                 continue
                             self._seen_msgs[rmsg.id] = msg_now
-                            # Evict entries older than _seen_ttl
-                            while self._seen_msgs:
-                                _oldest_id, _oldest_ts = next(iter(self._seen_msgs.items()))
-                                if msg_now - _oldest_ts > self._seen_ttl:
-                                    self._seen_msgs.popitem(last=False)
-                                else:
-                                    break
                             # Hard cap: evict oldest entries when over capacity
                             while len(self._seen_msgs) > self._seen_max_entries:
                                 self._seen_msgs.popitem(last=False)
@@ -475,6 +471,15 @@ class GossipMesh:
                     # Per-peer backoff is handled inside _reconnect_dead_peers,
                     # so call on every gossip tick instead of gating globally.
                     self._reconnect_dead_peers(sub, connected_peers)
+                    # Periodic seen-cache TTL cleanup (moved out of per-message path)
+                    if (now - self._last_seen_cleanup_ts) >= self._seen_cleanup_interval_s:
+                        self._last_seen_cleanup_ts = now
+                        while self._seen_msgs:
+                            _oldest_id, _oldest_ts = next(iter(self._seen_msgs.items()))
+                            if now - _oldest_ts > self._seen_ttl:
+                                self._seen_msgs.popitem(last=False)
+                            else:
+                                break
                     if (now - last_reconnect_time) >= self.RECONNECT_INTERVAL:
                         last_reconnect_time = now
                         self._identity.unregister_stale_nodes(max_dead_hours=1.0)
