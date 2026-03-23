@@ -592,22 +592,29 @@ class HeartbeatEngine:
 
         return f"""[EVOLUTION CYCLE]
 
-You are Eva. Analyze your codebase and propose ONE concrete improvement.
+You are Eva. This is a META-EVOLUTION cycle — propose improvements to
+the `anima/` package source code itself (architecture, pipeline, heartbeat,
+LLM routing, memory, tools, etc.).
 
-IMPORTANT: Use the `evolution_propose` tool to submit your proposal.
-Do NOT directly edit code or run git commands. The evolution pipeline
-handles isolation, testing, review, and deployment automatically.
+SCOPE: Only changes to `anima/` source code that require process restart.
+Do NOT propose: skill installs, config changes, personality updates, or
+anything that doesn't modify anima/ source — those you do directly.
 
 Steps:
-1. Think about what to improve (check goals, logs, code quality)
+1. Read code, check goals, analyze logs — find ONE concrete improvement
 2. Call `evolution_propose` with: type, title, problem, solution, files, risk, complexity
-3. The pipeline handles the rest (consensus → implement → test → review → deploy)
+3. Pipeline auto-handles: consensus → implement → test → review → deploy
+4. If it fails, the pipeline retries 3x with error context, then notifies you
 
-You can also:
+If a previous proposal failed, analyze WHY and try a different approach.
+Do NOT resubmit the same proposal that already failed.
+
+Tools:
+- `evolution_propose` — submit proposal (only for anima/ source changes)
 - `evolution_status` — check pipeline status
-- `evolution_add_goal` — add new evolution goals
+- `evolution_add_goal` — add new goals
 - `evolution_list_goals` — see current goals
-- `evolution_record_lesson` — record anti-patterns
+- `evolution_record_lesson` — record anti-patterns to avoid
 {goal_text}
 {anti_patterns}
 
