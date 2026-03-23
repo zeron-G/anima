@@ -30,6 +30,21 @@ class DashboardServer:
         self._runner: web.AppRunner | None = None
         self._push_task: asyncio.Task | None = None
 
+        # CORS middleware — allow Tauri (https://tauri.localhost) and dev server
+        @web.middleware
+        async def cors_middleware(request, handler):
+            if request.method == "OPTIONS":
+                resp = web.Response()
+            else:
+                resp = await handler(request)
+            resp.headers["Access-Control-Allow-Origin"] = request.headers.get("Origin", "*")
+            resp.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
+            resp.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
+            resp.headers["Access-Control-Allow-Credentials"] = "true"
+            return resp
+
+        self._app.middlewares.append(cors_middleware)
+
         # Core routes (kept)
         self._app.router.add_get("/ws", self._handle_ws)
         self._app.router.add_post("/api/upload", self._handle_upload)
