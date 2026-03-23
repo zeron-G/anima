@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import collections
 import math
+import random
 import threading
 import time
 from collections import defaultdict
@@ -78,6 +79,18 @@ class GossipMesh:
 
     STARTUP_GRACE = 30.0  # seconds after start before marking never-seen nodes as dead
     RECONNECT_INTERVAL = 30.0  # seconds between reconnect attempts for dead/suspect peers
+    RECONNECT_BASE = 1.0       # base delay for exponential backoff (seconds)
+    RECONNECT_MAX_DELAY = 30.0  # cap for exponential backoff (seconds)
+    RECONNECT_JITTER_RATIO = 0.3  # jitter as fraction of computed delay
+
+    @staticmethod
+    def compute_reconnect_delay(attempt: int, base: float = 1.0,
+                                max_delay: float = 30.0,
+                                jitter_ratio: float = 0.3) -> float:
+        """Exponential backoff with cap and random jitter."""
+        delay = min(base * (2 ** attempt), max_delay)
+        jitter = random.uniform(0, jitter_ratio * delay)
+        return delay + jitter
 
     def __init__(
         self,
@@ -715,9 +728,10 @@ class GossipMesh:
     def _reconnect_dead_peers(self, sub_socket, connected: set) -> None:
         """Ensure TCP connections exist for dead/suspect peers with exponential backoff.
 
-        Called every RECONNECT_INTERVAL seconds (from _gossip_thread on gossip
-        ticks).  Does not change peer state — status is managed by phi detector.
-        Backoff: min(RECONNECT_INTERVAL * 2^fail_count, 300) seconds between attempts.
+        Called on every gossip tick (from _gossip_thread).  Does not change
+        peer state — status is managed by phi detector.
+        Backoff: min(base * 2^fail_count, max_delay) + jitter to prevent
+        reconnect storms when multiple nodes target the same offline peer.
         """
         now = time.time()
         with self._lock:
@@ -730,9 +744,12 @@ class GossipMesh:
             if not ip or not port:
                 continue
 
-            # Exponential backoff check
+            # Exponential backoff with jitter to prevent reconnect storms
             fail_count = self._reconnect_fail_counts.get(nid, 0)
-            backoff = min(self.RECONNECT_INTERVAL * (2 ** fail_count), 300.0)
+            backoff = self.compute_reconnect_delay(
+                fail_count, self.RECONNECT_BASE,
+                self.RECONNECT_MAX_DELAY, self.RECONNECT_JITTER_RATIO,
+            )
             last_attempt = self._last_reconnect_per_peer.get(nid, 0.0)
             if (now - last_attempt) < backoff:
                 continue
@@ -759,6 +776,6 @@ class GossipMesh:
                 self._reconnect_fail_counts.pop(nid, None)
             except zmq.ZMQError as e:
                 self._reconnect_fail_counts[nid] = fail_count + 1
-                log.debug("Reconnect failed for %s at %s (fail_count=%d, next_backoff=%.0fs): %s",
-                          nid, addr, fail_count + 1,
-                          min(self.RECONNECT_INTERVAL * (2 ** (fail_count + 1)), 300.0), e)
+                next_backoff = min(self.RECONNECT_BASE * (2 ** (fail_count + 1)), self.RECONNECT_MAX_DELAY)
+                log.debug("Reconnect failed for %s at %s (fail_count=%d, next_backoff≈%.0fs): %s",
+                          nid, addr, fail_count + 1, next_backoff, e)
