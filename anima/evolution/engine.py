@@ -101,6 +101,11 @@ class EvolutionEngine:
 
         # Rate limit check
         self._check_rate_limits()
+        # Reset failure counter after cooldown expires
+        if self._cooldown_until > 0 and time.time() >= self._cooldown_until:
+            log.info("Cooldown expired — resetting consecutive failures (%d → 0)", self._consecutive_failures)
+            self._consecutive_failures = 0
+            self._cooldown_until = 0
         if time.time() < self._cooldown_until:
             remaining = int(self._cooldown_until - time.time())
             log.warning("Evolution in cooldown (%ds remaining)", remaining)
