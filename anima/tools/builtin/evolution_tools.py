@@ -124,10 +124,11 @@ def get_evolution_tools() -> list[ToolSpec]:
         ToolSpec(
             name="evolution_propose",
             description=(
-                "Submit an evolution proposal to the six-layer pipeline "
-                "(Proposal → Consensus → Implement → Test → Review → Deploy). "
-                "Use this INSTEAD of directly modifying code when doing evolution tasks. "
-                "The pipeline handles isolation (git worktree), testing, review, and safe deployment."
+                "Submit a META-EVOLUTION proposal — ONLY for changes to anima/ package source code "
+                "(core architecture, pipeline, heartbeat, LLM routing, etc.) that require process restart. "
+                "Do NOT use this for: installing skills, fixing user projects, editing configs, updating personality, "
+                "or any task that doesn't modify anima/ source code — just use shell/write_file/edit_file directly. "
+                "Pipeline: Proposal → Consensus → Implement → Test → Review → Deploy (auto-retries 3x on failure)."
             ),
             parameters={
                 "type": "object",

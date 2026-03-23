@@ -99,6 +99,8 @@ class TaskDelegate:
 
     TASK_TTL = 300.0        # seconds to keep completed tasks in memory
     HEARTBEAT_INTERVAL = 15.0  # executor sends task_heartbeat every N seconds
+    DEFAULT_TIMEOUT = 60.0    # configurable default delegation timeout (seconds)
+    STATUS_LOG_INTERVAL = 10.0  # log intermediate status every N seconds during wait
 
     def __init__(
         self,
@@ -169,7 +171,7 @@ class TaskDelegate:
         task_type: str,
         payload: dict,
         target_node: str,
-        timeout: float = 60.0,
+        timeout: float | None = None,
         priority: int = 0,
         max_retries: int = 0,
     ) -> str:
@@ -181,11 +183,16 @@ class TaskDelegate:
             payload:     Arbitrary dict passed to the handler.
             target_node: Node ID that should execute the task.
             timeout:     Seconds before the task is considered timed-out.
+                         Defaults to DEFAULT_TIMEOUT.
             priority:    Higher value = higher urgency (informational for now;
                          the executing node may use it to order its queue).
             max_retries: How many times the executor should retry on failure
                          before giving up.
         """
+        if timeout is None:
+            timeout = self.DEFAULT_TIMEOUT
+
+        request_id = gen_id("req")
         task = DelegatedTask(
             task_type=task_type,
             payload=payload,
@@ -204,8 +211,8 @@ class TaskDelegate:
             })
 
         log.info(
-            "Delegated task %s (%s) → %s [priority=%d, max_retries=%d]",
-            task.task_id, task_type, target_node, priority, max_retries,
+            "Delegated task %s (%s) → %s [request_id=%s, timeout=%.0fs, priority=%d, max_retries=%d]",
+            task.task_id, task_type, target_node, request_id, timeout, priority, max_retries,
         )
         return task.task_id
 
@@ -253,14 +260,15 @@ class TaskDelegate:
     async def wait_result(
         self,
         task_id: str,
-        timeout: float = 60.0,
+        timeout: float | None = None,
         heartbeat_timeout: float = 45.0,
     ) -> dict:
         """
         Await the result of a delegated task.
 
         Args:
-            timeout:           Overall deadline in seconds.
+            timeout:           Overall deadline in seconds.  Defaults to
+                               DEFAULT_TIMEOUT.
             heartbeat_timeout: If >0, raise NetworkTimeoutError when no
                                liveness signal is received within this many
                                seconds.  A "liveness signal" is any of:
@@ -269,9 +277,13 @@ class TaskDelegate:
                                task completion.  Defaults to 45 s.
 
         Returns result dict on success.
-        Raises TimeoutError on overall deadline, NetworkTimeoutError on
-        heartbeat silence, or RuntimeError on task failure.
+        Raises TimeoutError (with structured .detail dict) on overall
+        deadline, NetworkTimeoutError on heartbeat silence, or RuntimeError
+        on task failure.
         """
+        if timeout is None:
+            timeout = self.DEFAULT_TIMEOUT
+
         task = self._outbound.get(task_id)
         if task is None:
             raise KeyError(f"Unknown task_id: {task_id}")
@@ -296,13 +308,36 @@ class TaskDelegate:
             min(heartbeat_timeout / 3.0, 10.0) if heartbeat_timeout > 0 else timeout
         )
 
+        start_time = time.time()
+        last_status_log = start_time
+
         try:
-            deadline = time.time() + timeout
+            deadline = start_time + timeout
             while True:
                 remaining = deadline - time.time()
                 if remaining <= 0:
+                    elapsed_ms = int((time.time() - start_time) * 1000)
                     task.status = TaskStatus.TIMEOUT
-                    raise TimeoutError(f"Task {task_id} timed out after {timeout}s")
+                    err = TimeoutError(
+                        f"Task {task_id} timed out after {timeout}s "
+                        f"(node={task.target_node}, elapsed_ms={elapsed_ms})"
+                    )
+                    err.detail = {  # type: ignore[attr-defined]
+                        "error": "timeout",
+                        "task_id": task_id,
+                        "target_node": task.target_node,
+                        "elapsed_ms": elapsed_ms,
+                        "last_status": task.status,
+                        "retry_hint": "retry_with_different_node"
+                            if task.retry_count >= task.max_retries
+                            else "retry_same_node",
+                    }
+                    log.warning(
+                        "Task %s timeout: node=%s elapsed_ms=%d last_status=%s — "
+                        "consider local fallback or re-delegation",
+                        task_id, task.target_node, elapsed_ms, task.status,
+                    )
+                    raise err
 
                 wait_time = min(remaining, check_interval)
                 try:
@@ -310,6 +345,21 @@ class TaskDelegate:
                     return result
                 except asyncio.TimeoutError:
                     pass  # No result yet — check heartbeat below
+
+                # Periodic intermediate status feedback
+                now = time.time()
+                if (now - last_status_log) >= self.STATUS_LOG_INTERVAL:
+                    last_status_log = now
+                    elapsed_s = now - start_time
+                    status_label = {
+                        TaskStatus.PENDING: "waiting_remote",
+                        TaskStatus.ACCEPTED: "queued",
+                        TaskStatus.RUNNING: "running",
+                    }.get(task.status, task.status)
+                    log.info(
+                        "Task %s still in progress: status=%s node=%s elapsed=%.0fs remaining=%.0fs",
+                        task_id, status_label, task.target_node, elapsed_s, remaining,
+                    )
 
                 if heartbeat_timeout > 0:
                     # While task is still ACCEPTED (queued, not yet running),
@@ -321,11 +371,27 @@ class TaskDelegate:
                     last_hb = self._heartbeat_times.get(task_id, task.created_at)
                     since_hb = time.time() - last_hb
                     if since_hb > heartbeat_timeout:
+                        elapsed_ms = int((time.time() - start_time) * 1000)
                         task.status = TaskStatus.TIMEOUT
-                        raise NetworkTimeoutError(
+                        err_net = NetworkTimeoutError(
                             f"Task {task_id}: no heartbeat for {since_hb:.0f}s "
-                            f"(possible network disconnect)"
+                            f"(node={task.target_node}, elapsed_ms={elapsed_ms}, "
+                            f"possible network disconnect)"
                         )
+                        err_net.detail = {  # type: ignore[attr-defined]
+                            "error": "heartbeat_timeout",
+                            "task_id": task_id,
+                            "target_node": task.target_node,
+                            "elapsed_ms": elapsed_ms,
+                            "since_heartbeat_s": round(since_hb, 1),
+                            "retry_hint": "retry_with_different_node",
+                        }
+                        log.warning(
+                            "Task %s heartbeat timeout: node=%s elapsed_ms=%d since_hb=%.0fs — "
+                            "consider local fallback or re-delegation",
+                            task_id, task.target_node, elapsed_ms, since_hb,
+                        )
+                        raise err_net
         finally:
             self._result_futures.pop(task_id, None)
 

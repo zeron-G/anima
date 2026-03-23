@@ -2,7 +2,11 @@
 
 Pipeline: Proposal → Consensus → Implement → Test → Review → Deploy
 
-This is the main entry point. Called by the major heartbeat.
+Retry architecture:
+  - Test/review/implement failures trigger re-implementation with error context
+  - Up to max_retries (default 3) per proposal
+  - On final exhaustion, pushes FOLLOW_UP event back to cognitive loop
+  - Governance rejections return actionable feedback to the LLM tool call
 """
 
 from __future__ import annotations
@@ -25,9 +29,9 @@ from anima.utils.logging import get_logger
 
 def _count_pytest_failures(output: str) -> int:
     """Extract failure count from pytest output like '5 failed, 392 passed'."""
-    import re
     m = re.search(r'(\d+) failed', output)
     return int(m.group(1)) if m else 0
+
 
 log = get_logger("evolution.engine")
 
@@ -60,11 +64,14 @@ class EvolutionEngine:
         self._gossip_mesh = None
         self._reload_manager = None
         self._agent_manager = None
+        self._event_queue = None  # For pushing FOLLOW_UP events on failure
 
-    def wire(self, gossip_mesh=None, reload_manager=None, agent_manager=None) -> None:
+    def wire(self, gossip_mesh=None, reload_manager=None, agent_manager=None,
+             event_queue=None) -> None:
         """Wire external dependencies."""
         self._gossip_mesh = gossip_mesh
         self._reload_manager = reload_manager
+        self._event_queue = event_queue
         if agent_manager:
             self._agent_manager = agent_manager
         if gossip_mesh:
@@ -90,14 +97,14 @@ class EvolutionEngine:
         )
         if not allowed:
             log.warning("Governance rejected evolution: %s", reason)
-            return "governance_rejected"
+            return f"governance_rejected: {reason}"
 
         # Rate limit check
         self._check_rate_limits()
         if time.time() < self._cooldown_until:
             remaining = int(self._cooldown_until - time.time())
             log.warning("Evolution in cooldown (%ds remaining)", remaining)
-            return "cooldown"
+            return f"cooldown: {remaining}s remaining"
 
         log.info("═══ Evolution Pipeline: %s ═══", proposal.title)
 
@@ -109,7 +116,7 @@ class EvolutionEngine:
                 proposal.id, proposal.type.value, proposal.title,
                 "Consensus rejected", "Proposal did not pass voting",
             )
-            return "rejected"
+            return "rejected: consensus vote failed"
 
         # For multi-node: wait for votes before proceeding
         if alive > 1:
@@ -120,7 +127,7 @@ class EvolutionEngine:
                     f"Consensus: {result}", f"Voting result: {result}",
                 )
                 log.info("Evolution consensus: %s for '%s'", result, proposal.title)
-                return result
+                return f"rejected: {result}"
 
         # Add to queue
         self.queue.add(proposal)
@@ -134,10 +141,7 @@ class EvolutionEngine:
         return "queued"
 
     async def _wait_for_votes(self, proposal, alive: int, timeout: int = 30) -> str:
-        """Poll consensus.check_result() until voting completes or timeout.
-
-        Returns 'approved', 'rejected', or 'timeout'.
-        """
+        """Poll consensus.check_result() until voting completes or timeout."""
         import asyncio
         deadline = time.time() + timeout
         while time.time() < deadline:
@@ -145,7 +149,6 @@ class EvolutionEngine:
             if result is not None:
                 return result
             await asyncio.sleep(2)
-        # Timeout — check one final time with whatever votes we have
         result = self.consensus.check_result(proposal, alive)
         if result is not None:
             return result
@@ -153,169 +156,193 @@ class EvolutionEngine:
         return "timeout"
 
     async def _execute_next(self) -> str:
-        """Execute the next proposal in queue through implement → test → review → deploy."""
+        """Execute the next proposal with full retry loop.
+
+        On any stage failure (implement, test, review), re-runs implementation
+        with the error context so the agent can fix the issue. Up to max_retries
+        attempts total. On final exhaustion, pushes a FOLLOW_UP event so Eva
+        can revise and resubmit.
+        """
         proposal = self.queue.pop()
         if not proposal:
             return "empty"
 
         self._current_proposal = proposal
-        worktree = None
+        result = "unknown"
 
         try:
-            # Layer 3: Implement (in isolated worktree)
-            proposal.status = ProposalStatus.IMPLEMENTING
-            log.info("Layer 3 (Implement): %s", proposal.title)
-
-            worktree = Worktree(proposal.id)
-            worktree_path = worktree.create()
-            proposal.implementation_branch = worktree.branch
-
-            # Implementation: spawn a SubAgent with LLM agentic loop
-            impl_ok = await self._run_implementation(proposal, worktree_path)
-            if not impl_ok:
-                log.warning("Implementation failed for %s", proposal.id)
-                proposal.status = ProposalStatus.FAILED
-                self._on_failure(proposal, stage="implement", error="Implementation agent failed or timed out")
-                worktree.cleanup()
-                return "implement_failed"
-
-            # Layer 4: Test
-            proposal.status = ProposalStatus.TESTING
-            log.info("Layer 4 (Test): running three-level tests...")
-
-            # Test in worktree (SubAgent edits files there)
-            runner = TestRunner(str(worktree_path))
-
-            # Level 1: Static
-            ok, out = runner.level1_static(proposal.files)
-            if not ok:
-                return await self._handle_test_failure(proposal, worktree, "Level 1", out)
-
-            # Level 2: Pytest — compare against baseline to detect NEW failures only
-            baseline_runner = TestRunner(str(project_root()))
-            baseline_ok, baseline_out = baseline_runner.level2_pytest()
-            baseline_failures = _count_pytest_failures(baseline_out)
-
-            ok, out = runner.level2_pytest()
-            evo_failures = _count_pytest_failures(out)
-
-            if not ok and evo_failures > baseline_failures:
-                return await self._handle_test_failure(
-                    proposal, worktree, "Level 2",
-                    f"New test failures introduced ({evo_failures} vs baseline {baseline_failures}):\n{out}",
-                )
-            elif not ok:
-                log.info("Level 2: %d failures (same as baseline %d) — PASS", evo_failures, baseline_failures)
-
-            # Level 3: Sandbox (skip for trivial/small — worktree lacks runtime data/)
-            if proposal.complexity not in ("trivial", "small"):
-                ok, out = await runner.level3_sandbox()
-                if not ok:
-                    return await self._handle_test_failure(proposal, worktree, "Level 3", out)
-
-            # Layer 5: Review
-            proposal.status = ProposalStatus.REVIEWING
-            log.info("Layer 5 (Review): checking diff...")
-
-            # Get diff from worktree (SubAgent edits there)
-            try:
-                diff_result = _sp.run(
-                    ["git", "diff"], cwd=str(worktree_path),
-                    capture_output=True, text=True, timeout=10,
-                )
-                diff = diff_result.stdout or ""
-            except Exception:
-                diff = worktree.get_diff() or ""
-            review_ok, review_msg = self._review_diff(diff, proposal, cwd=str(worktree_path))
-            if not review_ok:
-                log.warning("Review failed: %s", review_msg)
-                proposal.status = ProposalStatus.FAILED
-                self._on_failure(proposal, stage="review", error=review_msg)
-                return "review_failed"
-
-            # Create evo/* branch for PR flow (in worktree)
-            branch = f"evo/{proposal.id}"
-            _sp.run(["git", "checkout", "-b", branch],
-                    cwd=str(worktree_path), capture_output=True, timeout=15)
-
-            # Commit changes in worktree (SubAgent edited files there)
-            _sp.run(["git", "add", "-A"], cwd=str(worktree_path),
-                    capture_output=True, timeout=15)
-            _sp.run(
-                ["git", "commit", "-m", f"Evolution {proposal.id}: {proposal.title}"],
-                cwd=str(worktree_path), capture_output=True, timeout=15,
-            )
-
-            # Sprint 8: Create safety tag before deploy
-            safety_tag = self._create_safety_tag(proposal)
-
-            # Layer 6: Deploy via evo/* branch + PR (from worktree)
-            log.info("Layer 6 (Deploy): creating PR on %s...", branch)
-            pr_ok, pr_msg = self._deploy_via_pr(proposal, branch, cwd=str(worktree_path))
-
-            if pr_ok:
-                # M-08 fix: set DEPLOYING first, DEPLOYED only after verification
-                proposal.status = ProposalStatus.DEPLOYING if hasattr(ProposalStatus, 'DEPLOYING') else ProposalStatus.DEPLOYED
-                log.info("Deployed via PR: %s — %s", proposal.title, pr_msg)
-                self.memory.record_success(
-                    proposal.id, proposal.type.value, proposal.title,
-                    proposal.files, proposal.solution[:200],
-                )
-                # Broadcast to other nodes so they auto-sync
-                if self._gossip_mesh:
-                    try:
-                        commit = _sp.run(["git", "rev-parse", "HEAD"], cwd=str(project_root()),
-                                        capture_output=True, text=True, timeout=10).stdout.strip()
-                        self._gossip_mesh.broadcast_event({
-                            "type": "evolution_deployed",
-                            "proposal_id": proposal.id,
-                            "title": proposal.title,
-                            "commit_hash": commit,
-                            "files": proposal.files,
-                        })
-                        log.info("Broadcast evolution_deployed to peers")
-                    except Exception as e:
-                        log.warning("Failed to broadcast deployment: %s", e)
-            else:
-                # PR failed — abandon this evolution, don't touch production
-                log.warning("PR flow failed (%s) — abandoning evolution (production safe)", pr_msg)
-                self._on_failure(proposal, stage="deploy", error=f"PR creation failed: {pr_msg}")
-                return "deploy_failed"
-
-            # Sprint 8: Post-deploy health check
-            if self.deployer and hasattr(self.deployer, 'verify_deployment'):
+            # ── Retry loop: implement → test → review, retry on any failure ──
+            for attempt in range(1, proposal.max_retries + 1):
+                worktree = None
                 try:
-                    ok, verify_msg = await self.deployer.verify_deployment()
+                    log.info("═══ Attempt %d/%d for %s ═══", attempt, proposal.max_retries, proposal.title)
+
+                    # Layer 3: Implement
+                    proposal.status = ProposalStatus.IMPLEMENTING
+                    log.info("Layer 3 (Implement): %s", proposal.title)
+
+                    worktree = Worktree(proposal.id)
+                    worktree_path = worktree.create()
+                    proposal.implementation_branch = worktree.branch
+
+                    # Build error context from previous attempts
+                    error_context = getattr(proposal, '_last_error_context', None)
+                    impl_ok = await self._run_implementation(proposal, worktree_path, error_context=error_context)
+                    if not impl_ok:
+                        proposal._last_error_context = "Implementation agent failed or timed out. Simplify the change."
+                        log.warning("Implementation failed (attempt %d/%d)", attempt, proposal.max_retries)
+                        worktree.cleanup()
+                        continue  # ← RETRY instead of return
+
+                    # Layer 4: Test
+                    proposal.status = ProposalStatus.TESTING
+                    log.info("Layer 4 (Test): running tests...")
+
+                    runner = TestRunner(str(worktree_path))
+
+                    # Level 1: Static
+                    ok, out = runner.level1_static(proposal.files)
                     if not ok:
-                        log.warning("Post-deploy health check failed: %s", verify_msg)
-                        self._auto_rollback_to_tag(proposal, safety_tag, verify_msg)
-                        return "rolled_back"
-                except Exception as e:
-                    log.warning("Health check error: %s", e)
+                        proposal._last_error_context = f"Level 1 static check failed:\n{out[:500]}\nFix the syntax errors."
+                        log.warning("Level 1 FAILED (attempt %d/%d)", attempt, proposal.max_retries)
+                        worktree.cleanup()
+                        continue  # ← RETRY
 
-            # Trigger hot-reload if needed
-            self.deployer.trigger_hot_reload(proposal)
+                    # Level 2: Pytest — compare against baseline
+                    baseline_runner = TestRunner(str(project_root()))
+                    baseline_ok, baseline_out = baseline_runner.level2_pytest()
+                    baseline_failures = _count_pytest_failures(baseline_out)
 
-            # Success!
-            self._on_success(proposal)
-            self.queue.archive(proposal)
-            log.info("═══ Evolution COMPLETE: %s ═══", proposal.title)
-            return "deployed"
+                    ok, out = runner.level2_pytest()
+                    evo_failures = _count_pytest_failures(out)
+
+                    if not ok and evo_failures > baseline_failures:
+                        proposal._last_error_context = (
+                            f"Level 2 pytest: {evo_failures} failures (baseline has {baseline_failures}). "
+                            f"Your change introduced {evo_failures - baseline_failures} new failure(s):\n{out[:500]}\n"
+                            f"Fix the failing tests."
+                        )
+                        log.warning("Level 2 FAILED: %d new failures (attempt %d/%d)",
+                                    evo_failures - baseline_failures, attempt, proposal.max_retries)
+                        worktree.cleanup()
+                        continue  # ← RETRY
+                    elif not ok:
+                        log.info("Level 2: %d failures (same as baseline %d) — PASS", evo_failures, baseline_failures)
+
+                    # Level 3: Sandbox (skip for trivial/small)
+                    if proposal.complexity not in ("trivial", "small"):
+                        ok, out = await runner.level3_sandbox()
+                        if not ok:
+                            proposal._last_error_context = f"Level 3 sandbox failed:\n{out[:500]}\nMake a simpler change."
+                            log.warning("Level 3 FAILED (attempt %d/%d)", attempt, proposal.max_retries)
+                            worktree.cleanup()
+                            continue  # ← RETRY
+
+                    # Layer 5: Review
+                    proposal.status = ProposalStatus.REVIEWING
+                    log.info("Layer 5 (Review): checking diff...")
+
+                    try:
+                        diff_result = _sp.run(
+                            ["git", "diff"], cwd=str(worktree_path),
+                            capture_output=True, text=True, timeout=10,
+                        )
+                        diff = diff_result.stdout or ""
+                    except Exception:
+                        diff = worktree.get_diff() or ""
+
+                    review_ok, review_msg = self._review_diff(diff, proposal, cwd=str(worktree_path))
+                    if not review_ok:
+                        proposal._last_error_context = (
+                            f"Code review failed: {review_msg}\n"
+                            f"Remove debug prints, hardcoded paths, and secrets before resubmitting."
+                        )
+                        log.warning("Review FAILED (attempt %d/%d): %s", attempt, proposal.max_retries, review_msg)
+                        worktree.cleanup()
+                        continue  # ← RETRY
+
+                    # ═══ ALL CHECKS PASSED — proceed to deploy ═══
+                    _sp.run(["git", "checkout", "-b", f"evo/{proposal.id}"],
+                            cwd=str(worktree_path), capture_output=True, timeout=15)
+                    _sp.run(["git", "add", "-A"], cwd=str(worktree_path),
+                            capture_output=True, timeout=15)
+                    _sp.run(
+                        ["git", "commit", "-m", f"Evolution {proposal.id}: {proposal.title}"],
+                        cwd=str(worktree_path), capture_output=True, timeout=15,
+                    )
+
+                    safety_tag = self._create_safety_tag(proposal)
+
+                    # Layer 6: Deploy
+                    log.info("Layer 6 (Deploy): creating PR on evo/%s...", proposal.id)
+                    pr_ok, pr_msg = self._deploy_via_pr(proposal, f"evo/{proposal.id}", cwd=str(worktree_path))
+
+                    if pr_ok:
+                        proposal.status = ProposalStatus.DEPLOYING if hasattr(ProposalStatus, 'DEPLOYING') else ProposalStatus.DEPLOYED
+                        log.info("Deployed via PR: %s — %s", proposal.title, pr_msg)
+                        self.memory.record_success(
+                            proposal.id, proposal.type.value, proposal.title,
+                            proposal.files, proposal.solution[:200],
+                        )
+                        self._broadcast_deployment(proposal)
+
+                        # Post-deploy health check
+                        if self.deployer and hasattr(self.deployer, 'verify_deployment'):
+                            try:
+                                ok, verify_msg = await self.deployer.verify_deployment()
+                                if not ok:
+                                    log.warning("Post-deploy health check failed: %s", verify_msg)
+                                    self._auto_rollback_to_tag(proposal, safety_tag, verify_msg)
+                                    result = "rolled_back"
+                                    break
+                            except Exception as e:
+                                log.warning("Health check error: %s", e)
+
+                        self.deployer.trigger_hot_reload(proposal)
+                        self._on_success(proposal)
+                        self.queue.archive(proposal)
+                        log.info("═══ Evolution COMPLETE: %s ═══", proposal.title)
+                        result = "deployed"
+                        break  # ← SUCCESS, exit retry loop
+                    else:
+                        proposal._last_error_context = f"Deploy failed: {pr_msg}. Try a lower-risk approach."
+                        log.warning("Deploy FAILED (attempt %d/%d): %s", attempt, proposal.max_retries, pr_msg)
+                        worktree.cleanup()
+                        continue  # ← RETRY
+
+                finally:
+                    if worktree:
+                        worktree.cleanup()
+
+            else:
+                # ── All retries exhausted ──
+                log.warning("═══ Evolution EXHAUSTED after %d attempts: %s ═══", proposal.max_retries, proposal.title)
+                proposal.status = ProposalStatus.ABANDONED
+                last_error = getattr(proposal, '_last_error_context', 'Unknown error')
+                self._on_failure(proposal, stage="exhausted", error=last_error[:300])
+                self.memory.record_failure(
+                    proposal.id, proposal.type.value, proposal.title,
+                    f"Exhausted {proposal.max_retries} attempts", last_error[:300],
+                )
+                # Push failure back to cognitive loop so Eva can revise
+                self._push_failure_feedback(proposal, last_error)
+                result = "exhausted"
 
         except Exception as e:
             log.error("Evolution pipeline error: %s", e)
             proposal.status = ProposalStatus.FAILED
             self._on_failure(proposal, stage="pipeline", error=str(e))
-            return "error"
+            self._push_failure_feedback(proposal, str(e))
+            result = "error"
 
         finally:
             self._current_proposal = None
-            if worktree:
-                worktree.cleanup()
-            # Clean up expired agents
             self.agent_pool.cleanup_expired()
 
-    async def _run_implementation(self, proposal: Proposal, worktree_path) -> bool:
+        return result
+
+    async def _run_implementation(self, proposal: Proposal, worktree_path,
+                                   error_context: str | None = None) -> bool:
         """Layer 3: Run a SubAgent to implement the proposal."""
         if not self._agent_manager:
             log.error("No agent_manager wired — cannot implement")
@@ -333,11 +360,17 @@ class EvolutionEngine:
             "Just read the files, make the fix, and report what you changed."
         )
 
-        log.info("Spawning implementation agent for %s (using Claude Code)", proposal.id)
+        # If this is a retry, include the error from the previous attempt
+        if error_context:
+            impl_prompt += (
+                f"\n\n⚠ PREVIOUS ATTEMPT FAILED:\n{error_context}\n\n"
+                f"Fix the above issue in this attempt. Do NOT repeat the same mistake."
+            )
+
+        log.info("Spawning implementation agent for %s (attempt %d, using Claude Code)",
+                 proposal.id, proposal.retry_count + 1)
         timeout = 600
 
-        # Use Claude Code for code development tasks (user requirement)
-        # Falls back to internal agent if Claude Code CLI not available
         try:
             session = await self._agent_manager.spawn_claude_code(
                 prompt=impl_prompt,
@@ -352,7 +385,6 @@ class EvolutionEngine:
                 timeout=timeout,
             )
 
-        # Wait for the agent to finish
         result = await self._agent_manager.wait_for(session.id, timeout=timeout)
 
         if result.status in ("completed", "done"):
@@ -362,29 +394,57 @@ class EvolutionEngine:
             log.warning("Implementation agent timed out: %s", proposal.id)
             return False
         else:
-            log.warning("Implementation agent %s: status=%s error=%s", proposal.id, result.status, result.error or "none")
+            log.warning("Implementation agent %s: status=%s error=%s",
+                        proposal.id, result.status, result.error or "none")
             return False
 
-    async def _handle_test_failure(self, proposal: Proposal, worktree: Worktree,
-                                    level: str, output: str) -> str:
-        """Handle test failure — retry or abandon."""
-        proposal.retry_count += 1
-        log.warning("Test %s FAILED (attempt %d/%d): %s",
-                     level, proposal.retry_count, proposal.max_retries, output[:200])
+    def _push_failure_feedback(self, proposal: Proposal, error: str) -> None:
+        """Push a FOLLOW_UP event back to the cognitive loop with failure context.
 
-        if proposal.retry_count >= proposal.max_retries:
-            proposal.status = ProposalStatus.ABANDONED
-            self.memory.record_failure(
-                proposal.id, proposal.type.value, proposal.title,
-                f"Test {level} failed after {proposal.max_retries} attempts",
-                f"Test output: {output[:300]}",
+        This ensures Eva knows about the failure and can revise her approach
+        instead of silently moving on.
+        """
+        if not self._event_queue:
+            return
+        try:
+            from anima.models.event import Event, EventType, EventPriority
+            feedback_msg = (
+                f"[EVOLUTION FAILED] Proposal '{proposal.title}' (ID: {proposal.id}) "
+                f"failed after {proposal.retry_count} attempt(s).\n"
+                f"Last error: {error[:400]}\n\n"
+                f"You should either:\n"
+                f"1. Revise the approach and resubmit with evolution_propose\n"
+                f"2. Record an anti-pattern with evolution_record_lesson\n"
+                f"3. Try a completely different improvement"
             )
-            self._on_failure(proposal, stage=f"test_{level.lower().replace(' ', '_')}", error=output[:300])
-            return "abandoned"
+            event = Event(
+                type=EventType.FOLLOW_UP,
+                payload={"text": feedback_msg, "source": "evolution_feedback"},
+                priority=EventPriority.NORMAL,
+                source="evolution_engine",
+            )
+            self._event_queue.put_nowait(event)
+            log.info("Pushed evolution failure feedback to cognitive loop")
+        except Exception as e:
+            log.warning("Failed to push failure feedback: %s", e)
 
-        # Retry — feed test failure output into the next implementation attempt
-        proposal.last_test_output = output[:500]
-        return "retry"
+    def _broadcast_deployment(self, proposal: Proposal) -> None:
+        """Broadcast deployment to gossip mesh peers."""
+        if not self._gossip_mesh:
+            return
+        try:
+            commit = _sp.run(["git", "rev-parse", "HEAD"], cwd=str(project_root()),
+                             capture_output=True, text=True, timeout=10).stdout.strip()
+            self._gossip_mesh.broadcast_event({
+                "type": "evolution_deployed",
+                "proposal_id": proposal.id,
+                "title": proposal.title,
+                "commit_hash": commit,
+                "files": proposal.files,
+            })
+            log.info("Broadcast evolution_deployed to peers")
+        except Exception as e:
+            log.warning("Failed to broadcast deployment: %s", e)
 
     def _review_diff(self, diff: str, proposal: Proposal, cwd: str = "") -> tuple[bool, str]:
         """Basic automated code review."""
@@ -392,7 +452,6 @@ class EvolutionEngine:
         issues = []
 
         if not diff or not diff.strip():
-            # SubAgent may have already committed — check git log in worktree
             try:
                 log_result = _sp.run(
                     ["git", "log", "--oneline", "-1"],
@@ -419,30 +478,24 @@ class EvolutionEngine:
                 return True, "Staged changes found"
             issues.append("No changes detected")
 
-        # Check for obvious problems
         lines = diff.split("\n")
         for i, line in enumerate(lines):
             if line.startswith("+") and not line.startswith("+++"):
-                # Check for hardcoded paths
-                # L-23: Cross-platform hardcoded path detection
                 home_dir = os.path.expanduser("~")
                 hardcoded_indicators = [
-                    home_dir,                          # User home directory
-                    "D:\\program", "D:\\data\\code",   # Windows dev paths
-                    "C:\\Users",                        # Windows users
-                    "/Users/", "/home/",               # macOS/Linux users
-                    "/opt/", "/usr/local/",            # Unix install paths
+                    home_dir,
+                    "D:\\program", "D:\\data\\code",
+                    "C:\\Users",
+                    "/Users/", "/home/",
+                    "/opt/", "/usr/local/",
                 ]
                 if any(indicator in line for indicator in hardcoded_indicators):
                     issues.append(f"Hardcoded path found: line {i}")
-                # Check for debug leftovers (word-boundary match to avoid false positives
-                # like sprint(, blueprint(, print_func(, etc.)
                 if (re.search(r'\bprint\(', line)
                         and "log." not in line
                         and "# noqa" not in line
                         and "# allow-print" not in line):
                     issues.append(f"Debug print found: line {i}")
-                # Check for secrets
                 if any(kw in line.lower() for kw in ["password=", "token=", "secret="]):
                     if "env var" not in line.lower() and '""' not in line:
                         issues.append(f"Possible secret in code: line {i}")
@@ -453,10 +506,9 @@ class EvolutionEngine:
 
     def _deploy_via_pr(self, proposal: Proposal, branch: str,
                        cwd: str = "") -> tuple[bool, str]:
-        """Push evo/* branch and create PR. Auto-merge if low risk (≤3 files)."""
+        """Push evo/* branch and create PR. Auto-merge if low risk."""
         root = cwd or str(project_root())
         try:
-            # Push branch
             push = _sp.run(
                 ["git", "push", "-u", "origin", branch],
                 cwd=root, capture_output=True, text=True, timeout=30,
@@ -464,7 +516,6 @@ class EvolutionEngine:
             if push.returncode != 0:
                 raise RuntimeError(f"Push failed: {push.stderr}")
 
-            # Create PR
             body = (
                 f"## Evolution: {proposal.title}\n\n"
                 f"**Problem:** {proposal.problem[:200]}\n"
@@ -484,14 +535,12 @@ class EvolutionEngine:
 
             pr_url = pr.stdout.strip()
 
-            # Auto-merge if low risk (≤3 files changed)
             if len(proposal.files) <= 3 and proposal.risk == "low":
                 merge = _sp.run(
                     ["gh", "pr", "merge", "--merge", "--delete-branch"],
                     cwd=root, capture_output=True, text=True, timeout=30,
                 )
                 if merge.returncode == 0:
-                    # Pull merged changes back to project_root (main checkout)
                     main_root = str(project_root())
                     _sp.run(["git", "checkout", "master"],
                             cwd=main_root, capture_output=True, timeout=15)
@@ -501,18 +550,15 @@ class EvolutionEngine:
                 else:
                     log.warning("Auto-merge failed: %s", merge.stderr)
 
-            # High risk or merge failed: leave PR open, return to master
             _sp.run(["git", "checkout", "master"], cwd=root, capture_output=True, timeout=15)
             return True, f"PR created (awaiting review): {pr_url}"
 
         except Exception as e:
-            # Return to master and clean up failed branch
             _sp.run(["git", "checkout", "master"], cwd=root, capture_output=True, timeout=15)
             _sp.run(["git", "branch", "-D", branch], cwd=root, capture_output=True, timeout=15)
             return False, str(e)
 
     def _create_safety_tag(self, proposal) -> str:
-        """Create a git tag as a known-good checkpoint before deploy."""
         tag_name = f"pre-evo-{proposal.id}"
         try:
             _sp.run(["git", "tag", tag_name, "HEAD~1"],
@@ -523,7 +569,6 @@ class EvolutionEngine:
         return tag_name
 
     def _auto_rollback_to_tag(self, proposal, tag_name: str, reason: str) -> bool:
-        """Rollback to the safety tag if post-deploy health check fails."""
         try:
             _sp.run(["git", "reset", "--hard", tag_name],
                     cwd=str(project_root()), capture_output=True, timeout=15)
@@ -552,9 +597,8 @@ class EvolutionEngine:
             "error": error or proposal.status.value,
             "timestamp": time.time(),
         }
-        # Persist to structured log for post-mortem diagnosis
         try:
-            log_path = os.path.join(str(__import__("anima.config", fromlist=["project_root"]).project_root()), "data", "logs", "evolution_failures.jsonl")
+            log_path = os.path.join(str(project_root()), "data", "logs", "evolution_failures.jsonl")
             os.makedirs(os.path.dirname(log_path), exist_ok=True)
             with open(log_path, "a", encoding="utf-8") as f:
                 f.write(json.dumps(self._last_failure) + "\n")

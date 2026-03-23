@@ -828,6 +828,7 @@ async def _init_cognitive(config: dict, core: dict, llm: dict, heartbeat_deps: d
     )
     cognitive.set_session_manager(session_manager)
     heartbeat_deps["heartbeat"].set_session_manager(session_manager)
+    heartbeat_deps["heartbeat"].set_user_activity(heartbeat_deps.get("user_activity"))
 
     # ── v3: Wire new memory + prompt components into cognitive loop ──
     cognitive.set_prompt_compiler(llm["prompt_compiler"])
@@ -842,6 +843,7 @@ async def _init_cognitive(config: dict, core: dict, llm: dict, heartbeat_deps: d
     # Wire evolution engine with reload manager (created later via cognitive)
     heartbeat_deps["evolution_engine"].wire(
         reload_manager=cognitive.reload_manager, agent_manager=core["agent_manager"],
+        event_queue=core["event_queue"],
     )
 
     # Allow network callbacks to reference cognitive (for evolution_deployed handler)
