@@ -15,7 +15,7 @@ class NetworkMessage:
     source_node: str = ""
     target_node: str = ""
     timestamp: float = field(default_factory=time.time)
-    ttl: int = 10
+    ttl: int = 3
     payload: dict = field(default_factory=dict)
     signature: str = ""
 
