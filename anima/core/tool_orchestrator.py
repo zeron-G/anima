@@ -37,6 +37,15 @@ _SELF_THINKING_TOOLS = frozenset({
     "update_user_profile",
 })
 
+# Evolution cycle gets read/analysis tools PLUS evolution-specific tools
+_EVOLUTION_CYCLE_TOOLS = frozenset({
+    "read_file", "system_info", "search",
+    "glob_search", "grep_search", "save_note", "get_datetime",
+    "list_directory", "env_search", "shell",
+    "evolution_propose", "evolution_status",
+    "evolution_add_goal", "evolution_list_goals", "evolution_record_lesson",
+})
+
 # ── Three-axis tool subsets ──
 _HUMAN_AXIS_TOOLS = frozenset({
     "read_file", "update_user_profile", "update_feelings",
@@ -161,7 +170,9 @@ class ToolOrchestrator:
         all_tools = self._registry.list_tools()
 
         if event_type == "SELF_THINKING":
-            if "Human Axis" in message:
+            if "EVOLUTION CYCLE" in message or "evolution_propose" in message:
+                tools = [t for t in all_tools if t.name in _EVOLUTION_CYCLE_TOOLS]
+            elif "Human Axis" in message:
                 tools = [t for t in all_tools if t.name in _HUMAN_AXIS_TOOLS]
             elif "Self Axis" in message or "Personality Reflect" in message or "Curate Examples" in message:
                 tools = [t for t in all_tools if t.name in _SELF_AXIS_TOOLS]
