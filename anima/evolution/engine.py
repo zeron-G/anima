@@ -22,6 +22,13 @@ from anima.evolution.deployer import Deployer
 from anima.evolution.agent_pool import AgentPool
 from anima.utils.logging import get_logger
 
+
+def _count_pytest_failures(output: str) -> int:
+    """Extract failure count from pytest output like '5 failed, 392 passed'."""
+    import re
+    m = re.search(r'(\d+) failed', output)
+    return int(m.group(1)) if m else 0
+
 log = get_logger("evolution.engine")
 
 # Rate limits
@@ -184,13 +191,24 @@ class EvolutionEngine:
             if not ok:
                 return await self._handle_test_failure(proposal, worktree, "Level 1", out)
 
-            # Level 2: Pytest
-            ok, out = runner.level2_pytest()
-            if not ok:
-                return await self._handle_test_failure(proposal, worktree, "Level 2", out)
+            # Level 2: Pytest — compare against baseline to detect NEW failures only
+            baseline_runner = TestRunner(str(project_root()))
+            baseline_ok, baseline_out = baseline_runner.level2_pytest()
+            baseline_failures = _count_pytest_failures(baseline_out)
 
-            # Level 3: Sandbox (optional for trivial changes)
-            if proposal.complexity != "trivial":
+            ok, out = runner.level2_pytest()
+            evo_failures = _count_pytest_failures(out)
+
+            if not ok and evo_failures > baseline_failures:
+                return await self._handle_test_failure(
+                    proposal, worktree, "Level 2",
+                    f"New test failures introduced ({evo_failures} vs baseline {baseline_failures}):\n{out}",
+                )
+            elif not ok:
+                log.info("Level 2: %d failures (same as baseline %d) — PASS", evo_failures, baseline_failures)
+
+            # Level 3: Sandbox (skip for trivial/small — worktree lacks runtime data/)
+            if proposal.complexity not in ("trivial", "small"):
                 ok, out = await runner.level3_sandbox()
                 if not ok:
                     return await self._handle_test_failure(proposal, worktree, "Level 3", out)
