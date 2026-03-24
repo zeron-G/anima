@@ -487,17 +487,23 @@ class GossipMesh:
                             if self._on_event:
                                 self._on_event(rmsg.payload)
                         elif rmsg.type == "task_delegate":
-                            self._handle_task_delegate(rmsg)
+                            if self._on_task_delegate:
+                                self._handle_task_delegate(rmsg)
                         elif rmsg.type == "task_result":
-                            self._handle_task_result(rmsg)
+                            if self._on_task_result:
+                                self._handle_task_result(rmsg)
                         elif rmsg.type == "task_cancel":
-                            self._handle_task_cancel(rmsg)
+                            if self._on_task_cancel:
+                                self._handle_task_cancel(rmsg)
                         elif rmsg.type == "task_status_query":
-                            self._handle_task_status_query(rmsg)
+                            if self._on_task_status_query:
+                                self._handle_task_status_query(rmsg)
                         elif rmsg.type == "task_status_reply":
-                            self._handle_task_status_reply(rmsg)
+                            if self._on_task_status_reply:
+                                self._handle_task_status_reply(rmsg)
                         elif rmsg.type == "task_heartbeat":
-                            self._handle_task_heartbeat(rmsg)
+                            if self._on_task_heartbeat:
+                                self._handle_task_heartbeat(rmsg)
                     except Exception as e:
                         log.debug("Message processing error: %s", e)
 
