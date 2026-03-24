@@ -311,6 +311,43 @@ class GossipMesh:
 
     # ── Thread ──
 
+    # ── Dedup helpers (extracted for testability) ──
+
+    def _dedup_check(self, msg_id: str) -> bool:
+        """Return True if *msg_id* was already seen (duplicate).
+
+        If new, register it and evict oldest entries when over capacity.
+        """
+        now = time.time()
+        if msg_id in self._seen_msgs:
+            log.debug("Dedup: dropping duplicate msg %s", msg_id)
+            return True
+        self._seen_msgs[msg_id] = now
+        evicted = 0
+        while len(self._seen_msgs) > self._seen_max_entries:
+            self._seen_msgs.popitem(last=False)
+            evicted += 1
+        if evicted:
+            log.debug("Dedup: evicted %d oldest entries (cap=%d)", evicted, self._seen_max_entries)
+        return False
+
+    def _dedup_cleanup(self) -> None:
+        """Remove expired entries from the seen-message cache."""
+        now = time.time()
+        if (now - self._last_seen_cleanup_ts) < self._seen_cleanup_interval_s:
+            return
+        self._last_seen_cleanup_ts = now
+        cleaned = 0
+        while self._seen_msgs:
+            _oldest_id, _oldest_ts = next(iter(self._seen_msgs.items()))
+            if now - _oldest_ts > self._seen_ttl:
+                self._seen_msgs.popitem(last=False)
+                cleaned += 1
+            else:
+                break
+        if cleaned:
+            log.debug("Dedup: TTL cleanup removed %d expired entries", cleaned)
+
     def _gossip_thread(self) -> None:
         ctx = zmq.Context()
 
@@ -441,13 +478,8 @@ class GossipMesh:
                             if rmsg.ttl <= 0:
                                 continue
                             rmsg.ttl -= 1
-                            msg_now = time.time()
-                            if rmsg.id in self._seen_msgs:
+                            if self._dedup_check(rmsg.id):
                                 continue
-                            self._seen_msgs[rmsg.id] = msg_now
-                            # Hard cap: evict oldest entries when over capacity
-                            while len(self._seen_msgs) > self._seen_max_entries:
-                                self._seen_msgs.popitem(last=False)
 
                         if rmsg.type == "gossip":
                             self._handle_gossip(rmsg, sub, connected_peers)
@@ -475,15 +507,8 @@ class GossipMesh:
                     # Per-peer backoff is handled inside _reconnect_dead_peers,
                     # so call on every gossip tick instead of gating globally.
                     self._reconnect_dead_peers(sub, connected_peers)
-                    # Periodic seen-cache TTL cleanup (moved out of per-message path)
-                    if (now - self._last_seen_cleanup_ts) >= self._seen_cleanup_interval_s:
-                        self._last_seen_cleanup_ts = now
-                        while self._seen_msgs:
-                            _oldest_id, _oldest_ts = next(iter(self._seen_msgs.items()))
-                            if now - _oldest_ts > self._seen_ttl:
-                                self._seen_msgs.popitem(last=False)
-                            else:
-                                break
+                    # Periodic seen-cache TTL cleanup
+                    self._dedup_cleanup()
                     if (now - last_reconnect_time) >= self.RECONNECT_INTERVAL:
                         last_reconnect_time = now
                         self._identity.unregister_stale_nodes(max_dead_hours=1.0)
