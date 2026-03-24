@@ -89,6 +89,7 @@ class GossipMesh:
         gossip_interval: float = 5.0,
         suspect_phi: float = 8.0,
         dead_phi: float = 16.0,
+        recv_batch_limit: int = 50,
     ):
         self._identity = identity
         self._local_state = local_state
@@ -99,6 +100,8 @@ class GossipMesh:
         self.GOSSIP_INTERVAL = gossip_interval
         self.SUSPECT_PHI = suspect_phi
         self.DEAD_PHI = dead_phi
+        # Max messages drained per wakeup; tune up for high-throughput deployments
+        self.RECV_BATCH_LIMIT = max(1, recv_batch_limit)
 
         self._peers: dict[str, NodeState] = {}
         self._peer_addresses: set[str] = set()
@@ -303,6 +306,7 @@ class GossipMesh:
                 "seen_cache_ttl": self._seen_ttl,
                 "seen_cache_max_entries": self._seen_max_entries,
                 "seen_last_cleanup_ts": self._last_seen_cleanup_ts,
+                "recv_batch_limit": self.RECV_BATCH_LIMIT,
             }
 
     # ── Thread ──
@@ -419,7 +423,7 @@ class GossipMesh:
             # --- Block 2: Receive + failure detection (independent of send) ---
             try:
                 # 4. Receive messages (always — drain on every wakeup)
-                for _ in range(50):  # drain up to 50 messages per tick
+                for _ in range(self.RECV_BATCH_LIMIT):
                     try:
                         data = sub.recv(zmq.NOBLOCK)
                     except zmq.Again:
