@@ -331,22 +331,44 @@ class GossipMesh:
             log.debug("Dedup: evicted %d oldest entries (cap=%d)", evicted, self._seen_max_entries)
         return False
 
-    def _dedup_cleanup(self) -> None:
-        """Remove expired entries from the seen-message cache."""
+    def _dedup_cleanup(self) -> tuple[int, int, int]:
+        """Remove expired entries from the seen-message cache.
+
+        Two-phase cleanup:
+          1. TTL — remove entries older than ``_seen_ttl``.
+          2. Trim — if still over ``_seen_max_entries``, evict oldest.
+
+        Returns:
+            (expired_count, trimmed_count, remaining) for observability.
+        """
         now = time.time()
         if (now - self._last_seen_cleanup_ts) < self._seen_cleanup_interval_s:
-            return
+            return (0, 0, len(self._seen_msgs))
         self._last_seen_cleanup_ts = now
-        cleaned = 0
+
+        # Phase 1: TTL expiry
+        expired_count = 0
         while self._seen_msgs:
             _oldest_id, _oldest_ts = next(iter(self._seen_msgs.items()))
             if now - _oldest_ts > self._seen_ttl:
                 self._seen_msgs.popitem(last=False)
-                cleaned += 1
+                expired_count += 1
             else:
                 break
-        if cleaned:
-            log.debug("Dedup: TTL cleanup removed %d expired entries", cleaned)
+
+        # Phase 2: capacity trim (oldest first)
+        trimmed_count = 0
+        while len(self._seen_msgs) > self._seen_max_entries:
+            self._seen_msgs.popitem(last=False)
+            trimmed_count += 1
+
+        remaining = len(self._seen_msgs)
+        if expired_count or trimmed_count:
+            log.debug(
+                "seen_cache_cleanup: expired=%d trimmed=%d remaining=%d",
+                expired_count, trimmed_count, remaining,
+            )
+        return (expired_count, trimmed_count, remaining)
 
     def _gossip_thread(self) -> None:
         ctx = zmq.Context()
