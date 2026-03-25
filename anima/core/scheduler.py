@@ -89,10 +89,15 @@ class Scheduler:
         """Check which jobs are due to run NOW. Called by heartbeat every 15s."""
         now = time.time()
         due = []
+        seen_names: set[str] = set()
         for job in self._jobs.values():
             if not job.enabled:
                 continue
             if now >= job.next_run:
+                if job.name in seen_names:
+                    job.enabled = False
+                    continue
+                seen_names.add(job.name)
                 due.append(job)
                 job.last_run = now
                 if job.recurring:
@@ -174,6 +179,21 @@ class Scheduler:
                     created_at=jd.get("created_at", time.time()),
                 )
                 self._jobs[job.id] = job
+            # Dedup: keep only the newest job per name
+            before = len(self._jobs)
+            by_name: dict[str, list[CronJob]] = {}
+            for job in self._jobs.values():
+                by_name.setdefault(job.name, []).append(job)
+            deduped: dict[str, CronJob] = {}
+            for name, jobs in by_name.items():
+                if len(jobs) > 1:
+                    jobs.sort(key=lambda j: j.created_at, reverse=True)
+                    log.warning("Dedup: %d copies of '%s', keeping newest", len(jobs), name)
+                deduped[jobs[0].id] = jobs[0]
+            self._jobs = deduped
+            if len(self._jobs) < before:
+                log.info("Deduped scheduler: %d -> %d jobs", before, len(self._jobs))
+                self._save()
             log.info("Loaded %d scheduled jobs", len(self._jobs))
         except Exception as e:
             log.error("Failed to load scheduler state: %s", e)
