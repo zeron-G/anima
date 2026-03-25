@@ -106,8 +106,7 @@ def _assess_segment(segment: str) -> RiskLevel:
         "which", "where", "type", "whereis", "whatis", "man", "help",
         "env", "printenv", "set", "locale",
         # Version / info
-        "python", "python3", "node", "npm", "git", "java", "go",
-        "rustc", "cargo", "ruby", "perl",
+        "npm", "git", "rustc", "cargo",
         # Windows
         "ver", "systeminfo", "tasklist", "ipconfig", "tree",
     }
@@ -120,6 +119,8 @@ def _assess_segment(segment: str) -> RiskLevel:
             if executable == "git":
                 return _check_git_safety(parts)
             return RiskLevel.SAFE
+        if executable in _INTERPRETER_EXECUTABLES:
+            return _check_interpreter_safety(parts)
     except ValueError as e:
         log.debug("safety: shlex parse failed (treating as HIGH): %s", e)
         return RiskLevel.HIGH
@@ -141,6 +142,14 @@ _GIT_DANGEROUS_FLAGS: frozenset[str] = frozenset({
     "alias.", "credential.", "http.proxy",
 })
 
+_INTERPRETER_EXECUTABLES: frozenset[str] = frozenset({
+    "python", "python3", "node", "ruby", "perl", "java", "go",
+})
+
+_INTERPRETER_INLINE_FLAGS: frozenset[str] = frozenset({
+    "-c", "-e",
+})
+
 
 def _extract_executable(token: str) -> str:
     """Extract bare executable name from a possibly absolute path.
@@ -153,6 +162,21 @@ def _extract_executable(token: str) -> str:
     if name.lower().endswith(".exe"):
         name = name[:-4]
     return name.lower()
+
+
+def _check_interpreter_safety(tokens: list[str]) -> RiskLevel:
+    """Assess risk of interpreter invocations (python, node, ruby, etc.)."""
+    if len(tokens) < 2:
+        return RiskLevel.SAFE  # bare 'python' / 'node' is safe
+
+    for token in tokens[1:]:
+        if token in _INTERPRETER_INLINE_FLAGS:
+            return RiskLevel.HIGH
+        if token == "-m":
+            return RiskLevel.MEDIUM
+
+    # Running a script file or other flags
+    return RiskLevel.MEDIUM
 
 
 def _check_git_safety(tokens: list[str]) -> RiskLevel:
