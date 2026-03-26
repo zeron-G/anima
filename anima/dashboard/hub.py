@@ -38,6 +38,7 @@ class DashboardHub:
         self.evolution_engine = None
         self.idle_scheduler = None
         self.session_manager = None
+        self.robotics_manager = None
         self.config: dict = {}
         self._server = None  # Set by DashboardServer after init
         self._start_time = time.time()
@@ -181,6 +182,11 @@ class DashboardHub:
                 "sessions": self.session_manager.list_sessions(),
             }
 
+        if self.robotics_manager:
+            snapshot["robotics"] = self.robotics_manager.get_snapshot()
+        else:
+            snapshot["robotics"] = {"enabled": False, "node_count": 0, "nodes": []}
+
         return snapshot
 
     def push_stream_chunk(self, chunk: str, event_type: str = "text") -> None:
@@ -258,8 +264,24 @@ class DashboardHub:
             import subprocess
             from anima.config import project_root
             root = str(project_root())
-            git_log = subprocess.run(["git", "log", "--oneline", "-5"], cwd=root, capture_output=True, text=True, timeout=3)
-            branch = subprocess.run(["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=root, capture_output=True, text=True, timeout=3)
+            git_log = subprocess.run(
+                ["git", "log", "--oneline", "-5"],
+                cwd=root,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=3,
+            )
+            branch = subprocess.run(
+                ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+                cwd=root,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=3,
+            )
             self._git_cache = {"branch": branch.stdout.strip(), "recent_commits": git_log.stdout.strip().split("\n")[:5]}
             self._git_cache_ts = now
         except Exception as e:

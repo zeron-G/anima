@@ -9,6 +9,7 @@ from pathlib import Path
 from aiohttp import web
 
 from anima.api.auth import check_auth
+from anima.api.context import get_hub
 from anima.config import agent_dir, data_dir
 from anima.utils.logging import get_logger
 
@@ -19,7 +20,7 @@ async def emotion(request: web.Request) -> web.Response:
     """GET /v1/soulscape/emotion — current emotion state."""
     if not check_auth(request):
         return web.json_response({"error": "unauthorized"}, status=401)
-    hub = request.app["hub"]
+    hub = get_hub(request)
     return web.json_response(hub.emotion_state.to_dict())
 
 

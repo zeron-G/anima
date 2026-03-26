@@ -5,7 +5,7 @@
  * Live2D: Pixi.js v7 (CDN) + pixi-live2d-display (CDN) + cubismcore (backend static)
  * Both canvases always in DOM, stacked via z-index. Toggle with 3D/2D buttons.
  */
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, onMounted, onUnmounted, watch } from 'vue'
 import * as THREE from 'three'
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
@@ -319,6 +319,15 @@ function updateL2dEmotion() {
     }
   } catch {}
 }
+
+watch(
+  () => emotion.current,
+  () => {
+    updateVrmEmotion()
+    updateL2dEmotion()
+  },
+  { deep: true, immediate: true },
+)
 
 // ═══════════════════════════════════════════
 //  Mode switching (exactly like old frontend)

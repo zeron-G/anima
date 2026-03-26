@@ -5,6 +5,7 @@ from __future__ import annotations
 from aiohttp import web
 
 from anima.api.auth import check_auth
+from anima.api.context import get_hub
 from anima.utils.logging import get_logger
 
 log = get_logger("api.evolution")
@@ -14,7 +15,7 @@ async def status(request: web.Request) -> web.Response:
     """GET /v1/evolution/status."""
     if not check_auth(request):
         return web.json_response({"error": "unauthorized"}, status=401)
-    hub = request.app["hub"]
+    hub = get_hub(request)
     if not hub.evolution_engine:
         return web.json_response({"enabled": False})
     return web.json_response(hub.evolution_engine.get_status())
@@ -24,7 +25,7 @@ async def history(request: web.Request) -> web.Response:
     """GET /v1/evolution/history — evolution history."""
     if not check_auth(request):
         return web.json_response({"error": "unauthorized"}, status=401)
-    hub = request.app["hub"]
+    hub = get_hub(request)
     if not hub.evolution_engine:
         return web.json_response({"successes": [], "failures": []})
     mem = hub.evolution_engine.memory

@@ -71,6 +71,13 @@ ANIMA 桌面应用
 - 模型: `Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice`
 - Agent 回复时自动生成，MD5 内容哈希缓存
 
+### 机器狗具身节点
+- 新增 PiDog Linux 平台接入层，支持把机器狗作为 ANIMA 的远程具身节点
+- 后端提供 `/v1/robotics/*` REST 接口和内置工具，ANIMA 可直接下发动作、NLP 指令和语音
+- EVA 桌面端新增 `/robotics` 页面，可直接控制机器狗并查看实时感知状态
+- 当前探索能力为第一阶段：基于超声、触摸、姿态、电量的保守式自主探索
+- 设计文档见 [docs/ROBOTICS_PIDOG.md](docs/ROBOTICS_PIDOG.md)
+
 ## 配置
 
 编辑 `config/default.yaml`。密钥放 `.env` 文件。

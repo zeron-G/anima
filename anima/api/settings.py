@@ -7,6 +7,7 @@ import time
 from aiohttp import web
 
 from anima.api.auth import check_auth
+from anima.api.context import get_hub
 from anima.config import get, get_config
 from anima.utils.logging import get_logger
 
@@ -39,7 +40,7 @@ async def config_update(request: web.Request) -> web.Response:
     """PUT /v1/settings/config — partial config update."""
     if not check_auth(request):
         return web.json_response({"error": "unauthorized"}, status=401)
-    hub = request.app["hub"]
+    hub = get_hub(request)
     try:
         data = await request.json()
     except Exception:
@@ -59,7 +60,7 @@ async def skills(request: web.Request) -> web.Response:
     """GET /v1/settings/skills — installed skills."""
     if not check_auth(request):
         return web.json_response({"error": "unauthorized"}, status=401)
-    hub = request.app["hub"]
+    hub = get_hub(request)
     if hub.skill_loader:
         return web.json_response({"skills": hub.skill_loader.list_skills()})
     return web.json_response({"skills": []})
@@ -69,7 +70,7 @@ async def install_skill(request: web.Request) -> web.Response:
     """POST /v1/settings/skills/install."""
     if not check_auth(request):
         return web.json_response({"error": "unauthorized"}, status=401)
-    hub = request.app["hub"]
+    hub = get_hub(request)
     try:
         data = await request.json()
     except Exception:
@@ -86,7 +87,7 @@ async def uninstall_skill(request: web.Request) -> web.Response:
     """DELETE /v1/settings/skills/:name."""
     if not check_auth(request):
         return web.json_response({"error": "unauthorized"}, status=401)
-    hub = request.app["hub"]
+    hub = get_hub(request)
     name = request.match_info.get("name", "")
     if not hub.skill_loader:
         return web.json_response({"error": "skill loader not initialized"}, status=500)
@@ -98,7 +99,7 @@ async def system_info(request: web.Request) -> web.Response:
     """GET /v1/settings/system — system information."""
     if not check_auth(request):
         return web.json_response({"error": "unauthorized"}, status=401)
-    hub = request.app["hub"]
+    hub = get_hub(request)
     snapshot = hub.get_full_snapshot()
     return web.json_response({
         "version": "0.2.0",
@@ -113,7 +114,7 @@ async def usage(request: web.Request) -> web.Response:
     """GET /v1/settings/usage — token usage."""
     if not check_auth(request):
         return web.json_response({"error": "unauthorized"}, status=401)
-    hub = request.app["hub"]
+    hub = get_hub(request)
     return web.json_response(hub.llm_router.get_usage_stats())
 
 
@@ -121,7 +122,7 @@ async def restart(request: web.Request) -> web.Response:
     """POST /v1/settings/restart."""
     if not check_auth(request):
         return web.json_response({"error": "unauthorized"}, status=401)
-    hub = request.app["hub"]
+    hub = get_hub(request)
     from anima.models.event import Event, EventType, EventPriority
     await hub.event_queue.put(Event(
         type=EventType.SHUTDOWN,
@@ -136,7 +137,7 @@ async def shutdown(request: web.Request) -> web.Response:
     """POST /v1/settings/shutdown."""
     if not check_auth(request):
         return web.json_response({"error": "unauthorized"}, status=401)
-    hub = request.app["hub"]
+    hub = get_hub(request)
     from anima.models.event import Event, EventType, EventPriority
     await hub.event_queue.put(Event(
         type=EventType.SHUTDOWN,

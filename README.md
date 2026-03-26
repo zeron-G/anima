@@ -32,7 +32,7 @@ cd eva-desktop && npm run build             # Build .exe installer
                     ┌──────────────────────────────┐
                     │     ANIMA Python Backend      │
                     │                              │
-                    │  anima/api/        44 REST   │
+                    │  anima/api/        52 REST   │
                     │  /ws              WebSocket  │
                     │                              │
                     │  Heartbeat (30s/5min/15min)  │
@@ -68,6 +68,7 @@ anima/                          # Python backend
 │   ├── evolution.py            # /v1/evolution/*
 │   ├── memory.py               # /v1/memory/*
 │   ├── network.py              # /v1/network/*
+│   ├── robotics.py             # /v1/robotics/*
 │   └── settings.py             # /v1/settings/*
 ├── core/                       # Cognitive pipeline
 │   ├── cognitive.py            # Thin orchestrator → Pipeline
@@ -97,18 +98,20 @@ anima/                          # Python backend
 ├── evolution/                  # 6-layer sandbox pipeline
 ├── network/                    # ZMQ gossip mesh
 ├── channels/                   # Discord, Telegram, Webhook
+├── robotics/                   # PiDog embodied-node manager + exploration
 ├── tools/                      # 30+ built-in tools
 ├── skills/                     # Skill loader + sandbox + lifecycle
 └── dashboard/                  # aiohttp server + WebSocket
 
 eva-ui/                         # Vue SPA frontend
 ├── src/
-│   ├── views/                  # 7 pages
+│   ├── views/                  # 8 pages
 │   │   ├── ChatView.vue        # Streaming chat + tool chain
 │   │   ├── SoulscapeView.vue   # VRM + Live2D avatar + persona petals
 │   │   ├── EvolutionView.vue   # DNA helix + governance
 │   │   ├── MemoryView.vue      # Star field + search
 │   │   ├── NetworkView.vue     # Node topology + channels
+│   │   ├── RoboticsView.vue    # PiDog control + embodied exploration
 │   │   ├── SettingsView.vue    # LLM/API/heartbeat config
 │   │   └── LoginView.vue       # Auth + backend detection
 │   ├── three/                  # Three.js 3D scenes
@@ -160,6 +163,13 @@ Primary (Codex/Opus) → Opus fallback → Sonnet fallback
 - Evolution proposal safety checks
 - Self-thinking loop detection
 - Drift accumulation monitoring
+
+### Embodied Robotics
+- PiDog Linux nodes are modeled as remote ANIMA-compatible embodied agents
+- Central ANIMA can control the dog through built-in tools or `/v1/robotics/*`
+- EVA desktop can directly drive actions, speech, and exploration from `/robotics`
+- Phase-1 autonomy uses onboard sensing plus a reactive exploration controller
+- Design notes: [docs/ROBOTICS_PIDOG.md](docs/ROBOTICS_PIDOG.md)
 
 ## Configuration
 

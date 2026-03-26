@@ -33,6 +33,10 @@ const navItems: NavItem[] = [
     svg: `<circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.5" fill="none"/><ellipse cx="12" cy="12" rx="4" ry="9" stroke="currentColor" stroke-width="1" fill="none" opacity="0.5"/><line x1="3" y1="9" x2="21" y2="9" stroke="currentColor" stroke-width="0.8" opacity="0.4" stroke-linecap="round"/><line x1="3" y1="15" x2="21" y2="15" stroke="currentColor" stroke-width="0.8" opacity="0.4" stroke-linecap="round"/>`,
   },
   {
+    path: '/robotics', name: 'Embodiment', key: 'robotics',
+    svg: `<circle cx="8" cy="8" r="1.6" fill="currentColor"/><circle cx="16" cy="8" r="1.6" fill="currentColor"/><circle cx="6.5" cy="14.5" r="1.4" fill="currentColor" opacity="0.85"/><circle cx="11.5" cy="16.5" r="1.8" fill="currentColor"/><circle cx="16.8" cy="14.8" r="1.4" fill="currentColor" opacity="0.85"/><path d="M8.5 13.5c1.3-1.1 2.3-1.6 3.5-1.6s2.2.5 3.5 1.6" stroke="currentColor" stroke-width="1.2" fill="none" stroke-linecap="round"/>`,
+  },
+  {
     path: '/settings', name: 'Settings', key: 'settings',
     svg: `<circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="1.5" fill="none"/><path d="M12 2v2m0 16v2M4.93 4.93l1.41 1.41m11.32 11.32 1.41 1.41M2 12h2m16 0h2M4.93 19.07l1.41-1.41m11.32-11.32 1.41-1.41" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>`,
   },

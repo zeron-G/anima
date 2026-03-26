@@ -36,6 +36,7 @@ _BUILTIN_MODULES = [
     "anima.tools.builtin.memory_tools",
     "anima.tools.builtin.evolution_tools",
     "anima.tools.builtin.audit_tools",
+    "anima.tools.builtin.robotics",
 ]
 
 
@@ -108,6 +109,7 @@ class ToolRegistry:
         from anima.tools.builtin.email_tool import get_email_tools
         from anima.tools.builtin.google_tool import get_google_tool
         from anima.tools.builtin.env_tools import get_env_tools
+        from anima.tools.builtin.robotics import get_robotics_tools
 
         self.register(get_shell_tool())
         for tool in get_file_tools():
@@ -132,4 +134,6 @@ class ToolRegistry:
             self.register(tool)
         self.register(get_google_tool())
         for tool in get_env_tools():
+            self.register(tool)
+        for tool in get_robotics_tools():
             self.register(tool)

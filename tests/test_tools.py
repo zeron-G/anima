@@ -23,6 +23,9 @@ def test_registry_has_builtins(registry):
     assert "save_note" in names
     assert "get_datetime" in names
     assert "system_info" in names
+    assert "robot_dog_status" in names
+    assert "robot_dog_command" in names
+    assert "robot_dog_exploration" in names
 
 
 def test_registry_get(registry):

@@ -186,3 +186,20 @@ logging:
 # Install MCP SDK: pip install mcp
 #
 mcp_servers: {}   # No MCP servers by default — configure in local/env.yaml
+
+# ── Robotics / Embodied Nodes ──
+# Configure PiDog-backed Linux nodes in local/env.yaml.
+robotics:
+  enabled: false
+  poll_interval_s: 2.0
+  nodes: []
+  exploration:
+    tick_interval_s: 2.0
+    move_burst_s: 1.2
+    turn_burst_s: 0.85
+    scan_pause_s: 0.35
+    avoid_distance_cm: 32.0
+    critical_battery_v: 6.0
+    low_battery_v: 6.4
+    walk_speed: 45
+    turn_speed: 55

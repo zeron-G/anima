@@ -5,6 +5,7 @@ from __future__ import annotations
 from aiohttp import web
 
 from anima.api.auth import check_auth
+from anima.api.context import get_hub
 from anima.utils.logging import get_logger
 
 log = get_logger("api.memory")
@@ -14,7 +15,7 @@ async def search(request: web.Request) -> web.Response:
     """GET /v1/memory/search?q=&limit=&type="""
     if not check_auth(request):
         return web.json_response({"error": "unauthorized"}, status=401)
-    hub = request.app["hub"]
+    hub = get_hub(request)
     query = request.query.get("q", "")
     limit = min(int(request.query.get("limit", "10")), 50)
     mem_type = request.query.get("type", None)
@@ -38,7 +39,7 @@ async def recent(request: web.Request) -> web.Response:
     """GET /v1/memory/recent?limit=&type="""
     if not check_auth(request):
         return web.json_response({"error": "unauthorized"}, status=401)
-    hub = request.app["hub"]
+    hub = get_hub(request)
     limit = min(int(request.query.get("limit", "10")), 50)
     mem_type = request.query.get("type", None)
 
@@ -58,7 +59,7 @@ async def stats(request: web.Request) -> web.Response:
     """GET /v1/memory/stats — memory statistics."""
     if not check_auth(request):
         return web.json_response({"error": "unauthorized"}, status=401)
-    hub = request.app["hub"]
+    hub = get_hub(request)
 
     import asyncio
     total = await asyncio.to_thread(

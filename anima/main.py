@@ -324,6 +324,22 @@ async def _init_llm(config: dict, tool_registry, tool_executor, memory_store) ->
     }
 
 
+async def _init_robotics(core: dict) -> dict:
+    """Initialize robotics node manager and register robotics tools."""
+    from anima.config import get
+    from anima.robotics.manager import RoboticsManager
+    from anima.tools.builtin.robotics import get_robotics_tools, set_robotics_manager
+
+    robotics_manager = RoboticsManager.from_config(get("robotics", {}))
+    await robotics_manager.start()
+    set_robotics_manager(robotics_manager)
+
+    for tool in get_robotics_tools():
+        core["tool_registry"].register(tool)
+
+    return {"robotics_manager": robotics_manager}
+
+
 async def _init_heartbeat(config: dict, core: dict, llm: dict) -> dict:
     """Initialize heartbeat engine, idle scheduler, evolution engine."""
     from anima.core.heartbeat import HeartbeatEngine
@@ -912,6 +928,7 @@ def _init_dashboard(core: dict, llm: dict, heartbeat_deps: dict, cognitive_deps:
     dashboard_hub.evolution_engine = heartbeat_deps["evolution_engine"]
     dashboard_hub.idle_scheduler = heartbeat_deps.get("idle_scheduler")
     dashboard_hub.session_manager = cognitive_deps.get("session_manager")
+    dashboard_hub.robotics_manager = core.get("robotics_manager")
     dashboard_hub.config = config
 
     dashboard_port = get("dashboard.port", 8420)
@@ -1067,6 +1084,8 @@ async def run() -> bool:
             pass
 
     core = await _init_core(config)
+    robotics = await _init_robotics(core)
+    core.update(robotics)
     llm = await _init_llm(config, core["tool_registry"], core["tool_executor"], core["memory_store"])
     hb = await _init_heartbeat(config, core, llm)
     net = await _init_network(config, core, llm, hb)
@@ -1159,6 +1178,8 @@ async def run() -> bool:
     # 3. Stop terminal + dashboard + network + channels
     terminal.stop()
     await dashboard.stop()
+    if core.get("robotics_manager"):
+        await core["robotics_manager"].stop()
     if gossip_mesh:
         channels = net.get("channels", [])
         for ch in channels:

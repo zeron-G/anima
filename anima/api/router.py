@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from aiohttp import web
 
-from anima.api import auth, chat, soulscape, evolution, memory, network, settings
+from anima.api import auth, chat, soulscape, evolution, memory, network, robotics, settings
+from anima.api.context import HUB_APP_KEY
 from anima.utils.logging import get_logger
 
 log = get_logger("api.router")
@@ -19,7 +20,7 @@ class APIRouter:
     def register(self, app: web.Application) -> None:
         """Register all /v1/* routes."""
         # Store hub reference for handlers
-        app["hub"] = self._hub
+        app[HUB_APP_KEY] = self._hub
 
         # Auth (no auth check needed for login itself)
         app.router.add_post("/v1/auth/login", auth.handle_login)
@@ -67,6 +68,16 @@ class APIRouter:
         app.router.add_get("/v1/network/nodes", network.nodes)
         app.router.add_get("/v1/network/channels", network.channels)
 
+        # Robotics
+        app.router.add_get("/v1/robotics/nodes", robotics.nodes)
+        app.router.add_get("/v1/robotics/nodes/{node_id}", robotics.node_detail)
+        app.router.add_post("/v1/robotics/nodes/{node_id}/command", robotics.command)
+        app.router.add_post("/v1/robotics/nodes/{node_id}/nlp", robotics.nlp)
+        app.router.add_post("/v1/robotics/nodes/{node_id}/speak", robotics.speak)
+        app.router.add_post("/v1/robotics/nodes/{node_id}/refresh", robotics.refresh)
+        app.router.add_post("/v1/robotics/nodes/{node_id}/exploration/start", robotics.start_exploration)
+        app.router.add_post("/v1/robotics/nodes/{node_id}/exploration/stop", robotics.stop_exploration)
+
         # Settings
         app.router.add_get("/v1/settings/config", settings.config_get)
         app.router.add_put("/v1/settings/config", settings.config_update)
@@ -84,5 +95,5 @@ class APIRouter:
 
         log.info(
             "API routes registered: auth(2) + chat(5) + soulscape(14)"
-            " + evolution(4) + memory(7) + network(2) + settings(10)"
+            " + evolution(4) + memory(7) + network(2) + robotics(8) + settings(10)"
         )

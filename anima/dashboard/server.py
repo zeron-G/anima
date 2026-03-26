@@ -83,7 +83,7 @@ class DashboardServer:
 
             # Register SPA routes for Vue Router paths (not API paths)
             for spa_path in ["/", "/login", "/soulscape", "/evolution",
-                             "/memory", "/network", "/settings"]:
+                             "/memory", "/network", "/robotics", "/settings"]:
                 self._app.router.add_get(spa_path, _serve_spa)
         else:
             # Fallback: show message if Vue SPA not built

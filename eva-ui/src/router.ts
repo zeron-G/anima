@@ -9,6 +9,7 @@ const router = createRouter({
     { path: '/evolution', name: 'evolution', component: () => import('./views/EvolutionView.vue') },
     { path: '/memory', name: 'memory', component: () => import('./views/MemoryView.vue') },
     { path: '/network', name: 'network', component: () => import('./views/NetworkView.vue') },
+    { path: '/robotics', name: 'robotics', component: () => import('./views/RoboticsView.vue') },
     { path: '/settings', name: 'settings', component: () => import('./views/SettingsView.vue') },
   ],
 })

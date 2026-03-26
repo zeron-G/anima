@@ -5,6 +5,7 @@ from __future__ import annotations
 from aiohttp import web
 
 from anima.api.auth import check_auth
+from anima.api.context import get_hub
 from anima.utils.logging import get_logger
 
 log = get_logger("api.network")
@@ -14,7 +15,7 @@ async def nodes(request: web.Request) -> web.Response:
     """GET /v1/network/nodes — node list with topology."""
     if not check_auth(request):
         return web.json_response({"error": "unauthorized"}, status=401)
-    hub = request.app["hub"]
+    hub = get_hub(request)
     if not hub.gossip_mesh:
         return web.json_response({"enabled": False, "nodes": []})
 
@@ -42,7 +43,7 @@ async def channels(request: web.Request) -> web.Response:
     """GET /v1/network/channels — channel status list."""
     if not check_auth(request):
         return web.json_response({"error": "unauthorized"}, status=401)
-    hub = request.app["hub"]
+    hub = get_hub(request)
 
     channel_list = []
     active = getattr(hub, '_active_channels', {})
