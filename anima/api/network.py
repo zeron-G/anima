@@ -13,6 +13,7 @@ from aiohttp import web
 
 from anima.api.auth import check_auth
 from anima.api.context import get_hub
+from anima.robotics.nlp_supervisor import match_pidog_command_text
 from anima.utils.logging import get_logger
 
 log = get_logger("api.network")
@@ -363,6 +364,12 @@ def _looks_like_status_request(text: str) -> bool:
     return any(keyword in lowered for keyword in keywords)
 
 
+def _should_prefer_robotics_fallback(text: str) -> bool:
+    if _looks_like_scan_request(text) or _looks_like_status_request(text):
+        return True
+    return match_pidog_command_text(text) is not None
+
+
 def _format_robot_snapshot_reply(snapshot: dict, *, prefix: str = "") -> str:
     state = str(snapshot.get("state", "UNKNOWN") or "UNKNOWN")
     emotion = str(snapshot.get("emotion", "unknown") or "unknown")
@@ -551,6 +558,7 @@ async def chat_node(request: web.Request) -> web.Response:
     direct_nodes = _direct_robot_lookup(hub, peers)
     bridge_mode = "gossip"
     node_name = ""
+    direct_chat_timeout = min(timeout, 12.0)
 
     if peer_state is None:
         direct_robot = direct_nodes.get(node_id)
@@ -562,7 +570,27 @@ async def chat_node(request: web.Request) -> web.Response:
             return web.json_response({"error": f"node '{node_id}' is offline"}, status=409)
         add_fn(node_id, "user", message, transport=bridge_mode, node_name=node_name)
         try:
-            direct_result = await _chat_direct_robot_node(direct_robot, message, timeout)
+            if _should_prefer_robotics_fallback(message):
+                fallback_result = await _chat_via_robotics_fallback(hub, direct_robot, message)
+                reply = str(fallback_result.get("reply", "") or "").strip() or "(robotics fallback returned no text)"
+                assistant_message = add_fn(
+                    node_id,
+                    "assistant",
+                    reply,
+                    transport="robotics_fallback",
+                    node_name=node_name,
+                    source=str(fallback_result.get("source", "") or "robotics_fallback"),
+                )
+                return web.json_response({
+                    "status": "ok",
+                    "node_id": node_id,
+                    "reply": reply,
+                    "message": assistant_message,
+                    "conversation": get_fn(node_id, limit=50),
+                    "bridge_mode": "robotics_fallback",
+                })
+
+            direct_result = await _chat_direct_robot_node(direct_robot, message, direct_chat_timeout)
             reply = str(direct_result.get("reply", "") or "").strip() or "(remote node returned no text)"
             assistant_message = add_fn(
                 node_id,

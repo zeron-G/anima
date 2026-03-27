@@ -34,9 +34,9 @@ class DummyPeerState:
 
 
 class DummyGossipMesh:
-    def __init__(self) -> None:
+    def __init__(self, peers: dict[str, DummyPeerState] | None = None) -> None:
         self._identity = DummyIdentity("anima-desktop")
-        self._peers = {
+        self._peers = peers if peers is not None else {
             "anima-pidog": DummyPeerState(
                 node_id="anima-pidog",
                 hostname="pidog",
@@ -61,7 +61,7 @@ class DummyGossipMesh:
         return dict(self._peers)
 
     def get_alive_count(self) -> int:
-        return 1
+        return len(self._peers)
 
 
 class DummyTaskDelegate:
@@ -78,6 +78,10 @@ class DummyTaskDelegate:
 
 
 class DummyRoboticsManager:
+    def __init__(self) -> None:
+        self.state = "STANDING"
+        self.nlp_calls: list[str] = []
+
     def get_snapshot(self) -> dict:
         return {
             "enabled": True,
@@ -95,9 +99,31 @@ class DummyRoboticsManager:
                     ],
                     "tags": ["pidog", "field"],
                     "metadata": {"anima_node_id": "anima-pidog"},
+                    "state": self.state,
+                    "emotion": "tired",
+                    "perception": {
+                        "distance_cm": 57.2,
+                        "touch": "N",
+                        "is_obstacle_near": False,
+                    },
                 },
             ],
         }
+
+    async def run_nlp(self, node_id: str, text: str) -> dict:
+        assert node_id == "dog1"
+        self.nlp_calls.append(text)
+        if "sit" in text.lower():
+            self.state = "SITTING"
+            return {"parsed": "sit", "result": {"status": "ok", "command": "sit"}}
+        if "stand" in text.lower():
+            self.state = "STANDING"
+            return {"parsed": "stand", "result": {"status": "ok", "command": "stand"}}
+        return {"parsed": None, "message": "unrecognized"}
+
+    async def refresh_node(self, node_id: str) -> dict:
+        assert node_id == "dog1"
+        return self.get_snapshot()["nodes"][0]
 
 
 @pytest.mark.asyncio
@@ -148,6 +174,52 @@ async def test_network_nodes_and_remote_chat_routes():
             assert hub.task_delegate.calls == [
                 ("eva_task", {"task": "站起来，然后看看周围"}, "anima-pidog", 30.0),
             ]
+    finally:
+        with contextlib.suppress(Exception):
+            await runner.cleanup()
+
+
+@pytest.mark.asyncio
+async def test_direct_robot_node_chat_prefers_robotics_fallback():
+    hub = DashboardHub()
+    hub.gossip_mesh = DummyGossipMesh(peers={})
+    hub.task_delegate = DummyTaskDelegate()
+    hub.robotics_manager = DummyRoboticsManager()
+
+    app = web.Application()
+    APIRouter(hub).register(app)
+    runner, base_url = await _start_app(app)
+
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(f"{base_url}/v1/network/nodes") as resp:
+                assert resp.status == 200
+                data = await resp.json()
+                assert data["enabled"] is True
+                assert data["nodes"][0]["node_id"] == "direct:dog1"
+                assert data["nodes"][0]["chat_available"] is True
+
+            async with session.post(
+                f"{base_url}/v1/network/nodes/direct:dog1/chat",
+                json={"message": "sit down", "timeout": 30},
+            ) as resp:
+                assert resp.status == 200
+                data = await resp.json()
+                assert data["status"] == "ok"
+                assert data["bridge_mode"] == "robotics_fallback"
+                assert "SITTING" in data["reply"]
+
+            async with session.get(
+                f"{base_url}/v1/network/nodes/direct:dog1/conversation?limit=10",
+            ) as resp:
+                assert resp.status == 200
+                data = await resp.json()
+                assert [message["role"] for message in data["messages"]] == ["user", "assistant"]
+                assert data["messages"][0]["content"] == "sit down"
+                assert "SITTING" in data["messages"][1]["content"]
+
+            assert hub.task_delegate.calls == []
+            assert hub.robotics_manager.nlp_calls == ["sit down"]
     finally:
         with contextlib.suppress(Exception):
             await runner.cleanup()
