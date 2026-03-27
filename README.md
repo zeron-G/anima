@@ -1,253 +1,150 @@
 [English](README.md) | [中文](README_ZH.md)
 
-<p align="center">
-  <img src="eva-ui/src/assets/hero.png" alt="ANIMA Hero" width="240" />
-</p>
+# ANIMA
 
-<h1 align="center">ANIMA</h1>
+ANIMA is a distributed AI runtime built for long-running, stateful agents. It combines a desktop interface, a persistent Python backend, memory and retrieval, multi-provider model routing, tool execution, node networking, and optional edge embodiments such as robot-dog Linux nodes.
 
-<p align="center"><strong>Heartbeat-driven, distributed, embodied AI life architecture.</strong></p>
+Instead of treating an agent as a single chat request, ANIMA treats it as a continuous process with its own runtime state, background activity, network identity, and deployment lifecycle. The current repository centers on EVA as the default persona, but the underlying architecture is a general system for building persistent AI nodes.
 
-<p align="center">
-  ANIMA is built as a persistent AI organism rather than a stateless chat box:
-  one EVA desktop, many networked nodes, and embodied edge runtimes such as PiDog.
-</p>
+## Overview
 
-<p align="center">
-  <a href="docs/EDGE_ANIMA.md">Edge ANIMA</a>
-  ·
-  <a href="docs/ROBOTICS_PIDOG.md">PiDog Robotics</a>
-  ·
-  <a href="#quick-start">Quick Start</a>
-  ·
-  <a href="#architecture-at-a-glance">Architecture</a>
-</p>
+ANIMA includes several layers that work together:
 
-<p align="center">
-  <img alt="Python 3.11+" src="https://img.shields.io/badge/Python-3.11%2B-111827?logo=python&logoColor=white">
-  <img alt="Vue 3" src="https://img.shields.io/badge/Vue-3-111827?logo=vuedotjs&logoColor=white">
-  <img alt="Tauri v2" src="https://img.shields.io/badge/Tauri-v2-111827?logo=tauri&logoColor=white">
-  <img alt="Embodied Nodes" src="https://img.shields.io/badge/Embodiment-PiDog%20%2B%20Edge-111827">
-  <img alt="License MIT" src="https://img.shields.io/badge/License-MIT-111827">
-</p>
+- A Python backend that runs the API, WebSocket streams, heartbeat loops, governance, memory, tools, and distributed-node services
+- A Vue frontend and Tauri desktop shell for the main operator-facing experience
+- A configuration system with committed profiles and local machine-specific overrides
+- A node network that supports discovery, delegation, remote deployment, and coordination between desktop, headless, and edge nodes
+- An embodied robotics layer that can connect ANIMA to PiDog-based robot endpoints
 
-## One-Sentence Pitch
+## Main Capabilities
 
-> ANIMA is a heartbeat-driven AI life system: a persistent EVA desktop, a distributed node mesh, and embodied edge runtimes that share memory, emotion, tools, and network presence.
+- Persistent runtime state with heartbeat-driven background processing
+- Memory and retrieval backed by SQLite and ChromaDB
+- Multi-provider LLM routing, fallback, and tool-integrated execution
+- Desktop, browser, terminal, and headless operation modes
+- Distributed node communication and task delegation
+- Edge deployment profiles for specialized environments
+- Robotics integration for PiDog-style Linux nodes
 
-## 30-Second Intro
+## System Architecture
 
-Most AI projects are request-response interfaces.  
-ANIMA is shaped more like a living runtime.
+At a high level, ANIMA is organized like this:
 
-It keeps an internal heartbeat, maintains layered memory, tracks emotional state, observes its environment, uses tools, joins a distributed mesh, and can extend itself into other machines or robots. The desktop EVA is the supervisory face of the system. Edge nodes let the same architecture move into Linux devices and robot-dog platforms.
+```text
+Client Surfaces
+  - Tauri desktop app
+  - Browser-based Vue interface
+  - Terminal mode
+  - Remote node and edge integrations
 
-If you need a simple way to explain it in a demo:
+Core Runtime
+  - REST API and WebSocket hub
+  - Cognitive pipeline and heartbeat loops
+  - Memory, retrieval, and emotion state
+  - Tool system and skill loading
+  - Governance and evolution workflows
+  - Gossip networking and task delegation
 
-- ANIMA is not just a chat UI.
-- It is a full AI runtime with persistence, introspection, networking, and embodiment.
-- EVA is the desktop expression of that runtime.
-
-## Why ANIMA Feels Different
-
-- **Heartbeat first**: ANIMA has ongoing internal rhythms for observation, reflection, and long-cycle evolution.
-- **Stateful by design**: memory, emotion, activity, and system context persist across turns.
-- **Distributed from the start**: nodes can discover each other over LAN or Tailscale and coordinate across a mesh.
-- **Embodied when needed**: PiDog and future edge platforms are treated as ANIMA-compatible bodies, not bolt-on peripherals.
-- **Built for growth**: governance, sandboxing, and evolution systems make architecture change a first-class concern.
-
-## What You Can Show In A Demo
-
-- Talk to EVA in the desktop app or browser and inspect the internal runtime instead of only the final reply.
-- Watch heartbeat, memory, emotion, tools, and activity streams update in real time.
-- Discover other nodes on the same network and chat across the mesh.
-- Control PiDog directly from EVA or from network-node conversations with commands such as `sit down`, `stand up`, and `look around`.
-- Deploy a new node onto a configured laptop or robot target with a selected runtime profile.
-- Reproduce the runtime onto another configured node from ANIMA itself while keeping per-machine secrets outside git.
-- Deploy an edge runtime onto a Linux robot node and let it operate as an embodied ANIMA endpoint.
-
-## System Shape
-
-| Runtime | What It Does | Typical Host |
-| --- | --- | --- |
-| **Desktop Supervisor** | Main EVA experience, orchestration, dashboard, chat, tools, settings, network workbench | Windows desktop |
-| **Headless ANIMA Node** | Browser/API runtime without the native window | Desktop, server, laptop |
-| **Edge ANIMA** | Lightweight embodied runtime for robot platforms | Linux edge device, PiDog host |
-
-<a id="architecture-at-a-glance"></a>
-
-## Architecture At A Glance
-
-```mermaid
-flowchart LR
-    subgraph Experience["Experience Layer"]
-        Desktop["EVA Desktop<br/>Tauri / PyWebView"]
-        Browser["Browser Dashboard<br/>Vue SPA"]
-        Channels["Discord / Telegram / Webhook"]
-    end
-
-    subgraph Core["ANIMA Core Runtime"]
-        Heartbeat["Heartbeat Engine"]
-        Cognitive["Cognitive Pipeline"]
-        Memory["Memory + Emotion"]
-        Tools["Tools + Skills"]
-        Governance["Governance + Evolution"]
-    end
-
-    subgraph Network["Distributed Mesh"]
-        Gossip["Gossip Mesh<br/>Session Routing"]
-        Nodes["Remote ANIMA Nodes"]
-        Edge["Edge ANIMA"]
-        Robot["PiDog / Embodied Robotics"]
-    end
-
-    Desktop --> Core
-    Browser --> Core
-    Channels --> Core
-
-    Heartbeat --> Cognitive
-    Cognitive --> Memory
-    Cognitive --> Tools
-    Governance --> Cognitive
-
-    Core --> Gossip
-    Gossip --> Nodes
-    Nodes --> Edge
-    Edge --> Robot
+Embodiment and Deployment
+  - Desktop supervisor nodes
+  - Headless nodes
+  - Edge nodes with committed runtime profiles
+  - Robot-dog nodes connected through the robotics layer
 ```
 
-## Core Capabilities
+## Repository Layout
 
-### 1. Cognitive Runtime
+```text
+anima/             Python backend and runtime modules
+eva-ui/            Vue frontend
+eva-desktop/       Tauri desktop shell
+config/            Default config and committed runtime profiles
+agents/            EVA identity, rules, and memory files
+docs/              Architecture and subsystem documents
+local/             Machine-local config templates
+tests/             Backend test suite
+```
 
-- Multi-stage cognitive pipeline for perception, routing, memory retrieval, tool use, and response handling
-- Multi-user session isolation
-- Configurable model cascade and fallback logic
-- Governance modes for activity intensity, safety, and drift control
+Important backend areas:
 
-### 2. Memory, Emotion, and State
+- `anima/api/`: REST endpoints
+- `anima/core/`: cognitive pipeline, heartbeat, governance
+- `anima/llm/`: model routing and provider integration
+- `anima/memory/`: storage and retrieval
+- `anima/network/`: gossip mesh and distributed node behavior
+- `anima/robotics/`: robot node manager, exploration, and PiDog integration
+- `anima/spawn/`: packaging and deployment for new nodes
+- `anima/tools/`: built-in tool registry and tool handlers
 
-- SQLite-backed persistent memory plus ChromaDB document/vector retrieval
-- Working memory, static knowledge, lorebook support, and conversation summarization
-- Emotion state modeled as continuous runtime state rather than one-off labels
-- Runtime snapshots that make internal system state visible in the dashboard
-
-### 3. EVA Desktop Experience
-
-- Native desktop shell plus browser-accessible dashboard
-- Chat, memory, soulscape, evolution, network, robotics, and settings views
-- Voice bridge, TTS/STT hooks, and embodied control surfaces
-- A presentation-friendly control center rather than a single chat pane
-
-### 4. Distributed Network
-
-- ZMQ gossip mesh for node presence and lightweight coordination
-- Cross-node chat and delegation
-- Node discovery across the same LAN or Tailscale
-- Direct robot-node bridges when a full remote EVA is not appropriate
-
-### 5. Embodied Robotics
-
-- PiDog modeled as an ANIMA-compatible embodied node
-- Direct control through REST APIs and built-in tools
-- EVA desktop can command actions, speech, status checks, and exploration
-- Edge runtime profile for robot-side deployment and autonomy
-
-<a id="quick-start"></a>
-
-## Quick Start
-
-### Desktop and Headless Runtime
+## Running ANIMA
 
 ```bash
-# Windows one-click launcher
-ANIMA.bat
-
-# Desktop app (PyWebView native window)
+# Desktop app
 python -m anima
 
-# Headless backend (browser / API / WebSocket)
+# Backend only
 python -m anima --headless
 
-# Legacy terminal mode
-python -m anima --legacy
+# Terminal mode
+python -m anima --terminal
 
-# Edge ANIMA runtime for robot nodes
-python -m anima --edge
-```
-
-### Frontend and Desktop Shell
-
-```bash
-# Vue dashboard
+# Frontend development
 cd eva-ui
 npm install
 npm run dev
 
-# Build the Vue dashboard
-cd eva-ui
-npm run build
-
-# Tauri desktop shell
+# Desktop shell development
 cd eva-desktop
+npm install
 npm run dev
-npm run build
 ```
 
-### Edge Deployment
+## Deployment Modes
+
+ANIMA supports several runtime shapes:
+
+- Desktop supervisor: the main local operator-facing node
+- Headless node: a networked backend without the desktop shell
+- Edge node: a specialized runtime selected through a committed profile such as `edge-pidog`
+
+Examples:
 
 ```bash
-# Package and deploy the edge runtime to a robot-side Linux host
-python -m anima spawn user@host --edge --profile edge-pidog
+# Run an edge profile locally
+ANIMA_PROFILE=edge-pidog python -m anima --edge
 
-# Deploy to a configured known node from local/env.yaml
+# Deploy to a configured known node
 python -m anima spawn --node pidog
-
-# Deploy a standard desktop/headless profile to another known node
 python -m anima spawn --node laptop --profile default
 ```
 
-The intended pattern is:
+## Configuration
 
-- commit reusable runtime profiles in `config/profiles/*.yaml`
-- keep machine-specific addresses, SSH credentials, peers, and per-node overrides in `local/env.yaml`
-- let `spawn --node ...` or the built-in `spawn_remote_node` tool inject ANIMA onto another configured node without committing sensitive data
+Configuration is intentionally split between committed project defaults and local machine settings:
 
-## Repository Guide
+- `config/default.yaml`: shared project defaults
+- `config/profiles/*.yaml`: committed runtime profiles such as edge deployments
+- `local/env.yaml`: machine-specific settings, peers, addresses, and deployment targets
+- `.env`: local secrets and provider credentials
 
-| Path | Purpose |
-| --- | --- |
-| `anima/` | Python backend, APIs, core cognition, memory, networking, robotics, governance |
-| `eva-ui/` | Vue 3 dashboard and operator-facing interface |
-| `eva-desktop/` | Tauri desktop shell for native packaging |
-| `agents/eva/` | EVA identity, rules, memory, examples, and style constraints |
-| `config/` | Shared config and committed runtime profiles |
-| `docs/` | Design notes for edge deployment, PiDog embodiment, and system strategy |
-| `tests/` | API, robotics, dashboard, network, and runtime tests |
+`local/env.yaml` and `.env` are ignored by git so sensitive configuration stays local.
 
-## Documentation Pointers
+## Documentation
 
-- [docs/EDGE_ANIMA.md](docs/EDGE_ANIMA.md): how edge runtimes are profiled, packaged, and deployed
-- [docs/ROBOTICS_PIDOG.md](docs/ROBOTICS_PIDOG.md): PiDog platform design, control model, and exploration behavior
+Additional design documents live in [docs](docs):
 
-## Good Fits For ANIMA
+- [ARCHITECTURE.md](docs/ARCHITECTURE.md)
+- [EDGE_ANIMA.md](docs/EDGE_ANIMA.md)
+- [ROBOTICS_PIDOG.md](docs/ROBOTICS_PIDOG.md)
+- [DEVELOPER_GUIDE.md](docs/DEVELOPER_GUIDE.md)
 
-- Persistent AI assistant experiments
-- Embodied AI and robotics orchestration
-- Distributed EVA-style multi-machine systems
-- Research demos that need internal visibility, not just a final answer
-- Personal AI companions with memory, personality, and operational tooling
+## Development
 
-## Current Project Status
-
-ANIMA is active, ambitious, and already demoable, but it is still an evolving system rather than a hardened production platform. The strongest current story is the combination of:
-
-- desktop EVA,
-- node-to-node networking,
-- embodied PiDog control,
-- edge ANIMA deployment,
-- and a runtime that exposes its internal structure instead of hiding it.
+```bash
+pip install -e ".[dev]"
+pytest
+```
 
 ## License
 
-[MIT](LICENSE)
+See [LICENSE](LICENSE).
