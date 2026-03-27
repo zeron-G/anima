@@ -17,6 +17,7 @@ runtime:
   labels: []
   compute_tier: 2
   max_concurrent: 5
+  require_llm_credentials: true
 
 edge:
   default_profile: "edge-pidog"

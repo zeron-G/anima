@@ -35,7 +35,7 @@ def verify_dependencies(config: dict | None = None) -> list[tuple[str, str]]:
     issues: list[tuple[str, str]] = []
 
     _check_python_version(issues)
-    _check_llm_credentials(issues)
+    _check_llm_credentials(issues, config)
     _check_semantic_search(issues)
     _check_required_files(issues)
     _check_database(issues, config)
@@ -48,29 +48,57 @@ def _check_python_version(issues: list) -> None:
         issues.append(("critical", f"Python 3.11+ required, got {sys.version}"))
 
 
-def _check_llm_credentials(issues: list) -> None:
-    """Check for Anthropic API credentials."""
+def _check_llm_credentials(issues: list, config: dict | None = None) -> None:
+    """Check whether this runtime has enough LLM configuration to start."""
+    runtime_cfg = (config or {}).get("runtime", {})
+    llm_cfg = (config or {}).get("llm", {})
+    require_llm = bool(runtime_cfg.get("require_llm_credentials", True))
+
+    openai_cfg = llm_cfg.get("openai_fallback", {}) if isinstance(llm_cfg, dict) else {}
+    tier1_model = str((llm_cfg.get("tier1", {}) or {}).get("model", ""))
+    tier2_model = str((llm_cfg.get("tier2", {}) or {}).get("model", ""))
+
+    has_openai_key = bool(os.environ.get("OPENAI_API_KEY", "").strip())
+    has_openai_model = bool(str(openai_cfg.get("model", "")).strip())
+    has_openai_route = has_openai_key and (
+        has_openai_model or tier1_model.startswith("openai/") or tier2_model.startswith("openai/")
+    )
+
     has_key = bool(os.environ.get("ANTHROPIC_API_KEY", "").strip())
     has_oauth = bool(os.environ.get("ANTHROPIC_OAUTH_TOKEN", "").strip())
+    has_creds = _has_claude_code_credentials()
 
-    # Check Claude Code credentials file
-    has_creds = False
-    creds_path = Path.home() / ".claude" / ".credentials.json"
-    if creds_path.exists():
-        try:
-            import json
-            data = json.loads(creds_path.read_text(encoding="utf-8"))
-            if data.get("claudeAiOauth", {}).get("accessToken"):
-                has_creds = True
-        except Exception:
-            pass
+    if has_key or has_oauth or has_creds or has_openai_route:
+        return
 
-    if not has_key and not has_oauth and not has_creds:
+    if require_llm:
         issues.append((
             "critical",
             "No LLM credentials found. Set ANTHROPIC_API_KEY or ANTHROPIC_OAUTH_TOKEN, "
             "or log into Claude Code."
         ))
+        return
+
+    issues.append((
+        "warning",
+        "No LLM credentials found. Continuing in degraded runtime mode; "
+        "LLM-backed conversation and planning will stay unavailable until credentials are configured."
+    ))
+
+
+def _has_claude_code_credentials() -> bool:
+    """Whether Claude Code OAuth credentials are available locally."""
+    creds_path = Path.home() / ".claude" / ".credentials.json"
+    if not creds_path.exists():
+        return False
+
+    try:
+        import json
+        data = json.loads(creds_path.read_text(encoding="utf-8"))
+    except Exception:
+        return False
+
+    return bool(data.get("claudeAiOauth", {}).get("accessToken"))
 
 
 def _check_semantic_search(issues: list) -> None:

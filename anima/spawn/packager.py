@@ -208,7 +208,9 @@ echo "Install dir: $ANIMA_DIR"
 $PYTHON --version || {{ echo "ERROR: Python 3.11+ required"; exit 1; }}
 # Create install dir
 mkdir -p "$ANIMA_DIR"
-cp -r ./* "$ANIMA_DIR/" 2>/dev/null || true
+# Copy package contents into place. `cp -r ./*` does not reliably replace
+# files inside pre-existing directories on repeated deployments.
+cp -a ./. "$ANIMA_DIR/"
 cd "$ANIMA_DIR"
 # Create venv
 $PYTHON -m venv .venv

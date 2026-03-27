@@ -6,6 +6,7 @@ runtime:
   labels: ["edge", "pidog", "embodied"]
   compute_tier: 3
   max_concurrent: 2
+  require_llm_credentials: false
 
 governance:
   default_mode: "cautious"
