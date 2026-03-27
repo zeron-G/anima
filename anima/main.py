@@ -933,6 +933,7 @@ def _init_dashboard(core: dict, llm: dict, heartbeat_deps: dict, cognitive_deps:
     dashboard_hub.scheduler = core["scheduler"]
     dashboard_hub.skill_loader = core["skill_loader"]
     dashboard_hub.gossip_mesh = network.get("gossip_mesh")
+    dashboard_hub.task_delegate = network.get("task_delegate")
     dashboard_hub.evolution_engine = heartbeat_deps["evolution_engine"]
     dashboard_hub.idle_scheduler = heartbeat_deps.get("idle_scheduler")
     dashboard_hub.session_manager = cognitive_deps.get("session_manager")

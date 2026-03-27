@@ -35,6 +35,7 @@ class DashboardHub:
         self.scheduler = None
         self.skill_loader = None
         self.gossip_mesh = None
+        self.task_delegate = None
         self.evolution_engine = None
         self.idle_scheduler = None
         self.session_manager = None
@@ -45,6 +46,7 @@ class DashboardHub:
         self._chat_history: list[dict] = []
         self._activity_log: list[dict] = []
         self._streams: dict[str, asyncio.Queue] = {}
+        self._node_conversations: dict[str, list[dict]] = {}
         self._git_cache: dict = {"branch": "?", "recent_commits": []}
         self._git_cache_ts: float = 0
 
@@ -234,6 +236,24 @@ class DashboardHub:
         # Fire-and-forget TTS generation for agent messages
         if role == "agent":
             self._generate_tts_async(entry)
+
+    def add_node_conversation_message(self, node_id: str, role: str, content: str, **kwargs: Any) -> dict:
+        """Append a message to a per-node remote conversation log."""
+        entry = {
+            "role": role,
+            "content": content,
+            "timestamp": time.time(),
+            **kwargs,
+        }
+        bucket = self._node_conversations.setdefault(node_id, [])
+        bucket.append(entry)
+        if len(bucket) > 80:
+            self._node_conversations[node_id] = bucket[-80:]
+        return entry
+
+    def get_node_conversation(self, node_id: str, limit: int = 50) -> list[dict]:
+        """Get recent messages for a remote node conversation."""
+        return list(self._node_conversations.get(node_id, [])[-limit:])
 
     def _generate_tts_async(self, entry: dict) -> None:
         """Generate TTS audio in background, attach URL to entry when done."""

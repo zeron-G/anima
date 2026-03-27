@@ -67,6 +67,8 @@ class APIRouter:
         # Network
         app.router.add_get("/v1/network/nodes", network.nodes)
         app.router.add_get("/v1/network/channels", network.channels)
+        app.router.add_get("/v1/network/nodes/{node_id}/conversation", network.conversation)
+        app.router.add_post("/v1/network/nodes/{node_id}/chat", network.chat_node)
 
         # Robotics
         app.router.add_get("/v1/robotics/nodes", robotics.nodes)
@@ -95,5 +97,5 @@ class APIRouter:
 
         log.info(
             "API routes registered: auth(2) + chat(5) + soulscape(14)"
-            " + evolution(4) + memory(7) + network(2) + robotics(8) + settings(10)"
+            " + evolution(4) + memory(7) + network(4) + robotics(8) + settings(10)"
         )
