@@ -12,6 +12,7 @@ from anima.config import get, project_root
 from anima.dashboard.hub import DashboardHub
 from anima.models.event import Event, EventType, EventPriority
 from anima.utils.logging import get_logger
+from anima.voice.bridge import VoiceBridgeServer
 
 log = get_logger("dashboard")
 
@@ -29,6 +30,14 @@ class DashboardServer:
         self._ws_clients: list[web.WebSocketResponse] = []
         self._runner: web.AppRunner | None = None
         self._push_task: asyncio.Task | None = None
+        self._voice_bridge: VoiceBridgeServer | None = None
+        voice_bridge_cfg = get("voice_bridge", {})
+        if voice_bridge_cfg.get("enabled", False):
+            self._voice_bridge = VoiceBridgeServer(
+                hub,
+                host=str(voice_bridge_cfg.get("host", "0.0.0.0")),
+                port=int(voice_bridge_cfg.get("port", 9000)),
+            )
 
         # CORS middleware — allow Tauri (https://tauri.localhost) and dev server
         @web.middleware
@@ -99,6 +108,11 @@ class DashboardServer:
         await self._runner.setup()
         site = web.TCPSite(self._runner, self._host, self._port)
         await site.start()
+        if self._voice_bridge:
+            try:
+                await self._voice_bridge.start()
+            except OSError as e:
+                log.warning("Voice bridge failed to start: %s", e)
         self._push_task = asyncio.create_task(self._push_loop())
         from anima.network.discovery import get_local_ip
         log.info("Dashboard running at http://%s:%d", get_local_ip(), self._port)
@@ -110,6 +124,8 @@ class DashboardServer:
             await ws.close()
         if self._runner:
             await self._runner.cleanup()
+        if self._voice_bridge:
+            await self._voice_bridge.stop()
         log.info("Dashboard stopped.")
 
     # ── Auth ──

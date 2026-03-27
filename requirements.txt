@@ -22,7 +22,8 @@ aiohttp>=3.9.0
 # einops
 
 # STT (optional)
-# faster-whisper
+faster-whisper>=1.1.0
+edge-tts>=6.1.0
 
 # Discord (optional)
 # discord.py>=2.3

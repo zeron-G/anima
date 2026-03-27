@@ -167,6 +167,17 @@ dashboard:
   auth:
     token: ""     # Set in local/env.yaml for security
 
+voice_bridge:
+  enabled: true
+  host: "0.0.0.0"
+  port: 9000
+  tts:
+    voice: "zh-CN-XiaoxiaoNeural"
+    rate: "+5%"
+    pitch: "+5Hz"
+  stt:
+    model_size: "base"
+
 # ── Governance ──
 governance:
   default_mode: "active"       # active / cautious / minimal

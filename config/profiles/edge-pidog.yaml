@@ -25,6 +25,9 @@ channels:
     port: 9421
     secret: ""
 
+voice_bridge:
+  enabled: false
+
 robotics:
   enabled: true
   poll_interval_s: 1.5

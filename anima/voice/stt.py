@@ -7,9 +7,11 @@ Downloads the model on first use.
 from __future__ import annotations
 
 import threading
+import sys
 from pathlib import Path
 from typing import Any
 
+from anima.config import get
 from anima.utils.logging import get_logger
 
 log = get_logger("voice.stt")
@@ -23,9 +25,10 @@ _stt_model_failed = False
 DEFAULT_MODEL_SIZE = "base"
 
 
-def _load_model(model_size: str = DEFAULT_MODEL_SIZE) -> Any:
+def _load_model(model_size: str | None = None) -> Any:
     """Lazy-load the faster-whisper model."""
     global _stt_model, _stt_model_failed
+    model_size = model_size or str(get("voice_bridge.stt.model_size", DEFAULT_MODEL_SIZE))
 
     if _stt_model is not None:
         return _stt_model
@@ -41,29 +44,44 @@ def _load_model(model_size: str = DEFAULT_MODEL_SIZE) -> Any:
         try:
             from faster_whisper import WhisperModel
 
-            # Use CUDA if available, otherwise CPU
+            backends: list[tuple[str, str]] = []
+            if sys.platform == "win32":
+                backends.append(("cpu", "int8"))
             try:
                 import torch
-                device = "cuda" if torch.cuda.is_available() else "cpu"
-                compute_type = "float16" if device == "cuda" else "int8"
+                if torch.cuda.is_available() and sys.platform != "win32":
+                    backends.append(("cuda", "float16"))
             except ImportError:
-                device = "cpu"
-                compute_type = "int8"
+                pass
+            if ("cpu", "int8") not in backends:
+                backends.append(("cpu", "int8"))
 
-            log.info("Loading Whisper %s model on %s...", model_size, device)
-            model = WhisperModel(model_size, device=device, compute_type=compute_type)
-            _stt_model = model
-            log.info("Whisper model loaded on %s", device)
-            return model
+            last_error: Exception | None = None
+            for device, compute_type in backends:
+                try:
+                    log.info(
+                        "Loading Whisper %s model on %s (%s)...",
+                        model_size,
+                        device,
+                        compute_type,
+                    )
+                    model = WhisperModel(model_size, device=device, compute_type=compute_type)
+                    _stt_model = model
+                    log.info("Whisper model loaded on %s", device)
+                    return model
+                except Exception as e:
+                    last_error = e
+                    log.warning("Whisper load failed on %s: %s", device, e)
 
         except ImportError:
             log.warning("faster-whisper not installed — STT unavailable")
             _stt_model_failed = True
             return None
-        except Exception as e:
-            log.warning("Failed to load Whisper model: %s", e)
-            _stt_model_failed = True
-            return None
+
+        if last_error is not None:
+            log.warning("Failed to load Whisper model: %s", last_error)
+        _stt_model_failed = True
+        return None
 
 
 def transcribe_sync(audio_path: str | Path, language: str | None = None) -> str:

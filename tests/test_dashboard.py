@@ -1,6 +1,7 @@
 """Tests for the dashboard server."""
 
 import asyncio
+import base64
 import pytest
 import aiohttp
 
@@ -19,6 +20,12 @@ from anima.tools.registry import ToolRegistry
 async def dashboard(tmp_path):
     """Start a dashboard server on a random port for testing."""
     config = load_config()
+    config.setdefault("voice_bridge", {})
+    config["voice_bridge"].update({
+        "enabled": True,
+        "host": "127.0.0.1",
+        "port": 19000,
+    })
     hub = DashboardHub()
     hub.config = config
     hub.event_queue = EventQueue()
@@ -97,3 +104,57 @@ async def test_dashboard_hub_snapshot(dashboard):
     assert snapshot["agent"]["name"] == "eva"
     assert snapshot["auth"]["provider"] == "Anthropic"
     assert len(snapshot["tools"]) > 0
+
+
+@pytest.mark.asyncio
+async def test_dashboard_voice_bridge_routes(dashboard, monkeypatch):
+    server, hub = dashboard
+
+    async def _fake_synthesize(text: str, *, voice: str = "", use_cache: bool = True) -> bytes:
+        assert text == "你好，PiDog"
+        assert use_cache is True
+        return b"fake-mp3"
+
+    async def _fake_transcribe(audio_path: str, language: str | None = None) -> str:
+        assert language == "zh"
+        return "坐下"
+
+    monkeypatch.setattr("anima.voice.bridge.synthesize_mp3", _fake_synthesize)
+    monkeypatch.setattr("anima.voice.bridge.stt_module.is_available", lambda: True)
+    monkeypatch.setattr("anima.voice.bridge.stt_module.transcribe", _fake_transcribe)
+
+    async with aiohttp.ClientSession() as session:
+        async with session.get("http://127.0.0.1:19000/health") as resp:
+            assert resp.status == 200
+            data = await resp.json()
+            assert data["status"] == "ok"
+            assert data["stt_available"] is True
+
+        async with session.post(
+            "http://127.0.0.1:19000/tts",
+            json={"text": "你好，PiDog", "use_cache": True},
+        ) as resp:
+            assert resp.status == 200
+            assert resp.headers["Content-Type"].startswith("audio/mpeg")
+            assert await resp.read() == b"fake-mp3"
+
+        audio_b64 = base64.b64encode(b"RIFFfake-audio-payload" * 20).decode("ascii")
+        async with session.post(
+            "http://127.0.0.1:19000/stt",
+            json={"audio_b64": audio_b64, "language": "zh"},
+        ) as resp:
+            assert resp.status == 200
+            data = await resp.json()
+            assert data["text"] == "坐下"
+
+        async with session.post(
+            "http://127.0.0.1:19000/task",
+            json={"text": "帮我看看周围"},
+        ) as resp:
+            assert resp.status == 200
+            data = await resp.json()
+            assert data["status"] == "ok"
+
+    event = await hub.event_queue.get_timeout(1.0)
+    assert event is not None
+    assert event.payload["text"] == "[PiDog Voice] 帮我看看周围"
