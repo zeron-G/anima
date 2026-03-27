@@ -40,6 +40,11 @@ class NodeState:
     idle_score: float = 0.0        # 0.0-1.0 from IdleScheduler
     idle_level: str = "busy"       # busy | light | moderate | deep
     agent_name: str = ""
+    runtime_profile: str = "default"
+    runtime_role: str = "desktop_supervisor"
+    platform_class: str = "desktop"
+    embodiment: str = "virtual"
+    labels: list = field(default_factory=list)
     code_version: str = "0.1.0"
     uptime_s: int = 0
     emotion: dict = field(default_factory=dict)

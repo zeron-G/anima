@@ -46,11 +46,21 @@ def test_node_state_bump():
 
 
 def test_node_state_dict_roundtrip():
-    state = NodeState(node_id="test-1", hostname="mypc", capabilities=["shell", "llm"])
+    state = NodeState(
+        node_id="test-1",
+        hostname="mypc",
+        capabilities=["shell", "llm"],
+        runtime_profile="edge-pidog",
+        runtime_role="edge_embodied",
+        embodiment="robot_dog",
+    )
     d = state.to_dict()
     state2 = NodeState.from_dict(d)
     assert state2.node_id == "test-1"
     assert state2.capabilities == ["shell", "llm"]
+    assert state2.runtime_profile == "edge-pidog"
+    assert state2.runtime_role == "edge_embodied"
+    assert state2.embodiment == "robot_dog"
 
 
 def test_node_identity_creates_on_first_run(tmp_path):

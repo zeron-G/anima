@@ -111,6 +111,7 @@ class DashboardHub:
             "timestamp": time.time(),
             "uptime_s": round(time.time() - self._start_time),
             "agent": self._agent_info(),
+            "runtime": self._runtime_info(),
             "heartbeat": self._heartbeat_info(),
             "auth": self._auth_info(),
             "usage": self._usage_info(),
@@ -298,6 +299,18 @@ class DashboardHub:
         return {
             "name": name,
             "status": "alive" if self.heartbeat and self.heartbeat._running else "stopped",
+        }
+
+    def _runtime_info(self) -> dict:
+        runtime = self.config.get("runtime", {})
+        return {
+            "profile": runtime.get("profile", "default"),
+            "role": runtime.get("role", "desktop_supervisor"),
+            "platform": runtime.get("platform", "desktop"),
+            "embodiment": runtime.get("embodiment", "virtual"),
+            "labels": list(runtime.get("labels", [])),
+            "compute_tier": runtime.get("compute_tier", 2),
+            "max_concurrent": runtime.get("max_concurrent", 5),
         }
 
     def _heartbeat_info(self) -> dict:

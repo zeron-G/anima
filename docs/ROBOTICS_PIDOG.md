@@ -9,6 +9,8 @@ This document describes the embodied-control architecture now wired into ANIMA f
 - Let the EVA desktop app directly drive the dog with low-latency actions.
 - Let the dog sense nearby obstacles and explore on its own when desktop control is not actively steering it.
 
+For the dedicated onboard runtime shape, see [EDGE_ANIMA.md](EDGE_ANIMA.md).
+
 ## Layer Mapping
 
 The current design intentionally mirrors the four-layer PiDog Eva stack already running on the robot:

@@ -3,8 +3,10 @@
 Usage:
     python -m anima                  # Desktop app (PyWebView native window)
     python -m anima --headless       # Backend only (browser access)
+    python -m anima --edge           # Edge ANIMA for robot-dog Linux nodes
     python -m anima --legacy         # Legacy terminal mode
     python -m anima --experimental   # Allow second instance
+    python -m anima --profile NAME   # Load a committed runtime profile
     python -m anima watchdog         # Watchdog mode
     python -m anima spawn user@host  # Deploy to remote
 """
@@ -70,15 +72,23 @@ if sys.platform == "win32":
 
 def main():
     args = sys.argv[1:]
+    args, profile = _extract_option(args, "--profile")
+    edge_mode = "--edge" in args
+    if edge_mode:
+        args = [arg for arg in args if arg != "--edge"]
+        profile = profile or "edge-pidog"
+
+    if profile:
+        os.environ["ANIMA_PROFILE"] = profile
 
     if args and args[0] == "watchdog":
         from anima.watchdog import run_watchdog
         run_watchdog(dry_run="--dry" in args)
     elif args and args[0] == "spawn":
-        _handle_spawn(args[1:])
+        _handle_spawn(args[1:], default_profile=profile, edge_mode=edge_mode)
     elif "--watch" in args:
         _run_with_watch()
-    elif "--legacy" in args:
+    elif "--legacy" in args or edge_mode:
         from anima.main import main_entry
         main_entry()
     else:
@@ -86,6 +96,20 @@ def main():
         headless = "--headless" in args
         from anima.desktop.app import launch_desktop
         launch_desktop(headless=headless, experimental=experimental)
+
+
+def _extract_option(args: list[str], option: str) -> tuple[list[str], str]:
+    """Remove a `--flag value` option pair and return the remaining args."""
+    items = list(args)
+    value = ""
+    if option in items:
+        idx = items.index(option)
+        if idx + 1 < len(items):
+            value = items[idx + 1]
+            del items[idx:idx + 2]
+        else:
+            del items[idx]
+    return items, value
 
 
 def _run_with_watch():
@@ -133,21 +157,26 @@ def _run_with_watch():
             time.sleep(3)
 
 
-def _handle_spawn(args: list[str]):
+def _handle_spawn(args: list[str], *, default_profile: str = "", edge_mode: bool = False):
     import asyncio
 
     if not args or "--help" in args:
         print("Usage:")
-        print("  python -m anima spawn user@host       Deploy via SSH")
-        print("  python -m anima spawn --local /path    Deploy locally")
-        print("  python -m anima spawn --pack-only      Create package only")
+        print("  python -m anima spawn user@host                      Deploy via SSH")
+        print("  python -m anima spawn user@host --edge               Deploy edge PiDog profile")
+        print("  python -m anima spawn --local /path                  Deploy locally")
+        print("  python -m anima spawn --pack-only [--edge]           Create package only")
+        print("  python -m anima spawn --profile edge-pidog --pack-only")
         return
 
     python_cmd = "python3"
     secret = ""
     include_env = True
     local_path = ""
+    install_dir = ""
+    profile = default_profile
     pack_only = False
+    install_service = False
     target = ""
 
     i = 0
@@ -156,26 +185,53 @@ def _handle_spawn(args: list[str]):
             python_cmd = args[i + 1]; i += 2
         elif args[i] == "--secret" and i + 1 < len(args):
             secret = args[i + 1]; i += 2
+        elif args[i] == "--profile" and i + 1 < len(args):
+            profile = args[i + 1]; i += 2
         elif args[i] == "--no-env":
             include_env = False; i += 1
         elif args[i] == "--local" and i + 1 < len(args):
             local_path = args[i + 1]; i += 2
+        elif args[i] == "--install-dir" and i + 1 < len(args):
+            install_dir = args[i + 1]; i += 2
         elif args[i] == "--pack-only":
             pack_only = True; i += 1
+        elif args[i] == "--install-service":
+            install_service = True; i += 1
+        elif args[i] == "--edge":
+            edge_mode = True
+            profile = profile or "edge-pidog"
+            install_service = True
+            i += 1
         elif not args[i].startswith("-"):
             target = args[i]; i += 1
         else:
             i += 1
 
+    if edge_mode and not profile:
+        profile = "edge-pidog"
+
     if pack_only:
         from anima.spawn.packager import create_spawn_package
-        path = create_spawn_package(network_secret=secret, include_env=include_env)
+        path = create_spawn_package(
+            network_secret=secret,
+            include_env=include_env,
+            profile=profile,
+            edge_mode=edge_mode,
+            install_service=install_service,
+        )
         print(f"Package created: {path}")
         return
 
     if local_path:
         from anima.spawn.deployer import deploy_local
-        result = asyncio.run(deploy_local(local_path, network_secret=secret))
+        result = asyncio.run(
+            deploy_local(
+                local_path,
+                network_secret=secret,
+                profile=profile,
+                edge_mode=edge_mode,
+            )
+        )
         print(f"Result: {result}")
         return
 
@@ -183,8 +239,13 @@ def _handle_spawn(args: list[str]):
         from anima.spawn.deployer import deploy_to_remote
 
         result = asyncio.run(deploy_to_remote(
-            target, python_cmd=python_cmd,
+            target,
+            python_cmd=python_cmd,
+            install_dir=install_dir,
             network_secret=secret, include_env=include_env,
+            profile=profile,
+            edge_mode=edge_mode,
+            install_service=install_service,
         ))
         print(f"Result: {result}")
         return

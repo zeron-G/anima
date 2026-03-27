@@ -430,6 +430,7 @@ async def _init_gossip(config: dict, core: dict, heartbeat_deps: dict) -> dict:
     event_queue = core["event_queue"]
     evolution_engine = heartbeat_deps["evolution_engine"]
     heartbeat = heartbeat_deps["heartbeat"]
+    runtime_cfg = get("runtime", {})
 
     node_identity = NodeIdentity()
     node_state = NodeState(
@@ -437,7 +438,14 @@ async def _init_gossip(config: dict, core: dict, heartbeat_deps: dict) -> dict:
         hostname=__import__("socket").gethostname(),
         ip=get_local_ip(),
         port=get("network.listen_port", 9420),
+        compute_tier=int(runtime_cfg.get("compute_tier", 2)),
         agent_name=get("agent.name", "eva"),
+        runtime_profile=str(runtime_cfg.get("profile", "default")),
+        runtime_role=str(runtime_cfg.get("role", "desktop_supervisor")),
+        platform_class=str(runtime_cfg.get("platform", sys.platform)),
+        embodiment=str(runtime_cfg.get("embodiment", "virtual")),
+        labels=list(runtime_cfg.get("labels", [])),
+        max_concurrent=int(runtime_cfg.get("max_concurrent", 5)),
         capabilities=[t.name for t in core["tool_registry"].list_tools()],
     )
     gossip_mesh = GossipMesh(

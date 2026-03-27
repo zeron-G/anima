@@ -19,6 +19,9 @@ async def deploy_to_remote(
     install_dir: str = "",
     network_secret: str = "",
     include_env: bool = True,
+    profile: str = "",
+    edge_mode: bool = False,
+    install_service: bool = False,
     timeout: int = 300,
 ) -> dict:
     """Deploy ANIMA to a remote machine via SSH + SCP.
@@ -26,9 +29,12 @@ async def deploy_to_remote(
     Args:
         target: SSH target (user@host)
         python_cmd: Python command on remote machine
-        install_dir: Install directory on remote (default: ~/.anima)
+        install_dir: Install directory on remote (default: ~/.anima or edge profile dir)
         network_secret: Shared network secret
         include_env: Whether to send .env with API keys
+        profile: Optional runtime profile such as edge-pidog
+        edge_mode: Whether to run the remote node in edge mode
+        install_service: Whether to install a user-level service on Linux
         timeout: Total timeout in seconds
 
     Returns:
@@ -40,10 +46,14 @@ async def deploy_to_remote(
     package = create_spawn_package(
         network_secret=network_secret,
         include_env=include_env,
+        profile=profile,
+        edge_mode=edge_mode,
+        install_service=install_service,
     )
 
     try:
-        remote_dir = install_dir or "~/.anima"
+        default_dir = "~/.anima-edge" if edge_mode else "~/.anima"
+        remote_dir = install_dir or default_dir
         remote_tmp = f"/tmp/anima-spawn-{os.getpid()}.tar.gz"
 
         # 2. SCP package to remote
@@ -92,6 +102,8 @@ async def deploy_local(
     install_dir: str,
     port: int = 8421,
     network_secret: str = "",
+    profile: str = "",
+    edge_mode: bool = False,
 ) -> dict:
     """Deploy a second ANIMA node locally (for testing).
 
@@ -108,6 +120,9 @@ async def deploy_local(
     package = create_spawn_package(
         network_secret=network_secret,
         include_env=True,
+        profile=profile,
+        edge_mode=edge_mode,
+        install_service=False,
     )
 
     try:
@@ -130,9 +145,19 @@ async def deploy_local(
 
         # Start
         python = sys.executable
+        launch_args = [python, "-m", "anima"]
+        if edge_mode:
+            launch_args.append("--edge")
+        else:
+            launch_args.append("--headless")
+
         proc = await asyncio.create_subprocess_exec(
-            python, "-m", "anima",
+            *launch_args,
             cwd=str(install),
+            env={
+                **os.environ,
+                "ANIMA_PROFILE": profile,
+            } if profile else None,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )

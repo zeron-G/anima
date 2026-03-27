@@ -20,57 +20,15 @@ from anima.utils.logging import get_logger
 
 log = get_logger("spawn.packager")
 
-BOOTSTRAP_SH = r"""#!/bin/bash
-# ANIMA Node Bootstrap — one-command deployment
-set -e
-ANIMA_DIR="${ANIMA_INSTALL_DIR:-$HOME/.anima}"
-PYTHON="${PYTHON_CMD:-python3}"
-echo "=== ANIMA Node Bootstrap ==="
-echo "Install dir: $ANIMA_DIR"
-# Check Python
-$PYTHON --version || { echo "ERROR: Python 3.11+ required"; exit 1; }
-# Create install dir
-mkdir -p "$ANIMA_DIR"
-cp -r ./* "$ANIMA_DIR/" 2>/dev/null || true
-cd "$ANIMA_DIR"
-# Create venv
-$PYTHON -m venv .venv
-source .venv/bin/activate
-# Install
-pip install -e . --quiet 2>&1 | tail -3
-# Permissions
-chmod 600 .env 2>/dev/null || true
-# Start
-nohup python -m anima > data/logs/anima.log 2>&1 &
-echo $! > data/anima.pid
-echo "=== ANIMA started (PID: $(cat data/anima.pid)) ==="
-echo "Dashboard: http://$(hostname -I 2>/dev/null | awk '{print $1}' || echo localhost):$(python -c 'import yaml; print(yaml.safe_load(open("config/default.yaml")).get("dashboard",{}).get("port",8420))')"
-"""
-
-BOOTSTRAP_PS1 = r"""# ANIMA Node Bootstrap — Windows PowerShell
-$ErrorActionPreference = "Stop"
-$ANIMA_DIR = if ($env:ANIMA_INSTALL_DIR) { $env:ANIMA_INSTALL_DIR } else { "$env:USERPROFILE\.anima" }
-$PYTHON = if ($env:PYTHON_CMD) { $env:PYTHON_CMD } else { "python" }
-Write-Host "=== ANIMA Node Bootstrap ==="
-Write-Host "Install dir: $ANIMA_DIR"
-& $PYTHON --version
-if ($LASTEXITCODE -ne 0) { throw "Python 3.11+ required" }
-New-Item -ItemType Directory -Force -Path $ANIMA_DIR | Out-Null
-Copy-Item -Recurse -Force .\* $ANIMA_DIR\
-Set-Location $ANIMA_DIR
-& $PYTHON -m venv .venv
-.\.venv\Scripts\Activate
-pip install -e . --quiet
-Start-Process -NoNewWindow -FilePath python -ArgumentList "-m anima" -RedirectStandardOutput "data\logs\anima.log"
-Write-Host "=== ANIMA started ==="
-"""
-
 
 def create_spawn_package(
     output_path: str | None = None,
     parent_address: str | None = None,
     network_secret: str = "",
     include_env: bool = False,
+    profile: str = "",
+    edge_mode: bool = False,
+    install_service: bool = False,
 ) -> Path:
     """Create a spawn package (tar.gz) for deploying to a new node.
 
@@ -79,6 +37,9 @@ def create_spawn_package(
         parent_address: ip:port of the parent node (for peers config)
         network_secret: Shared secret for the network
         include_env: Whether to include .env file (with API keys)
+        profile: Optional runtime profile such as "edge-pidog"
+        edge_mode: Whether the package should start ANIMA via `python -m anima --edge`
+        install_service: Whether to include and install a user-level systemd service on Linux
 
     Returns:
         Path to the created tar.gz file.
@@ -98,11 +59,17 @@ def create_spawn_package(
     if parent_address is None:
         parent_address = f"{get_local_ip()}:{get('network.listen_port', 9420)}"
 
-    log.info("Creating spawn package: %s (parent: %s)", output_path, parent_address)
+    log.info(
+        "Creating spawn package: %s (parent: %s, profile=%s, edge=%s)",
+        output_path,
+        parent_address,
+        profile or "default",
+        edge_mode,
+    )
 
     with tarfile.open(output_path, "w:gz") as tar:
         # Source code
-        for d in ["anima", "config", "prompts", "agents", "skills"]:
+        for d in ["anima", "config", "prompts", "agents", "skills", "docs"]:
             src = root / d
             if src.exists():
                 _add_dir_to_tar(tar, src, d, exclude={
@@ -116,9 +83,38 @@ def create_spawn_package(
             if fp.exists():
                 tar.add(str(fp), arcname=f)
 
+        # local/env example (safe to ship, unlike local/env.yaml)
+        local_env_example = root / "local" / "env.yaml.example"
+        if local_env_example.exists():
+            tar.add(str(local_env_example), arcname="local/env.yaml.example")
+
+        service_name = get("edge.service_name", "anima-edge")
+
         # Bootstrap scripts
-        _add_string_to_tar(tar, "bootstrap.sh", BOOTSTRAP_SH)
-        _add_string_to_tar(tar, "bootstrap.ps1", BOOTSTRAP_PS1)
+        _add_string_to_tar(
+            tar,
+            "bootstrap.sh",
+            _render_bootstrap_sh(
+                profile=profile,
+                edge_mode=edge_mode,
+                install_service=install_service,
+                service_name=service_name,
+            ),
+        )
+        _add_string_to_tar(
+            tar,
+            "bootstrap.ps1",
+            _render_bootstrap_ps1(profile=profile, edge_mode=edge_mode),
+        )
+        if install_service:
+            _add_string_to_tar(
+                tar,
+                f"deploy/{service_name}.service",
+                _render_systemd_service(
+                    profile=profile,
+                    edge_mode=edge_mode,
+                ),
+            )
 
         # Child node.json
         node_data = json.dumps({
@@ -142,6 +138,8 @@ def create_spawn_package(
                 "secret": network_secret or get("network.secret", ""),
                 "peers": [parent_address],
             }
+            runtime_cfg = cfg.setdefault("runtime", {})
+            runtime_cfg["profile"] = profile or runtime_cfg.get("profile", "default")
             # Disable Discord on child nodes (only parent runs the bot)
             if "channels" in cfg:
                 cfg["channels"]["discord"] = {"enabled": False, "token": "", "allowed_users": []}
@@ -166,6 +164,108 @@ def create_spawn_package(
     log.info("Spawn package created: %s (%d bytes)", output_path,
              Path(output_path).stat().st_size)
     return Path(output_path)
+
+
+def _render_bootstrap_sh(
+    *,
+    profile: str,
+    edge_mode: bool,
+    install_service: bool,
+    service_name: str,
+) -> str:
+    profile_env = f'export ANIMA_PROFILE="{profile}"\n' if profile else ""
+    cli_args = "--edge" if edge_mode else "--headless"
+    install_service_block = ""
+    if install_service:
+        install_service_block = f"""
+# Install user-level systemd service when available
+mkdir -p "$HOME/.config/systemd/user"
+sed "s|__ANIMA_DIR__|$ANIMA_DIR|g" "deploy/{service_name}.service" > "$HOME/.config/systemd/user/{service_name}.service"
+if command -v systemctl >/dev/null 2>&1; then
+  systemctl --user daemon-reload || true
+  systemctl --user enable --now {service_name}.service || true
+else
+  echo "systemctl not available; falling back to nohup launch"
+  nohup env ANIMA_PROFILE="{profile}" "$ANIMA_DIR/.venv/bin/python" -m anima {cli_args} > data/logs/anima.log 2>&1 &
+  echo $! > data/anima.pid
+fi
+"""
+    else:
+        install_service_block = f"""
+# Start
+nohup env ANIMA_PROFILE="{profile}" "$ANIMA_DIR/.venv/bin/python" -m anima {cli_args} > data/logs/anima.log 2>&1 &
+echo $! > data/anima.pid
+"""
+
+    return f"""#!/bin/bash
+# ANIMA Node Bootstrap — one-command deployment
+set -e
+ANIMA_DIR="${{ANIMA_INSTALL_DIR:-$HOME/.anima}}"
+PYTHON="${{PYTHON_CMD:-python3}}"
+echo "=== ANIMA Node Bootstrap ==="
+echo "Install dir: $ANIMA_DIR"
+# Check Python
+$PYTHON --version || {{ echo "ERROR: Python 3.11+ required"; exit 1; }}
+# Create install dir
+mkdir -p "$ANIMA_DIR"
+cp -r ./* "$ANIMA_DIR/" 2>/dev/null || true
+cd "$ANIMA_DIR"
+# Create venv
+$PYTHON -m venv .venv
+source .venv/bin/activate
+# Install
+pip install -e . --quiet 2>&1 | tail -3
+# Permissions
+chmod 600 .env 2>/dev/null || true
+{profile_env}{install_service_block}
+echo "=== ANIMA started ==="
+echo "Dashboard: http://$(hostname -I 2>/dev/null | awk '{{print $1}}' || echo localhost):$(python -c 'import yaml; print(yaml.safe_load(open(\"config/default.yaml\")).get(\"dashboard\",{{}}).get(\"port\",8420))')"
+"""
+
+
+def _render_bootstrap_ps1(*, profile: str, edge_mode: bool) -> str:
+    cli_args = "--edge" if edge_mode else "--headless"
+    profile_block = ""
+    if profile:
+        profile_block = f'$env:ANIMA_PROFILE = "{profile}"'
+    return f"""# ANIMA Node Bootstrap — Windows PowerShell
+$ErrorActionPreference = "Stop"
+$ANIMA_DIR = if ($env:ANIMA_INSTALL_DIR) {{ $env:ANIMA_INSTALL_DIR }} else {{ "$env:USERPROFILE\\.anima" }}
+$PYTHON = if ($env:PYTHON_CMD) {{ $env:PYTHON_CMD }} else {{ "python" }}
+Write-Host "=== ANIMA Node Bootstrap ==="
+Write-Host "Install dir: $ANIMA_DIR"
+& $PYTHON --version
+if ($LASTEXITCODE -ne 0) {{ throw "Python 3.11+ required" }}
+New-Item -ItemType Directory -Force -Path $ANIMA_DIR | Out-Null
+Copy-Item -Recurse -Force .\\* $ANIMA_DIR\\
+Set-Location $ANIMA_DIR
+& $PYTHON -m venv .venv
+.\\.venv\\Scripts\\Activate
+pip install -e . --quiet
+{profile_block}
+Start-Process -NoNewWindow -FilePath python -ArgumentList "-m anima {cli_args}" -RedirectStandardOutput "data\\logs\\anima.log"
+Write-Host "=== ANIMA started ==="
+"""
+
+
+def _render_systemd_service(*, profile: str, edge_mode: bool) -> str:
+    cli_args = "--edge" if edge_mode else "--headless"
+    environment = f'Environment=ANIMA_PROFILE={profile}\n' if profile else ""
+    return f"""[Unit]
+Description=ANIMA Edge Runtime
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=__ANIMA_DIR__
+{environment}ExecStart=__ANIMA_DIR__/.venv/bin/python -m anima {cli_args}
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target
+"""
 
 
 def _add_dir_to_tar(tar: tarfile.TarFile, src: Path, arcname: str,

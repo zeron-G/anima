@@ -1,0 +1,45 @@
+runtime:
+  profile: "edge-pidog"
+  role: "edge_embodied"
+  platform: "linux"
+  embodiment: "robot_dog"
+  labels: ["edge", "pidog", "embodied"]
+  compute_tier: 3
+  max_concurrent: 2
+
+governance:
+  default_mode: "cautious"
+
+channels:
+  discord:
+    enabled: false
+    token: ""
+    allowed_users: []
+  telegram:
+    enabled: false
+    token: ""
+    allowed_users: []
+  webhook:
+    enabled: false
+    port: 9421
+    secret: ""
+
+robotics:
+  enabled: true
+  poll_interval_s: 1.5
+  nodes:
+    - id: "pidog-local"
+      name: "PiDog Edge"
+      kind: "pidog"
+      role: "robot_dog"
+      base_urls:
+        - "http://127.0.0.1:8888"
+      tags: ["edge", "local", "robot_dog"]
+      metadata:
+        platform: "linux"
+        locality: "onboard"
+        anima_mode: "edge"
+      exploration:
+        move_burst_s: 1.0
+        turn_burst_s: 0.8
+        avoid_distance_cm: 28.0

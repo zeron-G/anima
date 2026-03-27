@@ -105,6 +105,7 @@ async def system_info(request: web.Request) -> web.Response:
         "version": "0.2.0",
         "uptime_s": snapshot.get("uptime_s", 0),
         "agent_name": get("agent.name", "eva"),
+        "runtime": snapshot.get("runtime", {}),
         "python_version": __import__("sys").version,
         "chromadb": True,
     })

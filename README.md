@@ -15,6 +15,7 @@ ANIMA.bat                                   # Auto-detects conda/venv
 # Backend
 python -m anima              # Desktop app (PyWebView)
 python -m anima --headless   # Backend only (API + WebSocket)
+python -m anima --edge       # Edge ANIMA runtime for robot-dog Linux nodes
 python -m anima --terminal   # Terminal mode (no GUI)
 
 # Frontend (Vue SPA — connects to backend at :8420)
@@ -170,6 +171,13 @@ Primary (Codex/Opus) → Opus fallback → Sonnet fallback
 - EVA desktop can directly drive actions, speech, and exploration from `/robotics`
 - Phase-1 autonomy uses onboard sensing plus a reactive exploration controller
 - Design notes: [docs/ROBOTICS_PIDOG.md](docs/ROBOTICS_PIDOG.md)
+
+### Edge ANIMA
+- `config/profiles/edge-pidog.yaml` defines the onboard robot-dog runtime profile
+- `python -m anima --edge` runs ANIMA as a headless embodied edge node
+- `python -m anima spawn user@host --edge --profile edge-pidog` packages and deploys the edge runtime
+- Edge nodes now advertise runtime role, profile, platform, and embodiment through gossip
+- Design notes: [docs/EDGE_ANIMA.md](docs/EDGE_ANIMA.md)
 
 ## Configuration
 

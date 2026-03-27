@@ -15,6 +15,7 @@ ANIMA.bat
 # 或命令行
 python -m anima              # 桌面应用（PyWebView 窗口）
 python -m anima --headless   # 无窗口（浏览器访问 localhost:8420/desktop）
+python -m anima --edge       # 机器狗 Linux 机载 edge ANIMA
 python -m anima --legacy     # 终端模式
 ```
 
@@ -77,6 +78,13 @@ ANIMA 桌面应用
 - EVA 桌面端新增 `/robotics` 页面，可直接控制机器狗并查看实时感知状态
 - 当前探索能力为第一阶段：基于超声、触摸、姿态、电量的保守式自主探索
 - 设计文档见 [docs/ROBOTICS_PIDOG.md](docs/ROBOTICS_PIDOG.md)
+
+### Edge ANIMA
+- 新增 `config/profiles/edge-pidog.yaml`，用于机器狗机载 Linux 侧的 edge 运行档位
+- `python -m anima --edge` 可直接以无桌面、具身 edge 模式启动
+- `python -m anima spawn user@host --edge --profile edge-pidog` 可直接打包并远程部署机载版
+- edge 节点现在会在 gossip 网络中广播自己的 profile、角色、平台和具身类型
+- 设计文档见 [docs/EDGE_ANIMA.md](docs/EDGE_ANIMA.md)
 
 ## 配置
 

@@ -9,6 +9,21 @@
 agent:
   name: "eva"
 
+runtime:
+  profile: "default"
+  role: "desktop_supervisor"
+  platform: "desktop"
+  embodiment: "virtual"
+  labels: []
+  compute_tier: 2
+  max_concurrent: 5
+
+edge:
+  default_profile: "edge-pidog"
+  service_name: "anima-edge"
+  install_dir: "~/.anima-edge"
+  auto_install_service: true
+
 # ── Heartbeat ──
 heartbeat:
   script_interval_s: 30
