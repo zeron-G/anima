@@ -208,6 +208,11 @@ mcp_servers: {}   # No MCP servers by default — configure in local/env.yaml
 robotics:
   enabled: false
   poll_interval_s: 2.0
+  nlp_supervisor:
+    enabled: true
+    model: "codex/gpt-5.3-codex"
+    max_tokens: 480
+    min_confidence: 0.55
   nodes: []
   exploration:
     tick_interval_s: 2.0

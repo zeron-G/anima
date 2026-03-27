@@ -111,6 +111,11 @@ This allows the desktop supervisor to distinguish:
 - coordinate multi-node behavior
 - take over or stop exploration remotely
 
+The desktop supervisor is also the preferred place for higher-level robot NLP planning.
+In the current configuration, the desktop runtime can use Codex OAuth with
+`codex/gpt-5.3-codex` to translate freer English requests into one safe PiDog command,
+while the edge runtime stays on lightweight local parsing plus autonomy.
+
 ## Suggested Robot-Side Local Overrides
 
 In `local/env.yaml` on the robot, typically provide:

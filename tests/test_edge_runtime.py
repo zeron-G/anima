@@ -22,6 +22,8 @@ def test_load_edge_profile_without_local_overrides():
     assert cfg["runtime"]["embodiment"] == "robot_dog"
     assert cfg["runtime"]["require_llm_credentials"] is False
     assert cfg["robotics"]["enabled"] is True
+    assert cfg["robotics"]["nlp_supervisor"]["enabled"] is False
+    assert cfg["robotics"]["nlp_supervisor"]["model"] == "codex/gpt-5.3-codex"
     assert cfg["robotics"]["nodes"][0]["base_urls"] == ["http://127.0.0.1:8888"]
     assert cfg["channels"]["discord"]["enabled"] is False
 

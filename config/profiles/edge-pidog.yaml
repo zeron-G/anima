@@ -28,6 +28,11 @@ channels:
 robotics:
   enabled: true
   poll_interval_s: 1.5
+  nlp_supervisor:
+    enabled: false
+    model: "codex/gpt-5.3-codex"
+    max_tokens: 480
+    min_confidence: 0.55
   nodes:
     - id: "pidog-local"
       name: "PiDog Edge"

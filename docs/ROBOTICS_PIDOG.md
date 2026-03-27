@@ -40,6 +40,15 @@ There are now three first-class control paths:
 - EVA desktop direct control.
   The Vue desktop page `/robotics` lets the user click motion commands, submit natural-language requests, trigger robot speech, and start or stop exploration.
 
+Natural-language control now resolves in three tiers:
+
+1. Robot-local PiDog `/nlp`.
+   Fast keyword parsing on the dog, now intended for low-latency basic actions.
+2. Supervisor-side deterministic fallback.
+   ANIMA can map common English motion phrases such as `sit down`, `stand up`, `turn left`, or `wag your tail` even when the robot-local parser does not understand them.
+3. Supervisor-side LLM fallback.
+   The desktop supervisor can escalate unresolved phrases to a higher-level planner model and then emit a structured PiDog command.
+
 ## Node Contract
 
 The PiDog Linux node contract assumed by ANIMA is:
@@ -135,6 +144,11 @@ Example:
 robotics:
   enabled: true
   poll_interval_s: 2.0
+  nlp_supervisor:
+    enabled: true
+    model: "codex/gpt-5.3-codex"
+    max_tokens: 480
+    min_confidence: 0.55
   exploration:
     walk_speed: 45
     turn_speed: 55
@@ -160,6 +174,8 @@ Notes:
 - `base_urls` should contain both the direct LAN address and the overlay-network address when available.
 - Global `robotics.exploration` acts as the fleet default.
 - Per-node `exploration` overrides only that node.
+- `robotics.nlp_supervisor` is intended for the desktop supervisor node, where the user's Codex OAuth session is available.
+- The committed default model is `codex/gpt-5.3-codex`; the edge robot profile keeps this layer disabled so the robot can stay self-contained when offline.
 
 ## Operational Model
 

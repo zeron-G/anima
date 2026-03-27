@@ -12,6 +12,7 @@ from anima.api.router import APIRouter
 from anima.dashboard.hub import DashboardHub
 from anima.robotics.exploration import ExplorationController
 from anima.robotics.manager import RoboticsManager
+from anima.robotics.nlp_supervisor import match_pidog_command_text
 from anima.tools.builtin.robotics import get_robotics_tools, set_robotics_manager
 from anima.tools.executor import ToolExecutor
 from anima.tools.registry import ToolRegistry
@@ -84,6 +85,9 @@ async def pidog_service():
     async def nlp(request: web.Request) -> web.Response:
         data = await request.json()
         state["nlp"].append(data)
+        text = str(data.get("text", "") or "").strip().lower()
+        if text in {"sit down", "stand up", "lower yourself into a seated pose"}:
+            return web.json_response({"parsed": None, "message": "未识别指令"})
         return web.json_response({"ok": True, "text": data.get("text", "")})
 
     async def speak(request: web.Request) -> web.Response:
@@ -153,6 +157,82 @@ async def test_robotics_manager_refresh_command_and_config_merge(pidog_service):
         speak_result = await manager.speak("pidog-eva", "你好，主人", blocking=True)
         assert nlp_result["text"] == "向前走一步"
         assert speak_result["blocking"] is True
+    finally:
+        await manager.stop()
+
+
+def test_supervisor_rule_parser_matches_english_motion():
+    parsed = match_pidog_command_text("Please sit down right now.")
+    assert parsed is not None
+    assert parsed["command"] == "sit"
+    assert parsed["confidence"] == 1.0
+
+
+@pytest.mark.asyncio
+async def test_robotics_manager_uses_supervisor_rule_for_english_nlp(pidog_service):
+    manager = RoboticsManager.from_config(
+        {
+            "enabled": True,
+            "nodes": [
+                {
+                    "id": "pidog-eva",
+                    "name": "PiDog Eva",
+                    "base_urls": [pidog_service["base_url"]],
+                }
+            ],
+        }
+    )
+
+    await manager.start()
+    try:
+        result = await manager.run_nlp("pidog-eva", "sit down")
+        assert result["source"] == "supervisor_rule"
+        assert result["parsed"] == "sit"
+        assert pidog_service["state"]["commands"][-1]["command"] == "sit"
+        assert manager.get_node("pidog-eva")["state"] == "SITTING"
+    finally:
+        await manager.stop()
+
+
+@pytest.mark.asyncio
+async def test_robotics_manager_uses_supervisor_llm_when_needed(pidog_service, monkeypatch):
+    async def _fake_plan(self, text: str, *, node_id: str = "", capabilities: list[str] | None = None):
+        return {
+            "command": "sit",
+            "params": {},
+            "confidence": 0.92,
+            "reason": f"planned for {text}",
+            "model": "codex/gpt-5.3-codex",
+        }
+
+    monkeypatch.setattr("anima.robotics.manager.RobotNlpSupervisor.plan", _fake_plan)
+
+    manager = RoboticsManager.from_config(
+        {
+            "enabled": True,
+            "nlp_supervisor": {
+                "enabled": True,
+                "model": "5.3codex",
+                "max_tokens": 320,
+                "min_confidence": 0.55,
+            },
+            "nodes": [
+                {
+                    "id": "pidog-eva",
+                    "name": "PiDog Eva",
+                    "base_urls": [pidog_service["base_url"]],
+                }
+            ],
+        }
+    )
+
+    await manager.start()
+    try:
+        result = await manager.run_nlp("pidog-eva", "lower yourself into a seated pose")
+        assert result["source"] == "supervisor_llm"
+        assert result["parsed"] == "sit"
+        assert result["planner"]["model"] == "codex/gpt-5.3-codex"
+        assert pidog_service["state"]["commands"][-1]["command"] == "sit"
     finally:
         await manager.stop()
 

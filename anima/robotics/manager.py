@@ -10,6 +10,7 @@ import aiohttp
 
 from anima.robotics.exploration import ExplorationController
 from anima.robotics.models import PIDOG_COMMANDS, RobotNodeConfig, RobotNodeSnapshot
+from anima.robotics.nlp_supervisor import RobotNlpSupervisor, match_pidog_command_text
 from anima.robotics.pidog import PiDogApiClient
 from anima.utils.logging import get_logger
 
@@ -27,6 +28,7 @@ class RoboticsManager:
         self._session = session
         self._owns_session = session is None
         self._poll_task: asyncio.Task | None = None
+        self._nlp_supervisor = RobotNlpSupervisor(cfg.get("nlp_supervisor") or {})
         self._nodes: dict[str, RobotNodeConfig] = {}
         self._clients: dict[str, PiDogApiClient] = {}
         self._snapshots: dict[str, RobotNodeSnapshot] = {}
@@ -134,9 +136,63 @@ class RoboticsManager:
 
     async def run_nlp(self, node_id: str, text: str) -> dict[str, Any]:
         client = self._require_client(node_id)
-        result = await client.nlp(text)
-        await self.refresh_node(node_id)
-        return result
+        robot_result: dict[str, Any] | None = None
+        robot_error = ""
+
+        try:
+            robot_result = await client.nlp(text)
+        except Exception as exc:
+            robot_error = str(exc)
+            log.warning("Robot NLP request failed for %s: %s", node_id, exc)
+
+        if self._nlp_result_recognized(robot_result):
+            assert robot_result is not None
+            robot_result.setdefault("source", "robot_local")
+            await self.refresh_node(node_id)
+            return robot_result
+
+        rule_plan = match_pidog_command_text(text)
+        if rule_plan:
+            command_result = await self.execute_command(node_id, rule_plan["command"], rule_plan["params"])
+            return {
+                "parsed": rule_plan["command"],
+                "result": command_result,
+                "source": "supervisor_rule",
+                "planner": rule_plan,
+                "robot_nlp": robot_result,
+                "robot_error": robot_error,
+            }
+
+        llm_plan = await self._nlp_supervisor.plan(
+            text,
+            node_id=node_id,
+            capabilities=self._require_snapshot(node_id).capabilities,
+        )
+        if llm_plan and llm_plan["confidence"] >= self._nlp_supervisor.min_confidence:
+            command_result = await self.execute_command(node_id, llm_plan["command"], llm_plan["params"])
+            return {
+                "parsed": llm_plan["command"],
+                "result": command_result,
+                "source": "supervisor_llm",
+                "planner": llm_plan,
+                "robot_nlp": robot_result,
+                "robot_error": robot_error,
+            }
+
+        if robot_result is not None:
+            await self.refresh_node(node_id)
+            if llm_plan:
+                robot_result.setdefault("supervisor_plan", llm_plan)
+            if robot_error:
+                robot_result.setdefault("robot_error", robot_error)
+            return robot_result
+
+        return {
+            "parsed": None,
+            "message": "robot NLP unavailable and supervisor could not resolve the command",
+            "robot_error": robot_error,
+            "source": "supervisor_unresolved",
+        }
 
     async def speak(self, node_id: str, text: str, blocking: bool = False) -> dict[str, Any]:
         client = self._require_client(node_id)
@@ -195,3 +251,23 @@ class RoboticsManager:
         if node_id not in self._explorers:
             raise KeyError(f"Unknown robotics node '{node_id}'")
         return self._explorers[node_id]
+
+    @staticmethod
+    def _nlp_result_recognized(result: dict[str, Any] | None) -> bool:
+        if not isinstance(result, dict):
+            return False
+
+        message = str(result.get("message", "") or "").lower()
+        if "未识别" in message or "unrecognized" in message or "not recognized" in message:
+            return False
+
+        if result.get("parsed"):
+            return True
+        if result.get("command"):
+            return True
+
+        nested = result.get("result")
+        if isinstance(nested, dict) and nested.get("command"):
+            return True
+
+        return bool(result.get("ok")) and not bool(result.get("error"))
