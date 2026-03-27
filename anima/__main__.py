@@ -9,6 +9,7 @@ Usage:
     python -m anima --profile NAME   # Load a committed runtime profile
     python -m anima watchdog         # Watchdog mode
     python -m anima spawn user@host  # Deploy to remote
+    python -m anima spawn --node X   # Deploy to configured remote_nodes target
 """
 
 import asyncio
@@ -163,21 +164,25 @@ def _handle_spawn(args: list[str], *, default_profile: str = "", edge_mode: bool
     if not args or "--help" in args:
         print("Usage:")
         print("  python -m anima spawn user@host                      Deploy via SSH")
+        print("  python -m anima spawn --node <name>                  Deploy to configured remote_nodes target")
         print("  python -m anima spawn user@host --edge               Deploy edge PiDog profile")
         print("  python -m anima spawn --local /path                  Deploy locally")
         print("  python -m anima spawn --pack-only [--edge]           Create package only")
         print("  python -m anima spawn --profile edge-pidog --pack-only")
+        print("  Flags: --with-env to include .env, --no-env to force omit .env")
         return
 
     python_cmd = "python3"
     secret = ""
-    include_env = True
+    include_env: bool | None = None
     local_path = ""
     install_dir = ""
     profile = default_profile
     pack_only = False
-    install_service = False
+    install_service: bool | None = None
     target = ""
+    known_node = ""
+    resolved_edge_mode: bool | None = True if edge_mode else None
 
     i = 0
     while i < len(args):
@@ -189,6 +194,10 @@ def _handle_spawn(args: list[str], *, default_profile: str = "", edge_mode: bool
             profile = args[i + 1]; i += 2
         elif args[i] == "--no-env":
             include_env = False; i += 1
+        elif args[i] == "--with-env":
+            include_env = True; i += 1
+        elif args[i] == "--node" and i + 1 < len(args):
+            known_node = args[i + 1]; i += 2
         elif args[i] == "--local" and i + 1 < len(args):
             local_path = args[i + 1]; i += 2
         elif args[i] == "--install-dir" and i + 1 < len(args):
@@ -198,26 +207,33 @@ def _handle_spawn(args: list[str], *, default_profile: str = "", edge_mode: bool
         elif args[i] == "--install-service":
             install_service = True; i += 1
         elif args[i] == "--edge":
-            edge_mode = True
+            resolved_edge_mode = True
             profile = profile or "edge-pidog"
-            install_service = True
             i += 1
         elif not args[i].startswith("-"):
             target = args[i]; i += 1
         else:
             i += 1
 
-    if edge_mode and not profile:
-        profile = "edge-pidog"
+    from anima.spawn.targets import resolve_deploy_plan
+
+    plan = resolve_deploy_plan(
+        profile=profile,
+        edge_mode=resolved_edge_mode,
+        install_service=install_service,
+        install_dir=install_dir,
+        python_cmd=python_cmd,
+        include_env=include_env,
+    )
 
     if pack_only:
         from anima.spawn.packager import create_spawn_package
         path = create_spawn_package(
             network_secret=secret,
-            include_env=include_env,
-            profile=profile,
-            edge_mode=edge_mode,
-            install_service=install_service,
+            include_env=plan["include_env"],
+            profile=plan["profile"],
+            edge_mode=plan["edge_mode"],
+            install_service=plan["install_service"],
         )
         print(f"Package created: {path}")
         return
@@ -228,10 +244,26 @@ def _handle_spawn(args: list[str], *, default_profile: str = "", edge_mode: bool
             deploy_local(
                 local_path,
                 network_secret=secret,
-                profile=profile,
-                edge_mode=edge_mode,
+                profile=plan["profile"],
+                edge_mode=plan["edge_mode"],
             )
         )
+        print(f"Result: {result}")
+        return
+
+    if known_node:
+        from anima.spawn.deployer import deploy_to_known_node
+
+        result = asyncio.run(deploy_to_known_node(
+            known_node,
+            python_cmd=python_cmd,
+            install_dir=install_dir,
+            network_secret=secret,
+            include_env=include_env,
+            profile=profile,
+            edge_mode=resolved_edge_mode,
+            install_service=install_service,
+        ))
         print(f"Result: {result}")
         return
 
@@ -244,13 +276,13 @@ def _handle_spawn(args: list[str], *, default_profile: str = "", edge_mode: bool
             install_dir=install_dir,
             network_secret=secret, include_env=include_env,
             profile=profile,
-            edge_mode=edge_mode,
+            edge_mode=resolved_edge_mode,
             install_service=install_service,
         ))
         print(f"Result: {result}")
         return
 
-    print("Error: specify a target (user@host), --local /path, or --pack-only")
+    print("Error: specify a target (user@host), --node <name>, --local /path, or --pack-only")
 
 
 main()

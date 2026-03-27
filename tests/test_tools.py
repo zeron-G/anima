@@ -26,6 +26,7 @@ def test_registry_has_builtins(registry):
     assert "robot_dog_status" in names
     assert "robot_dog_command" in names
     assert "robot_dog_exploration" in names
+    assert "spawn_remote_node" in names
 
 
 def test_registry_get(registry):

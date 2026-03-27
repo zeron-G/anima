@@ -6,6 +6,7 @@ import tarfile
 
 from anima.config import active_profile, available_profiles, load_config
 from anima.spawn.packager import create_spawn_package
+from anima.spawn.targets import resolve_deploy_plan
 from anima.startup_check import verify_dependencies
 
 
@@ -90,3 +91,40 @@ def test_edge_spawn_package_contains_profile_and_service(tmp_path):
         service = tar.extractfile("deploy/anima-edge.service").read().decode("utf-8")
         assert "Environment=ANIMA_PROFILE=edge-pidog" in service
         assert "ExecStart=__ANIMA_DIR__/.venv/bin/python -m anima --edge" in service
+
+
+def test_resolve_deploy_plan_for_edge_profile_defaults():
+    plan = resolve_deploy_plan(profile="edge-pidog", include_env=None)
+
+    assert plan["profile"] == "edge-pidog"
+    assert plan["edge_mode"] is True
+    assert plan["install_service"] is True
+    assert plan["install_dir"] == "~/.anima-edge"
+    assert plan["python_cmd"] == "python3"
+
+
+def test_spawn_package_can_embed_local_env_overrides(tmp_path):
+    package_path = create_spawn_package(
+        output_path=str(tmp_path / "edge-pidog-with-local.tar.gz"),
+        parent_address="10.0.0.5:9420",
+        network_secret="shared-secret",
+        include_env=False,
+        profile="edge-pidog",
+        edge_mode=True,
+        install_service=True,
+        local_overrides={
+            "machine": {
+                "hostname": "PiDog",
+                "platform": "linux",
+            },
+            "network": {
+                "peers": ["192.168.1.10:9420"],
+            },
+        },
+    )
+
+    with tarfile.open(package_path, "r:gz") as tar:
+        local_env = tar.extractfile("local/env.yaml").read().decode("utf-8")
+        assert "hostname: PiDog" in local_env
+        assert "platform: linux" in local_env
+        assert "- 192.168.1.10:9420" in local_env

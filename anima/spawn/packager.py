@@ -11,7 +11,9 @@ import json
 import tarfile
 import time
 from pathlib import Path
+from typing import Any
 
+import yaml
 from anima.config import project_root, get
 from anima.network.discovery import get_local_ip
 from anima.network.node import NodeIdentity
@@ -29,6 +31,7 @@ def create_spawn_package(
     profile: str = "",
     edge_mode: bool = False,
     install_service: bool = False,
+    local_overrides: dict[str, Any] | None = None,
 ) -> Path:
     """Create a spawn package (tar.gz) for deploying to a new node.
 
@@ -40,6 +43,7 @@ def create_spawn_package(
         profile: Optional runtime profile such as "edge-pidog"
         edge_mode: Whether the package should start ANIMA via `python -m anima --edge`
         install_service: Whether to include and install a user-level systemd service on Linux
+        local_overrides: Optional machine-specific `local/env.yaml` content to embed in the package
 
     Returns:
         Path to the created tar.gz file.
@@ -104,7 +108,12 @@ def create_spawn_package(
         _add_string_to_tar(
             tar,
             "bootstrap.ps1",
-            _render_bootstrap_ps1(profile=profile, edge_mode=edge_mode),
+            _render_bootstrap_ps1(
+                profile=profile,
+                edge_mode=edge_mode,
+                install_service=install_service,
+                service_name=service_name,
+            ),
         )
         if install_service:
             _add_string_to_tar(
@@ -149,6 +158,11 @@ def create_spawn_package(
         # Gitkeep dirs
         for d in ["data/logs", "data/workspace", "data/uploads", "data/notes"]:
             _add_string_to_tar(tar, f"{d}/.gitkeep", "")
+
+        # local/env.yaml overrides (optional, generated per target at deploy time)
+        if local_overrides:
+            local_text = yaml.dump(local_overrides, default_flow_style=False, allow_unicode=True, sort_keys=False)
+            _add_string_to_tar(tar, "local/env.yaml", local_text)
 
         # .env (optional)
         if include_env:
@@ -216,6 +230,9 @@ cd "$ANIMA_DIR"
 $PYTHON -m venv .venv
 source .venv/bin/activate
 # Install
+if [ -f requirements.txt ]; then
+  pip install -r requirements.txt --quiet 2>&1 | tail -3
+fi
 pip install -e . --quiet 2>&1 | tail -3
 # Permissions
 chmod 600 .env 2>/dev/null || true
@@ -225,11 +242,36 @@ echo "Dashboard: http://$(hostname -I 2>/dev/null | awk '{{print $1}}' || echo l
 """
 
 
-def _render_bootstrap_ps1(*, profile: str, edge_mode: bool) -> str:
+def _render_bootstrap_ps1(*, profile: str, edge_mode: bool, install_service: bool, service_name: str) -> str:
     cli_args = "--edge" if edge_mode else "--headless"
     profile_block = ""
+    cmd_profile_block = ""
     if profile:
         profile_block = f'$env:ANIMA_PROFILE = "{profile}"'
+        cmd_profile_block = f"set ANIMA_PROFILE={profile}\n"
+    service_block = ""
+    if install_service:
+        service_block = f"""
+$taskName = "{service_name}"
+$runCmdPath = Join-Path $ANIMA_DIR "run-anima-node.cmd"
+$cmdBody = @"
+@echo off
+set PYTHONIOENCODING=utf-8
+set PYTHONUTF8=1
+{cmd_profile_block}cd /d %~dp0
+call "%~dp0.venv\\Scripts\\python.exe" -m anima {cli_args} 1>> "%~dp0data\\logs\\anima-stdout.log" 2>> "%~dp0data\\logs\\anima-stderr.log"
+"@
+Set-Content -Path $runCmdPath -Value $cmdBody -Encoding ASCII
+cmd /c "schtasks /Delete /TN $taskName /F" *> $null
+cmd /c "schtasks /Create /TN $taskName /SC ONLOGON /RL HIGHEST /TR \\"$runCmdPath\\" /F" | Out-Null
+cmd /c "schtasks /Run /TN $taskName" | Out-Null
+"""
+    else:
+        service_block = f"""
+$stdoutLog = Join-Path $ANIMA_DIR "data\\logs\\anima-stdout.log"
+$stderrLog = Join-Path $ANIMA_DIR "data\\logs\\anima-stderr.log"
+Start-Process -FilePath $venvPy -ArgumentList "-m","anima","{cli_args}" -WorkingDirectory $ANIMA_DIR -WindowStyle Hidden -RedirectStandardOutput $stdoutLog -RedirectStandardError $stderrLog | Out-Null
+"""
     return f"""# ANIMA Node Bootstrap — Windows PowerShell
 $ErrorActionPreference = "Stop"
 $ANIMA_DIR = if ($env:ANIMA_INSTALL_DIR) {{ $env:ANIMA_INSTALL_DIR }} else {{ "$env:USERPROFILE\\.anima" }}
@@ -242,10 +284,25 @@ New-Item -ItemType Directory -Force -Path $ANIMA_DIR | Out-Null
 Copy-Item -Recurse -Force .\\* $ANIMA_DIR\\
 Set-Location $ANIMA_DIR
 & $PYTHON -m venv .venv
-.\\.venv\\Scripts\\Activate
-pip install -e . --quiet
+$venvPy = Join-Path $ANIMA_DIR ".venv\\Scripts\\python.exe"
+if (Test-Path .\\requirements.txt) {{
+  & $venvPy -m pip install -r .\\requirements.txt --quiet
+}}
+& $venvPy -m pip install -e . --quiet
+New-Item -ItemType Directory -Force -Path (Join-Path $ANIMA_DIR "data\\logs") | Out-Null
 {profile_block}
-Start-Process -NoNewWindow -FilePath python -ArgumentList "-m anima {cli_args}" -RedirectStandardOutput "data\\logs\\anima.log"
+{service_block}
+$deadline = (Get-Date).AddMinutes(5)
+$system = $null
+while ((Get-Date) -lt $deadline) {{
+  try {{
+    $system = Invoke-RestMethod -Uri "http://127.0.0.1:8420/v1/settings/system" -TimeoutSec 5
+    if ($system) {{ break }}
+  }} catch {{
+    Start-Sleep -Seconds 3
+  }}
+}}
+if (-not $system) {{ throw "ANIMA failed to start on 8420" }}
 Write-Host "=== ANIMA started ==="
 """
 

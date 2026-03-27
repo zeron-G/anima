@@ -62,6 +62,8 @@ If you need a simple way to explain it in a demo:
 - Watch heartbeat, memory, emotion, tools, and activity streams update in real time.
 - Discover other nodes on the same network and chat across the mesh.
 - Control PiDog directly from EVA or from network-node conversations with commands such as `sit down`, `stand up`, and `look around`.
+- Deploy a new node onto a configured laptop or robot target with a selected runtime profile.
+- Reproduce the runtime onto another configured node from ANIMA itself while keeping per-machine secrets outside git.
 - Deploy an edge runtime onto a Linux robot node and let it operate as an embodied ANIMA endpoint.
 
 ## System Shape
@@ -197,7 +199,19 @@ npm run build
 ```bash
 # Package and deploy the edge runtime to a robot-side Linux host
 python -m anima spawn user@host --edge --profile edge-pidog
+
+# Deploy to a configured known node from local/env.yaml
+python -m anima spawn --node pidog
+
+# Deploy a standard desktop/headless profile to another known node
+python -m anima spawn --node laptop --profile default
 ```
+
+The intended pattern is:
+
+- commit reusable runtime profiles in `config/profiles/*.yaml`
+- keep machine-specific addresses, SSH credentials, peers, and per-node overrides in `local/env.yaml`
+- let `spawn --node ...` or the built-in `spawn_remote_node` tool inject ANIMA onto another configured node without committing sensitive data
 
 ## Repository Guide
 

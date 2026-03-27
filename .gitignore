@@ -99,6 +99,9 @@ _*.py
 tmp_*
 test_out*
 D*tmp*
+data/deploy_*.py
+data/deploy_*.ps1
+data/deploy_*.sh
 
 # Live2D binary models (too large for git)
 anima/dashboard/static/model/PurpleBird/

@@ -67,6 +67,20 @@ This now produces a package that can:
 - start the edge runtime with `--edge`
 - optionally install a user-level systemd service
 
+### Deploy to a configured known node
+
+If the robot or another node is described in `local/env.yaml` under
+`network.remote_nodes`, deployment becomes profile-aware and repeatable:
+
+```bash
+python -m anima spawn --node pidog
+python -m anima spawn --node laptop --profile default
+```
+
+This is the preferred way to treat robots, laptops, and relays as
+specialized but still native ANIMA targets. The runtime profile stays in
+committed config, while machine-local secrets and addresses stay outside git.
+
 ## Deployment Artifacts
 
 The spawn package now includes:
@@ -139,6 +153,49 @@ robotics:
         lan_hint: "192.168.1.174:8888"
         tailscale_hint: "100.99.62.80:8888"
 ```
+
+To manage known-node deployment from the supervisor side, it is also valid to
+keep a `remote_nodes` entry in the operator machine's `local/env.yaml`:
+
+```yaml
+network:
+  remote_nodes:
+    - name: "pidog"
+      platform: "linux"
+      host: "100.x.x.x"
+      hosts:
+        - "192.168.x.x"
+      user: "eva"
+      password: "<local-only-password>"
+      profile: "edge-pidog"
+      edge_mode: true
+      install_service: true
+      include_env: false
+      local_overrides:
+        network:
+          peers:
+            - "192.168.1.10:9420"
+```
+
+## Node-to-Node Propagation
+
+ANIMA can now seed another configured node through the same deployment chain:
+
+- CLI: `python -m anima spawn --node pidog`
+- Tool layer: `spawn_remote_node`
+
+This makes "injecting" or "reproducing" a new runtime onto another trusted node
+a first-class capability instead of a one-off manual script.
+
+## Sensitive Configuration Handling
+
+The repository is now arranged so reusable behavior is committed while local
+infrastructure details remain untracked:
+
+- `config/profiles/*.yaml` stores shared runtime profiles
+- `local/env.yaml` stores machine-specific addresses, peers, credentials, and overrides
+- `.env` stores provider secrets
+- temporary deploy helpers such as `data/deploy_*.py` are ignored
 
 ## Current Edge Scope
 

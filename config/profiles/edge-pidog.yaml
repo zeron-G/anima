@@ -8,6 +8,12 @@ runtime:
   max_concurrent: 2
   require_llm_credentials: false
 
+deploy:
+  mode: "edge"
+  install_dir: "~/.anima-edge"
+  install_service: true
+  python_cmd: "python3"
+
 governance:
   default_mode: "cautious"
 

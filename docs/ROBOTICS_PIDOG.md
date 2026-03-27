@@ -187,6 +187,23 @@ At runtime the flow is:
 4. `/v1/robotics/*` routes provide structured desktop access.
 5. Built-in tools let ANIMA cognition invoke robot actions during agent execution.
 
+## Deployment and Replication Model
+
+The robot-side environment is now embedded into the main ANIMA deployment path,
+not maintained as a separate ad hoc installer.
+
+In practice that means:
+
+- the reusable robot runtime shape lives in `config/profiles/edge-pidog.yaml`
+- machine-local robot addresses, peers, and credentials live in `local/env.yaml`
+- the same spawn system can package and deploy the robot runtime with either:
+  - `python -m anima spawn user@robot-host --edge --profile edge-pidog`
+  - `python -m anima spawn --node pidog`
+- ANIMA's built-in remote tool layer can also trigger `spawn_remote_node` for trusted known nodes
+
+This keeps the robot as a special environment, but still a native part of the
+ANIMA architecture rather than a disconnected side project.
+
 ## Testing Scope
 
 The implementation is covered by:

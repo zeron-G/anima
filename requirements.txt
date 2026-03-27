@@ -10,6 +10,7 @@ msgpack>=1.0
 zeroconf>=0.131
 pywebview>=5.0
 aiohttp>=3.9.0
+paramiko>=3.5.0
 
 # TTS (Qwen3-TTS)
 # qwen_tts            # Copy from WSL: ~/qwen3-tts-env

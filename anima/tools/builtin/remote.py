@@ -5,6 +5,8 @@ from __future__ import annotations
 import asyncio
 import base64
 
+from anima.config import get as cfg_get
+from anima.spawn.deployer import deploy_to_known_node
 from anima.models.tool_spec import ToolSpec, RiskLevel
 from anima.utils.logging import get_logger
 
@@ -164,7 +166,6 @@ async def _delegate_task(node: str, task: str, timeout: int = 120) -> dict:
 
         if target_node_id is None:
             # 4. Look up in remote_nodes config → match by IP or hostname
-            from anima.config import get as cfg_get
             remote_nodes: list[dict] = cfg_get("network.remote_nodes", [])
             for rn in remote_nodes:
                 if rn.get("name", "").lower() == node.lower():
@@ -223,11 +224,52 @@ async def _delegate_task(node: str, task: str, timeout: int = 120) -> dict:
         return {"success": False, "error": str(e)}
 
 
+async def _spawn_remote_node(
+    node: str,
+    profile: str = "",
+    edge_mode: bool | None = None,
+    install_service: bool | None = None,
+    include_env: bool | None = None,
+    install_dir: str = "",
+    python_cmd: str = "",
+    timeout: int = 600,
+) -> dict:
+    """Deploy ANIMA onto a configured remote node."""
+    remote_nodes: list[dict] = cfg_get("network.remote_nodes", [])
+    names = [str(item.get("name", "") or "") for item in remote_nodes]
+    if node not in names and node.lower() not in {name.lower() for name in names}:
+        return {
+            "success": False,
+            "error": f"Unknown remote node '{node}'. Available: {names}",
+        }
+
+    result = await deploy_to_known_node(
+        node,
+        profile=profile,
+        edge_mode=edge_mode,
+        install_service=install_service,
+        include_env=include_env,
+        install_dir=install_dir,
+        python_cmd=python_cmd,
+        timeout=timeout,
+    )
+    if result.get("success"):
+        return {
+            "success": True,
+            "result": result,
+        }
+    return {
+        "success": False,
+        "error": str(result.get("message", "") or result.get("stderr", "") or result),
+        "result": result,
+    }
+
+
 def get_remote_tools() -> list[ToolSpec]:
     return [
         ToolSpec(
             name="remote_exec",
-            description="Execute a PowerShell command on a remote ANIMA node. Available nodes: 'laptop'.",
+            description="Execute a PowerShell command on a configured remote ANIMA node.",
             parameters={
                 "type": "object",
                 "properties": {
@@ -242,7 +284,7 @@ def get_remote_tools() -> list[ToolSpec]:
         ),
         ToolSpec(
             name="remote_write_file",
-            description="Write a file on a remote ANIMA node via SFTP. Specify full path and content. Available nodes: 'laptop'.",
+            description="Write a file on a configured remote ANIMA node via SFTP. Specify full path and content.",
             parameters={
                 "type": "object",
                 "properties": {
@@ -257,7 +299,7 @@ def get_remote_tools() -> list[ToolSpec]:
         ),
         ToolSpec(
             name="delegate_task",
-            description="Delegate a task to another ANIMA node via the gossip network. Unlike remote_exec (SSH), this sends the task to the other node's Eva, who processes it with her own tools and reasoning. Available nodes: 'laptop'.",
+            description="Delegate a task to another ANIMA node via the gossip network. Unlike remote_exec (SSH), this sends the task to the other node's Eva, who processes it with her own tools and reasoning.",
             parameters={
                 "type": "object",
                 "properties": {
@@ -269,5 +311,25 @@ def get_remote_tools() -> list[ToolSpec]:
             },
             risk_level=RiskLevel.LOW,
             handler=_delegate_task,
+        ),
+        ToolSpec(
+            name="spawn_remote_node",
+            description="Deploy ANIMA to a configured remote node using local remote_nodes metadata. Supports profile selection, edge runtimes, and service-style startup.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "node": {"type": "string", "description": "Configured remote node name"},
+                    "profile": {"type": "string", "description": "Optional runtime profile such as edge-pidog", "default": ""},
+                    "edge_mode": {"type": "boolean", "description": "Force edge runtime mode", "default": False},
+                    "install_service": {"type": "boolean", "description": "Enable systemd or scheduled-task style startup", "default": False},
+                    "include_env": {"type": "boolean", "description": "Include .env secrets in the deployment package", "default": False},
+                    "install_dir": {"type": "string", "description": "Optional install directory override", "default": ""},
+                    "python_cmd": {"type": "string", "description": "Optional remote Python executable override", "default": ""},
+                    "timeout": {"type": "integer", "description": "Deployment timeout in seconds", "default": 600},
+                },
+                "required": ["node"],
+            },
+            risk_level=RiskLevel.HIGH,
+            handler=_spawn_remote_node,
         ),
     ]
