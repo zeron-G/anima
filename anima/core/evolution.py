@@ -51,18 +51,37 @@ class EvolutionState:
                 self.current_loop = d.get("current_loop", {})
                 self.history = d.get("history", [])
                 self.last_loop_at = d.get("last_loop_at", 0)
+            except json.JSONDecodeError as e:
+                log.warning("Evolution state JSON corrupted: %s — trying .tmp backup", e)
+                tmp = self._path.with_suffix(".tmp")
+                if tmp.exists():
+                    try:
+                        d = json.loads(tmp.read_text(encoding="utf-8"))
+                        self.loop_count = d.get("loop_count", 0)
+                        self.status = d.get("status", "idle")
+                        self.current_loop = d.get("current_loop", {})
+                        self.history = d.get("history", [])
+                        self.last_loop_at = d.get("last_loop_at", 0)
+                        log.info("Recovered evolution state from .tmp backup")
+                        return
+                    except Exception:
+                        log.error("Both evolution state files corrupted, using defaults")
             except Exception as e:
-                log.warning("Evolution state JSON corrupted: %s", e)
+                log.warning("Evolution state load error: %s", e)
 
     def save(self):
         self._path.parent.mkdir(parents=True, exist_ok=True)
-        self._path.write_text(json.dumps({
+        data = json.dumps({
             "loop_count": self.loop_count,
             "status": self.status,
             "current_loop": self.current_loop,
             "history": self.history[-100:],
             "last_loop_at": self.last_loop_at,
-        }, indent=2, ensure_ascii=False), encoding="utf-8")
+        }, indent=2, ensure_ascii=False)
+        # Atomic write: temp file + rename to prevent corruption on crash
+        tmp = self._path.with_suffix(".tmp")
+        tmp.write_text(data, encoding="utf-8")
+        tmp.replace(self._path)
 
     def start_loop(self) -> str:
         self.loop_count += 1

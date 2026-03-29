@@ -207,6 +207,7 @@ class TestDecayIntegrity:
     async def test_original_importance_preserved(self):
         """C-05: update_all_scores must NOT overwrite importance column."""
         from anima.memory.decay import MemoryDecay
+        from unittest.mock import AsyncMock
         import time
 
         decay = MemoryDecay()
@@ -223,18 +224,17 @@ class TestDecayIntegrity:
             "metadata_json": "{}",
         }
 
-        # Mock the DB connection
-        mock_conn = MagicMock()
-        mock_conn.execute.return_value.fetchall.return_value = [mock_row]
-        mock_store._conn = mock_conn
+        # Mock the DatabaseManager interface (D-02 migrated from _conn to _db)
+        mock_db = MagicMock()
+        mock_db.fetch = AsyncMock(return_value=[mock_row])
+        mock_db.execute_many = AsyncMock(return_value=1)
+        mock_store._db = mock_db
 
         await decay.update_all_scores(mock_store)
 
         # Verify: the UPDATE should target decay_score, NOT importance
-        calls = mock_conn.execute.call_args_list
-        update_calls = [c for c in calls if "UPDATE" in str(c)]
-        for call in update_calls:
-            sql = str(call)
+        if mock_db.execute_many.called:
+            sql = mock_db.execute_many.call_args[0][0]
             assert "decay_score" in sql, f"Expected 'decay_score' in UPDATE, got: {sql}"
             assert "SET importance" not in sql, f"Must NOT update importance column: {sql}"
 

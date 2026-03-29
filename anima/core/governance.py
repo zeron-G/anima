@@ -11,6 +11,7 @@ Consolidates scattered governance checks into one module:
 from __future__ import annotations
 
 import json
+import threading
 import time
 
 from anima.config import get, data_dir
@@ -131,10 +132,20 @@ class GovernanceEngine:
 
 # Module-level singleton
 _governance: GovernanceEngine | None = None
+_governance_lock = threading.Lock()
 
 
 def get_governance() -> GovernanceEngine:
+    """Get or create the singleton GovernanceEngine (thread-safe).
+
+    .. deprecated::
+        Prefer dependency injection via CognitiveContext.governance.
+        This function is retained for API/tool layer compatibility.
+    """
     global _governance
-    if _governance is None:
-        _governance = GovernanceEngine()
+    if _governance is not None:
+        return _governance
+    with _governance_lock:
+        if _governance is None:
+            _governance = GovernanceEngine()
     return _governance

@@ -17,6 +17,7 @@ sentence). On CPU-only, ~50ms per sentence.
 from __future__ import annotations
 
 import struct
+import threading
 from typing import Any
 
 from anima.utils.logging import get_logger
@@ -31,6 +32,7 @@ _EMBEDDING_DIM = 384
 # Lazy-loaded model singleton
 _model: Any = None
 _model_load_attempted = False
+_model_lock = threading.Lock()
 
 
 def _get_model():
@@ -38,29 +40,42 @@ def _get_model():
 
     Returns the model or None if sentence-transformers is not installed.
     Only attempts loading once per process lifetime.
+    Uses double-checked locking to prevent concurrent loads.
     """
     global _model, _model_load_attempted
     if _model is not None:
         return _model
-    if _model_load_attempted:
-        return None  # Already tried and failed
-    _model_load_attempted = True
+    with _model_lock:
+        if _model is not None:
+            return _model
+        if _model_load_attempted:
+            return None
+        _model_load_attempted = True
 
-    try:
-        from sentence_transformers import SentenceTransformer
-        log.info("Loading embedding model: %s ...", _MODEL_NAME)
-        _model = SentenceTransformer(_MODEL_NAME)
-        log.info("Embedding model loaded: %s (%d dimensions)", _MODEL_NAME, _EMBEDDING_DIM)
-        return _model
-    except ImportError:
-        log.info(
-            "sentence-transformers not installed — local embeddings disabled. "
-            "Install with: pip install sentence-transformers"
-        )
-        return None
-    except Exception as e:
-        log.warning("Failed to load embedding model: %s", e)
-        return None
+        try:
+            from sentence_transformers import SentenceTransformer
+            log.info("Loading embedding model: %s ...", _MODEL_NAME)
+            _model = SentenceTransformer(_MODEL_NAME)
+            log.info("Embedding model loaded: %s (%d dimensions)", _MODEL_NAME, _EMBEDDING_DIM)
+            return _model
+        except ImportError:
+            log.info(
+                "sentence-transformers not installed — local embeddings disabled. "
+                "Install with: pip install sentence-transformers"
+            )
+            return None
+        except Exception as e:
+            log.warning("Failed to load embedding model: %s", e)
+            return None
+
+
+def shutdown() -> None:
+    """Release the embedding model to free GPU/CPU memory."""
+    global _model, _model_load_attempted
+    if _model is not None:
+        log.info("Releasing embedding model: %s", _MODEL_NAME)
+        _model = None
+    _model_load_attempted = False
 
 
 def is_available() -> bool:

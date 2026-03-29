@@ -493,6 +493,7 @@ class GossipMesh:
                         if rmsg.source_node == self._identity.node_id:
                             continue
                         if self._secret and not rmsg.verify(self._secret):
+                            log.debug("Rejected unsigned/invalid msg %s from %s", rmsg.id, rmsg.source_node)
                             continue
 
                         # Dedup non-gossip messages by ID; drop expired TTL

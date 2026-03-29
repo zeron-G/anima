@@ -1,6 +1,7 @@
 """ANIMA data models."""
 
 from anima.models.event import Event, EventType, EventPriority
+from anima.models.message import MessagePayload
 from anima.models.perception_frame import (
     PerceptionFrame,
     StateDiff,
@@ -13,6 +14,7 @@ from anima.models.tool_spec import ToolSpec, RiskLevel
 
 __all__ = [
     "Event", "EventType", "EventPriority",
+    "MessagePayload",
     "PerceptionFrame", "StateDiff", "FieldDiff", "DiffRule",
     "Decision", "ActionType",
     "MemoryItem", "MemoryType",

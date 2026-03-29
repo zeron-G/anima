@@ -113,14 +113,13 @@ class MemoryDecay:
         Number of memories updated.
         """
         now = time.time()
-        rows = store._conn.execute(
+        rows = await store._db.fetch(
             "SELECT id, type, importance, created_at, access_count, "
             "decay_score, metadata_json FROM episodic_memories"
-        ).fetchall()
+        )
 
-        count = 0
-        for row in rows:
-            row_dict = dict(row)
+        updates: list[tuple[float, str]] = []
+        for row_dict in rows:
             meta = _parse_meta(row_dict.get("metadata_json", "{}"))
             if meta.get("consolidated"):
                 continue
@@ -132,16 +131,15 @@ class MemoryDecay:
             if abs(effective - old) < 1e-6:
                 continue
 
-            store._conn.execute(
-                "UPDATE episodic_memories SET decay_score = ? WHERE id = ?",
-                (effective, row_dict["id"]),
-            )
-            count += 1
+            updates.append((effective, row_dict["id"]))
 
-        if count:
-            store._conn.commit()
-            log.info("Updated effective scores for %d memories", count)
-        return count
+        if updates:
+            await store._db.execute_many(
+                "UPDATE episodic_memories SET decay_score = ? WHERE id = ?",
+                updates,
+            )
+            log.info("Updated effective scores for %d memories", len(updates))
+        return len(updates)
 
     # ------------------------------------------------------------------ #
     #  Consolidation                                                       #
@@ -171,16 +169,15 @@ class MemoryDecay:
         Number of original memories consolidated.
         """
         now = time.time()
-        rows = store._conn.execute(
+        rows = await store._db.fetch(
             "SELECT id, type, content, importance, created_at, access_count, "
             "metadata_json FROM episodic_memories "
             "ORDER BY created_at ASC"
-        ).fetchall()
+        )
 
         # Filter to stale, unconsolidated memories
         stale: list[dict[str, Any]] = []
-        for row in rows:
-            d = dict(row)
+        for d in rows:
             meta = _parse_meta(d.get("metadata_json", "{}"))
             if meta.get("consolidated"):
                 continue
@@ -198,16 +195,19 @@ class MemoryDecay:
         for cluster in clusters:
             if len(cluster) < 2:
                 # L-06: Clean up very old singletons (effective_score < 0.05)
+                singleton_updates: list[tuple[str, str]] = []
                 for mem in cluster:
                     eff = self.compute_effective_score(mem, now)
                     if eff < 0.05:
                         meta = mem.get("_meta", {})
                         meta["consolidated"] = True
                         meta["singleton_cleaned"] = True
-                        store._conn.execute(
-                            "UPDATE episodic_memories SET metadata_json = ? WHERE id = ?",
-                            (json.dumps(meta), mem["id"]),
-                        )
+                        singleton_updates.append((json.dumps(meta), mem["id"]))
+                if singleton_updates:
+                    await store._db.execute_many(
+                        "UPDATE episodic_memories SET metadata_json = ? WHERE id = ?",
+                        singleton_updates,
+                    )
                 continue
 
             summary = await self._summarise_cluster(
@@ -224,21 +224,16 @@ class MemoryDecay:
                 tags=["consolidated", mem_type],
             )
 
-            # C-07 fix: use explicit transaction for consolidation
-            store._conn.execute("BEGIN IMMEDIATE")
-            try:
-                # Mark originals as consolidated
-                for mem in cluster:
-                    meta = mem.get("_meta", {})
-                    meta["consolidated"] = True
-                    store._conn.execute(
-                        "UPDATE episodic_memories SET metadata_json = ? WHERE id = ?",
-                        (json.dumps(meta), mem["id"]),
-                    )
-                store._conn.commit()
-            except Exception:
-                store._conn.rollback()
-                raise
+            # Mark originals as consolidated
+            consolidation_updates: list[tuple[str, str]] = []
+            for mem in cluster:
+                meta = mem.get("_meta", {})
+                meta["consolidated"] = True
+                consolidation_updates.append((json.dumps(meta), mem["id"]))
+            await store._db.execute_many(
+                "UPDATE episodic_memories SET metadata_json = ? WHERE id = ?",
+                consolidation_updates,
+            )
             total_consolidated += len(cluster)
 
         if total_consolidated:

@@ -4,6 +4,7 @@ from __future__ import annotations
 from aiohttp import web
 
 from anima.channels.base import BaseChannel
+from anima.models.message import MessagePayload
 from anima.utils.logging import get_logger
 
 log = get_logger("channels.webhook")
@@ -67,12 +68,13 @@ class WebhookChannel(BaseChannel):
         user = data.get("user", "webhook")
 
         if self._on_message:
-            await self._on_message({
-                "text": text,
-                "user": user,
-                "channel": "webhook",
-                "source": f"webhook:{user}",
-            })
+            payload = MessagePayload(
+                text=text,
+                user=user,
+                channel="webhook",
+                source=f"webhook:{user}",
+            )
+            await self._on_message(payload.to_dict())
 
         return web.json_response({"ok": True, "received": text[:100]})
 

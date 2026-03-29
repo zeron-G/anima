@@ -19,6 +19,7 @@ from __future__ import annotations
 import json
 from typing import Any, Callable
 
+from anima.core.checkpoint import PipelineCheckpointer
 from anima.core.context import CognitiveContext
 from anima.core.event_queue import EventQueue
 from anima.core.event_routing import EventRouter
@@ -82,12 +83,21 @@ class AgenticLoop:
         )
         # prompt_compiler is set via setter before run() starts
 
+        # Governance DI — lazy init if not provided
+        from anima.core.governance import GovernanceEngine
+        if self._ctx.governance is None:
+            self._ctx.governance = GovernanceEngine()
+
         self._reload_manager = ReloadManager()
 
         # Components
         self._router = EventRouter()
         self._orchestrator = ToolOrchestrator(tool_executor, tool_registry)
         self._response_handler = ResponseHandler()
+
+        # Pipeline checkpoint for crash recovery
+        self._checkpointer = PipelineCheckpointer()
+        self._checkpointer.check_incomplete()
 
         # Pipeline — composable stages replacing inline _process_event_traced
         self._pipeline = Pipeline([
@@ -98,7 +108,7 @@ class AgenticLoop:
             PromptCompilationStage(self._orchestrator),
             ToolLoopStage(self._orchestrator),
             ResponseHandlingStage(self._response_handler, self._router),
-        ])
+        ], checkpoint_fn=self._checkpointer.save)
 
     # ── Setters (backward compat with main.py wiring) ──
     # These forward to the context object.
@@ -235,6 +245,7 @@ class AgenticLoop:
             pctx = PipelineContext(event=event, cognitive_ctx=ctx, trace=trace,
                                    correlation_id=event.id)
             await self._pipeline.run(pctx)
+            self._checkpointer.clear()
         finally:
             clear_correlation_id()
 

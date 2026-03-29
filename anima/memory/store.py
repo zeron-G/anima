@@ -163,8 +163,13 @@ class MemoryStore:
         resolved.parent.mkdir(parents=True, exist_ok=True)
         self._db_path = str(resolved)
         self._db: DatabaseManager | None = None  # owns the connection
-        self._conn: sqlite3.Connection | None = None  # backward-compat alias
+        # DEPRECATED: _conn exposes the raw SQLite connection, bypassing
+        # DatabaseManager's locking. All write paths should use _db methods
+        # (write_sync, execute, execute_many). Read-only access via _conn
+        # is safe under WAL mode. Will be removed in a future version.
+        self._conn: sqlite3.Connection | None = None
         self._chroma_collection = None
+        self._chroma_client = None
         self._write_lock = threading.Lock()
 
     # ------------------------------------------------------------------ #
@@ -203,13 +208,14 @@ class MemoryStore:
 
         # Initialize ChromaDB (required dependency)
         try:
-            def _init_chroma() -> Any:
+            def _init_chroma() -> tuple[Any, Any]:
                 chroma_path = Path(store._db_path).parent / "chroma"
                 chroma_path.mkdir(exist_ok=True)
                 client = chromadb.PersistentClient(path=str(chroma_path))
-                return client.get_or_create_collection("episodic")
+                collection = client.get_or_create_collection("episodic")
+                return client, collection
 
-            store._chroma_collection = await asyncio.to_thread(_init_chroma)
+            store._chroma_client, store._chroma_collection = await asyncio.to_thread(_init_chroma)
             log.info("ChromaDB initialized for vector search")
             # M-15: Backfill ChromaDB from SQLite if collection is empty
             try:
@@ -241,11 +247,13 @@ class MemoryStore:
     # sync.py handle the coordination. Thread safety is not critical
     # because sync_seq monotonicity is not a correctness requirement.
     _sync_seq_counter: int = 0
+    _sync_seq_lock = threading.Lock()
 
     def _next_sync_seq(self) -> int:
-        """Increment and return the next sync_seq value."""
-        MemoryStore._sync_seq_counter += 1
-        return MemoryStore._sync_seq_counter
+        """Increment and return the next sync_seq value (thread-safe)."""
+        with MemoryStore._sync_seq_lock:
+            MemoryStore._sync_seq_counter += 1
+            return MemoryStore._sync_seq_counter
 
     @staticmethod
     def _content_hash(content: str, type_: str) -> str:
@@ -273,11 +281,11 @@ class MemoryStore:
         self._db.write_sync(
             "INSERT INTO episodic_memories "
             "(id, type, content, importance, access_count, created_at, last_accessed, "
-            "metadata_json, tags_json, sync_seq, content_hash) "
-            "VALUES (?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?)",
+            "metadata_json, tags_json, sync_seq, content_hash, decay_score) "
+            "VALUES (?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?)",
             (mid, type, content, importance, now, now,
              json.dumps(metadata), json.dumps(tags),
-             seq, chash),
+             seq, chash, importance),
         )
         return mid
 
@@ -1359,6 +1367,15 @@ class MemoryStore:
     # ------------------------------------------------------------------ #
 
     async def close(self) -> None:
+        # Release ChromaDB client
+        if self._chroma_client is not None:
+            self._chroma_client = None
+            self._chroma_collection = None
+            log.info("ChromaDB client released")
+
+        from anima.memory import embedder
+        embedder.shutdown()
+
         if self._db and self._db.is_open:
             await self._db.close()
             self._conn = None

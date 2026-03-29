@@ -1,0 +1,145 @@
+# Tool subsets by event type — replaces hardcoded frozensets in tool_orchestrator.py
+
+event_tools:
+  SELF_THINKING:
+    - read_file
+    - write_file
+    - edit_file
+    - system_info
+    - search
+    - glob_search
+    - grep_search
+    - save_note
+    - get_datetime
+    - update_feelings
+    - list_jobs
+    - read_email
+    - env_search
+    - list_directory
+    - update_user_profile
+    - message_user
+    - shell
+
+  STARTUP:
+    - system_info
+    - get_datetime
+    - read_file
+    - shell
+
+  IDLE_TASK:
+    - shell
+    - read_file
+    - write_file
+    - system_info
+    - search
+    - glob_search
+    - grep_search
+    - save_note
+    - get_datetime
+    - update_feelings
+    - audit_run
+    - issue_manage
+    - list_jobs
+    - read_email
+    - env_search
+    - list_directory
+    - edit_file
+    - github
+
+  SCHEDULED_TASK:
+    - shell
+    - read_file
+    - write_file
+    - system_info
+    - search
+    - glob_search
+    - grep_search
+    - save_note
+    - get_datetime
+    - update_feelings
+    - list_jobs
+    - read_email
+    - send_email
+    - env_search
+    - list_directory
+    - edit_file
+    - github
+    - web_fetch
+    - google
+
+axis_tools:
+  human:
+    - read_file
+    - update_user_profile
+    - update_feelings
+    - save_note
+    - get_datetime
+    - update_personality
+    - message_user
+
+  self:
+    - read_file
+    - save_note
+    - get_datetime
+    - update_feelings
+    - update_personality
+    - mark_golden_reply
+    - glob_search
+    - update_user_profile
+    - message_user
+
+  world:
+    - read_file
+    - write_file
+    - edit_file
+    - system_info
+    - get_datetime
+    - read_email
+    - env_search
+    - list_directory
+    - glob_search
+    - grep_search
+    - save_note
+    - update_feelings
+    - message_user
+    - shell
+
+  evolution:
+    - read_file
+    - system_info
+    - search
+    - glob_search
+    - grep_search
+    - save_note
+    - get_datetime
+    - list_directory
+    - env_search
+    - shell
+    - evolution_propose
+    - evolution_status
+    - evolution_add_goal
+    - evolution_list_goals
+    - evolution_record_lesson
+
+# User-only tools (not available during self-thinking)
+user_only:
+  - spawn_agent
+  - check_agent
+  - wait_agent
+  - list_agents
+  - claude_code
+  - self_repair
+  - delegate_task
+  - remote_exec
+  - remote_write_file
+  - schedule_job
+  - cancel_job
+  - enable_job
+  - evolution_propose
+  - evolution_status
+  - evolution_add_goal
+  - evolution_list_goals
+  - evolution_record_lesson
+  - web_fetch
+  - google
+  - send_email

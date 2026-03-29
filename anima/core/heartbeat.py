@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import threading
 import time
+from collections import deque
 
 from anima.config import get
 from anima.core.event_queue import EventQueue
@@ -41,6 +42,7 @@ class HeartbeatEngine:
         working_memory: WorkingMemory,
         llm_router: LLMRouter,
         config: dict,
+        governance=None,
     ) -> None:
         self._event_queue = event_queue
         self._snapshot_cache = snapshot_cache
@@ -67,7 +69,7 @@ class HeartbeatEngine:
         self._tick_count = 0
         self._tick_lock = threading.Lock()  # M-22: atomicity for tick count
         self._tick_callback = None  # Dashboard heartbeat visualization
-        self._tick_history: list[dict] = []  # Last 30 tick records
+        self._tick_history: deque[dict] = deque(maxlen=30)
         self._scheduler: Scheduler | None = None
         self._gossip_mesh = None  # Set via set_gossip_mesh()
         self._evolution_engine = None  # Set via set_evolution_engine()
@@ -79,6 +81,7 @@ class HeartbeatEngine:
         self._session_manager = None  # Set via set_session_manager()
         self._user_activity = None  # Set via set_user_activity()
         self._emotion_state = emotion_state  # Alias for proactive outreach
+        self._governance = governance  # Governance engine (DI)
 
         # File watcher
         watch_paths = get("perception.watch_paths", ["."])
@@ -279,8 +282,6 @@ class HeartbeatEngine:
             "idle_level": self._idle_scheduler.level if self._idle_scheduler else "unknown",
         }
         self._tick_history.append(tick_record)
-        if len(self._tick_history) > 30:
-            self._tick_history = self._tick_history[-30:]
         if self._tick_callback:
             try:
                 self._tick_callback(tick_record)
@@ -367,8 +368,7 @@ class HeartbeatEngine:
                     effective_interval = self._llm_interval
 
                 # Governance: cautious mode doubles the interval
-                from anima.core.governance import get_governance
-                activity = get_governance().get_activity_level()
+                activity = self._governance.get_activity_level() if self._governance else "active"
                 if activity == "cautious":
                     effective_interval = max(effective_interval, 600)  # min 10 min
                 elif activity == "minimal":
@@ -392,10 +392,10 @@ class HeartbeatEngine:
 
     def _should_llm_think(self) -> bool:
         """Check governance activity level before allowing self-thinking."""
-        from anima.core.governance import get_governance
-        level = get_governance().get_activity_level()
-        if level == "minimal":
-            return False  # Self-thinking disabled in minimal mode
+        if self._governance:
+            level = self._governance.get_activity_level()
+            if level == "minimal":
+                return False  # Self-thinking disabled in minimal mode
         return True
 
     async def _on_llm_tick(self) -> None:
@@ -524,8 +524,7 @@ class HeartbeatEngine:
                     continue
 
                 # Governance: block evolution in cautious/minimal mode
-                from anima.core.governance import get_governance
-                gov_level = get_governance().get_activity_level()
+                gov_level = self._governance.get_activity_level() if self._governance else "active"
                 if gov_level in ("cautious", "minimal"):
                     log.debug("Evolution blocked — governance mode: %s", gov_level)
                     await asyncio.sleep(effective_interval)

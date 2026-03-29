@@ -327,7 +327,10 @@ class ResponseHandlingStage(PipelineStage):
                 details=pctx.user_message[:200],
             )
 
-        # Update session conversation if multi-user
+        # Update per-session conversation buffer (separate from ctx.conversation
+        # which is the global cognitive context buffer in response_handler.py).
+        # Both are needed: global buffer for LLM context, session buffer for
+        # per-user history in multi-user scenarios.
         if hasattr(pctx, '_session') and pctx._session:
             session = pctx._session
             session.conversation.append({"role": "user", "content": pctx.user_message})
@@ -335,14 +338,13 @@ class ResponseHandlingStage(PipelineStage):
             session.trim_conversation(100)
 
         # Governance: Self-Thinking loop detection + drift accumulation
-        from anima.core.governance import get_governance
-        gov = get_governance()
+        gov = pctx.cognitive_ctx.governance
 
-        if decision.is_self and event.type == EventType.SELF_THINKING:
+        if gov and decision.is_self and event.type == EventType.SELF_THINKING:
             action = "active" if pctx.tool_calls_made > 0 else "quiet"
             gov.check_self_thinking_loop(action)
 
-        if not decision.is_self and pctx.content:
+        if gov and not decision.is_self and pctx.content:
             # Check drift on user-facing responses (SoulContainer already wrote drift.jsonl)
             gov.load_recent_drift_scores(max_entries=5)
             if gov._drift_scores:

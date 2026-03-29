@@ -11,6 +11,7 @@ Retry architecture:
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import re
@@ -44,8 +45,9 @@ FAILURE_COOLDOWN_S = 7200  # 2 hours
 class EvolutionEngine:
     """Main orchestrator for the evolution pipeline."""
 
-    def __init__(self, node_id: str = "local") -> None:
+    def __init__(self, node_id: str = "local", governance=None) -> None:
         self._node_id = node_id
+        self._governance = governance
         self.memory = EvolutionMemory()
         self.queue = ProposalQueue()
         self.consensus = ConsensusEngine(node_id)
@@ -53,6 +55,7 @@ class EvolutionEngine:
         self.agent_pool = AgentPool()
 
         self._running = False
+        self._exec_lock = asyncio.Lock()
         self._current_proposal: Proposal | None = None
         self._evolution_count_this_hour = 0
         self._consecutive_failures = 0
@@ -89,8 +92,11 @@ class EvolutionEngine:
     async def submit_proposal(self, proposal: Proposal) -> str:
         """Submit a proposal through the pipeline. Returns final status."""
         # Governance check — core module protection + failure cooldown
-        from anima.core.governance import get_governance
-        gov = get_governance()
+        if self._governance:
+            gov = self._governance
+        else:
+            from anima.core.governance import get_governance
+            gov = get_governance()
         allowed, reason = gov.check_evolution_proposal(
             {"files": proposal.files, "title": proposal.title, "human_confirmed": getattr(proposal, 'human_confirmed', False)},
             self._consecutive_failures,
@@ -138,11 +144,10 @@ class EvolutionEngine:
         self.queue.add(proposal)
 
         # Execute in background (don't block cognitive loop)
-        if self._current_proposal is None:
-            import asyncio
-            asyncio.get_event_loop().create_task(self._execute_next())
-            return "approved_executing"
-
+        async with self._exec_lock:
+            if self._current_proposal is None:
+                asyncio.get_event_loop().create_task(self._execute_next())
+                return "approved_executing"
         return "queued"
 
     async def _wait_for_votes(self, proposal, alive: int, timeout: int = 30) -> str:

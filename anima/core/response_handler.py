@@ -45,6 +45,8 @@ class ResponseHandler:
     def __init__(self) -> None:
         # SELF_THINKING dedup: updated after each self-thought so the
         # next heartbeat tick can inject "what I did last time" context.
+        # Accessed only from the async event loop (no threading concern).
+        # CPython str assignment is atomic (single bytecode op).
         self.last_proactive_result: str = ""
 
     # ------------------------------------------------------------------ #
@@ -99,6 +101,9 @@ class ResponseHandler:
             content = fallback  # So conversation buffer gets the fallback
 
         # -- 2. Conversation buffer: always append both sides ------------
+        # This writes to ctx.conversation (the global cognitive context buffer,
+        # shared across sessions). Per-session buffers are managed separately
+        # in ResponseHandlingStage (stages.py) via session.conversation.
         ctx.conversation.append({"role": "user", "content": user_message})
         conv_entry: dict = {"role": "assistant", "content": content or "(no response)"}
         if is_self:

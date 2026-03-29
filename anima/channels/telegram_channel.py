@@ -13,6 +13,7 @@ import threading
 from typing import Any, Callable
 
 from anima.channels.base import BaseChannel
+from anima.models.message import MessagePayload
 from anima.utils.logging import get_logger
 
 log = get_logger("channels.telegram")
@@ -119,14 +120,16 @@ class TelegramChannel(BaseChannel):
                 session_id = f"telegram:{user_id}"
                 self._response_targets[session_id] = msg.chat_id
 
-                self._inbox.put({
-                    "text": msg.text,
-                    "user": str(user_id),
-                    "user_name": msg.from_user.username or str(user_id),
-                    "channel": "telegram",
-                    "chat_id": str(msg.chat_id),
-                    "source": session_id,
-                })
+                payload = MessagePayload(
+                    text=msg.text,
+                    user=str(user_id),
+                    user_name=msg.from_user.username or str(user_id),
+                    channel="telegram",
+                    source=session_id,
+                    channel_id=str(msg.chat_id),
+                    metadata={"chat_id": str(msg.chat_id)},
+                )
+                self._inbox.put(payload.to_dict())
 
             app.add_handler(
                 MessageHandler(filters.TEXT & ~filters.COMMAND, on_message),

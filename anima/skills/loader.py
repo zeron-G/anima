@@ -8,6 +8,7 @@ Supports:
 
 import json
 import subprocess
+from enum import Enum
 from pathlib import Path
 
 from anima.config import project_root
@@ -15,6 +16,14 @@ from anima.models.tool_spec import ToolSpec, RiskLevel
 from anima.utils.logging import get_logger
 
 log = get_logger("skills")
+
+
+class SkillState(Enum):
+    """Lifecycle state of a skill."""
+    DISCOVERED = "discovered"
+    LOADED = "loaded"
+    FAILED = "failed"
+    DISABLED = "disabled"
 
 
 class SkillMeta:
@@ -27,6 +36,8 @@ class SkillMeta:
         self.commands = data.get("commands", {})
         self.cron = data.get("cron", {})
         self.path = path
+        self.state: SkillState = SkillState.LOADED
+        self.error: str = ""
 
 
 class SkillLoader:
@@ -61,7 +72,12 @@ class SkillLoader:
                     self._skills[meta.name] = meta
                     log.info("Discovered skill: %s v%s at %s", meta.name, meta.version, skill_dir)
                 except Exception as e:
-                    log.warning("Failed to load skill from %s: %s", skill_dir, e)
+                    meta = SkillMeta({}, skill_dir)
+                    meta.name = skill_dir.name
+                    meta.state = SkillState.FAILED
+                    meta.error = str(e)
+                    self._skills[skill_dir.name] = meta
+                    log.warning("Skill %s failed to load: %s", skill_dir.name, e)
         return list(self._skills.values())
 
     def get_skill(self, name: str) -> SkillMeta | None:
@@ -70,7 +86,8 @@ class SkillLoader:
     def list_skills(self) -> list[dict]:
         return [
             {"name": s.name, "version": s.version, "description": s.description,
-             "commands": list(s.commands.keys()), "path": str(s.path)}
+             "commands": list(s.commands.keys()), "path": str(s.path),
+             "state": s.state.value, "error": s.error}
             for s in self._skills.values()
         ]
 
@@ -201,6 +218,8 @@ class SkillLoader:
         """Generate ToolSpec objects for each skill command."""
         tools = []
         for skill in self._skills.values():
+            if skill.state != SkillState.LOADED:
+                continue
             for cmd_name, cmd_spec in skill.commands.items():
                 tool_name = f"skill_{skill.name}_{cmd_name}"
 

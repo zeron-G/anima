@@ -13,6 +13,7 @@ import sys
 import threading
 
 from anima.channels.base import BaseChannel
+from anima.models.message import MessagePayload
 from anima.utils.logging import get_logger
 
 log = get_logger("channels.discord")
@@ -130,15 +131,16 @@ class DiscordChannel(BaseChannel):
             await self._start_typing(message.channel.id)
 
             # Put on thread-safe queue (ANIMA polls this)
-            self._inbox.put({
-                "text": message.content,
-                "user": str(message.author.id),
-                "user_name": message.author.display_name,
-                "channel": "discord",
-                "channel_id": str(message.channel.id),
-                "guild": message.guild.name if message.guild else "DM",
-                "source": session_id,
-            })
+            payload = MessagePayload(
+                text=message.content,
+                user=str(message.author.id),
+                user_name=message.author.display_name,
+                channel="discord",
+                source=session_id,
+                channel_id=str(message.channel.id),
+                guild=message.guild.name if message.guild else "DM",
+            )
+            self._inbox.put(payload.to_dict())
 
         try:
             log.info("Discord thread starting with token %s...", self._token[:20])

@@ -120,11 +120,15 @@ class TestRunner:
 
     def _run(self, cmd: list[str], timeout: int = 60) -> tuple[bool, str]:
         try:
-            result = subprocess.run(
-                cmd, cwd=self._cwd, capture_output=True, text=True,
+            kwargs: dict = dict(
+                cwd=self._cwd, capture_output=True, text=True,
                 encoding="utf-8", errors="replace",
-                timeout=timeout, env={**os.environ, "PYTHONIOENCODING": "utf-8"},
+                timeout=timeout,
+                env={**os.environ, "PYTHONIOENCODING": "utf-8"},
             )
+            if os.name == "nt":
+                kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
+            result = subprocess.run(cmd, **kwargs)
             output = (result.stdout + "\n" + result.stderr).strip()
             return result.returncode == 0, output
         except subprocess.TimeoutExpired:
@@ -201,6 +205,16 @@ class TestRunner:
 
         try:
             await asyncio.sleep(timeout)
+
+            # Memory limit check (psutil is in requirements.txt)
+            try:
+                import psutil
+                mem = psutil.Process(proc.pid).memory_info().rss
+                if mem > 512 * 1024 * 1024:  # 512 MB
+                    proc.kill()
+                    return False, f"Memory limit exceeded: {mem // (1024*1024)}MB > 512MB"
+            except (ImportError, Exception):
+                pass  # psutil optional for this check
 
             # Check if still alive
             if proc.poll() is not None:

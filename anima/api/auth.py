@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import secrets
 import time
 from typing import Any
 
@@ -21,8 +22,20 @@ _SECRET = ""
 def _get_secret() -> str:
     global _SECRET
     if not _SECRET:
-        _SECRET = get("dashboard.auth.token", "") or "anima-default-secret"
+        configured = get("dashboard.auth.token", "")
+        if configured:
+            _SECRET = configured
+        else:
+            _SECRET = secrets.token_hex(32)
+            log.warning(
+                "No dashboard.auth.token configured — using random per-process secret. "
+                "Tokens will not survive restarts. Set 'dashboard.auth.token' in local/env.yaml."
+            )
     return _SECRET
+
+_login_attempts: dict[str, list[float]] = {}
+_MAX_LOGIN_ATTEMPTS = 5
+_LOGIN_WINDOW_S = 60.0
 
 def generate_token(ttl_hours: int = 24) -> dict:
     """Generate a JWT-like token."""
@@ -84,13 +97,27 @@ async def handle_login(request: web.Request) -> web.Response:
     except Exception:
         return web.json_response({"error": "invalid json"}, status=400)
 
+    # Rate limiting
+    client_ip = request.remote or "unknown"
+    now = time.time()
+    attempts = _login_attempts.get(client_ip, [])
+    # Clean old entries
+    attempts = [t for t in attempts if now - t < _LOGIN_WINDOW_S]
+    _login_attempts[client_ip] = attempts
+    if len(attempts) >= _MAX_LOGIN_ATTEMPTS:
+        return web.json_response(
+            {"error": "too many login attempts, try again later"},
+            status=429,
+        )
+
     password = get("dashboard.auth.password", "")
     if not password:
         # Auth disabled, return token anyway
         result = generate_token()
         return web.json_response(result)
 
-    if data.get("password") != password:
+    if not hmac.compare_digest(data.get("password", ""), password):
+        _login_attempts.setdefault(client_ip, []).append(now)
         return web.json_response({"error": "invalid password"}, status=401)
 
     result = generate_token()

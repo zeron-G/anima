@@ -53,6 +53,7 @@ class LorebookEngine:
         self._sticky_state: dict[str, int] = {}   # file -> remaining sticky rounds
         self._cooldown_state: dict[str, float] = {}  # file -> last trigger timestamp
         self._cache: dict[str, str] = {}           # file -> content cache
+        self._index_mtime: float = 0.0
         self._load_index()
 
     # ------------------------------------------------------------------ #
@@ -77,9 +78,31 @@ class LorebookEngine:
                 "Lorebook loaded: %d entries from %s",
                 len(self._index), index_path,
             )
+            try:
+                self._index_mtime = index_path.stat().st_mtime
+            except OSError:
+                pass
         except Exception:
             log.exception("Failed to load lorebook index: %s", index_path)
             self._index = []
+
+    # ------------------------------------------------------------------ #
+    #  Hot-reload                                                         #
+    # ------------------------------------------------------------------ #
+
+    def _check_reload(self) -> None:
+        """Reload _index.yaml if the file has been modified since last load."""
+        index_path = self._dir / "_index.yaml"
+        if not index_path.exists():
+            return
+        try:
+            current_mtime = index_path.stat().st_mtime
+            if current_mtime > self._index_mtime:
+                log.info("Lorebook index changed, reloading...")
+                self._load_index()
+                self._cache.clear()
+        except OSError:
+            pass
 
     # ------------------------------------------------------------------ #
     #  Scan                                                               #
@@ -103,6 +126,8 @@ class LorebookEngine:
         4. Fit within total *budget*.
         5. Update sticky / cooldown state.
         """
+        self._check_reload()
+
         if not self._index:
             return LorebookHit()
 

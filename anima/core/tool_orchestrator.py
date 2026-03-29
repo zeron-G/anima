@@ -13,8 +13,11 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 from typing import Any, Callable
 
+from anima.core.tool_selector import ToolSelector
+from anima.observability.audit_log import ToolAuditLog
 from anima.tools.executor import ToolExecutor
 from anima.tools.registry import ToolRegistry
 from anima.utils.logging import get_logger
@@ -26,6 +29,7 @@ MAX_TURNS = 50  # Maximum tool-use loop iterations
 # ------------------------------------------------------------------ #
 #  Tool subsets for dynamic selection                                  #
 # ------------------------------------------------------------------ #
+# Legacy tool subsets — prefer config/tool_selection.yaml via ToolSelector
 # Each event type only sees tools relevant to its task, reducing token
 # usage and preventing the LLM from invoking inappropriate tools.
 
@@ -154,9 +158,17 @@ class ToolOrchestrator:
       - The human-readable tools description for prompt compilation
     """
 
-    def __init__(self, executor: ToolExecutor, registry: ToolRegistry) -> None:
+    def __init__(
+        self,
+        executor: ToolExecutor,
+        registry: ToolRegistry,
+        audit_log: ToolAuditLog | None = None,
+        tool_selector: ToolSelector | None = None,
+    ) -> None:
         self._executor = executor
         self._registry = registry
+        self._audit_log = audit_log
+        self._selector = tool_selector
 
     # ------------------------------------------------------------------ #
     #  Tool schema generation (dynamic selection)                         #
@@ -361,8 +373,18 @@ class ToolOrchestrator:
                 except Exception:
                     pass  # Status display must never crash tool execution
 
+            _t0 = time.time()
             result = await self._executor.execute(name, args)
             result_text = self.format_result(name, result)
+
+            if self._audit_log:
+                self._audit_log.record(
+                    tool_name=name,
+                    args_summary=json.dumps(args, ensure_ascii=False)[:200] if isinstance(args, dict) else str(args)[:200],
+                    result_summary=str(result)[:200],
+                    duration_ms=(time.time() - _t0) * 1000,
+                    success=result.get("success", False) if isinstance(result, dict) else True,
+                )
 
             if result.get("success"):
                 log.info("Tool %s succeeded", name)

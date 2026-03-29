@@ -45,11 +45,16 @@ class NetworkMessage:
         ).hexdigest()[:32]
         return self.signature
 
-    def verify(self, secret: str) -> bool:
+    def verify(self, secret: str, max_age_s: float = 60.0) -> bool:
         """Verify message signature."""
         if not self.signature:
             return False
         expected = _hmac.new(
             secret.encode(), self._body_bytes(), hashlib.sha256
         ).hexdigest()[:32]
-        return _hmac.compare_digest(self.signature, expected)
+        if not _hmac.compare_digest(self.signature, expected):
+            return False
+        # Replay protection: reject messages outside the time window
+        if max_age_s > 0 and abs(time.time() - self.timestamp) > max_age_s:
+            return False
+        return True

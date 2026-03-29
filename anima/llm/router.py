@@ -271,6 +271,10 @@ class LLMRouter:
 
     async def call(self, messages, tier=2, temperature=0.7) -> str | None:
         """Call LLM. Returns content string or None."""
+        # Note: budget check is not atomic with _try_call(). Two concurrent
+        # coroutines could both pass check_budget() before either records
+        # usage. This is acceptable — budget is a soft limit, and adding a
+        # lock would serialize ALL LLM calls, hurting throughput.
         if not self.check_budget():
             log.warning("Budget exceeded")
             return None
@@ -418,6 +422,42 @@ class LLMRouter:
                 price = (0.0, 0.0)
             total_cost += (inp * price[0] + out * price[1]) / 1_000_000
         return (total_cost + estimated_cost) < self._daily_budget
+
+    def check_budget_alerts(self) -> tuple[str, float]:
+        """Check budget utilization and return (alert_level, pct_used).
+
+        Returns:
+            ("none", 0.0)      -- under 50%
+            ("warning", 0.52)  -- 50-75%
+            ("high", 0.78)     -- 75-90%
+            ("critical", 0.95) -- 90%+
+        """
+        if self._daily_budget <= 0:
+            return ("none", 0.0)
+
+        # Reuse the cost calculation from check_budget
+        total_cost = 0.0
+        for u in self._usage:
+            model = u.get("model", "").lower()
+            inp = u.get("prompt_tokens", 0)
+            out = u.get("completion_tokens", 0)
+            price: tuple[float, float] | None = None
+            for key, rates in self._PRICING.items():
+                if key in model:
+                    price = rates
+                    break
+            if price is None:
+                price = (0.0, 0.0)
+            total_cost += (inp * price[0] + out * price[1]) / 1_000_000
+
+        pct = total_cost / self._daily_budget
+        if pct >= 0.90:
+            return ("critical", round(pct, 3))
+        elif pct >= 0.75:
+            return ("high", round(pct, 3))
+        elif pct >= 0.50:
+            return ("warning", round(pct, 3))
+        return ("none", round(pct, 3))
 
     def get_status(self) -> dict:
         return {

@@ -113,6 +113,9 @@ class CognitiveContext:
     session_manager: Any | None = None
     """Per-session state manager for multi-user isolation."""
 
+    governance: Any | None = None
+    """Governance engine for evolution approval and drift detection."""
+
     # ── Callbacks ──
 
     output_callback: Callable[..., Any] | None = None

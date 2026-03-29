@@ -58,13 +58,19 @@ class PipelineStage:
 class Pipeline:
     """Ordered sequence of processing stages."""
 
-    def __init__(self, stages: list[PipelineStage]) -> None:
+    def __init__(self, stages: list[PipelineStage], checkpoint_fn: Any | None = None) -> None:
         self._stages = stages
+        self._checkpoint_fn = checkpoint_fn
 
     async def run(self, ctx: PipelineContext) -> PipelineContext:
         for stage in self._stages:
             try:
                 ctx = await stage.process(ctx)
+                if self._checkpoint_fn and not ctx.handled:
+                    try:
+                        self._checkpoint_fn(ctx, stage.name)
+                    except Exception:
+                        pass
                 if ctx.handled:
                     log.debug("Pipeline short-circuited at stage: %s", stage.name)
                     break
