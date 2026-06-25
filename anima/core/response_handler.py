@@ -450,7 +450,12 @@ class ResponseHandler:
         - Tools/prompts/config → importlib.reload + re-register (instant)
         - Core modules (cognitive/heartbeat/main) → full restart via checkpoint
         """
-        from anima.config import project_root
+        from anima.config import source_tree
+
+        repo = source_tree()
+        if repo is None:
+            log.info("Evolution reload skipped: not running from a source checkout")
+            return
 
         try:
             result = subprocess.run(
@@ -458,7 +463,7 @@ class ResponseHandler:
                 capture_output=True,
                 text=True,
                 timeout=10,
-                cwd=str(project_root()),
+                cwd=str(repo),
             )
             changed_files = (
                 result.stdout.strip().splitlines()

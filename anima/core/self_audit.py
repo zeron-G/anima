@@ -13,7 +13,7 @@ import subprocess
 import time
 from dataclasses import dataclass, field
 
-from anima.config import project_root
+from anima.config import project_root, source_tree
 from anima.utils.logging import get_logger
 
 log = get_logger("self_audit")
@@ -53,7 +53,11 @@ class SelfAudit:
         self._issue_tracker = issue_tracker
         self._event_queue = event_queue
         self._last_results: dict[int, AuditResult] = {}
-        self._root = str(project_root())
+        # Self-audit operates on the code repo; an installed kernel (no source
+        # tree) has nothing to audit, so disable rather than run tools in site-packages.
+        st = source_tree()
+        self._enabled = st is not None
+        self._root = str(st) if st is not None else str(project_root())
 
     def set_issue_tracker(self, tracker) -> None:
         self._issue_tracker = tracker
@@ -63,6 +67,11 @@ class SelfAudit:
 
     async def run_tier(self, tier: int) -> AuditResult:
         """Run a specific audit tier."""
+        if not self._enabled:
+            return AuditResult(
+                tier=tier, name="disabled", passed=True,
+                summary="self-audit disabled: not running from a source checkout",
+            )
         runners = {
             1: self._tier1_static,
             2: self._tier2_tests,

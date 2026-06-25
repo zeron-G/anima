@@ -2,7 +2,7 @@
 
 > 本文件是"代码/状态分离"大重构的**单一事实源 + 跨机器交接说明**。
 > 换工作环境后,`git clone` 本仓库 → 读本文件即可接着干。
-> 最后更新:Phase 1.5 **T6(wheel 资源打包)完成**;本机灵魂实例已设为权威源(persona/feelings 以本机为准,见 §5)。
+> 最后更新:**Phase 1.5 全部完成(T6 wheel 打包 + A5 装机优雅禁用)**;本机灵魂实例已设为权威源(persona/feelings 以本机为准,见 §5)。
 
 ---
 
@@ -51,13 +51,18 @@
 - **T4** `data_dir()/agent_dir()` 消费方收口到 home(因解析器已重定向,消费方无需逐个改,已验证语义正确)。
 - **T5** `project_root()` 三类归位:用户数据(uploads/logs)→ `data_dir()`;代码资产(skills/default.yaml)→ `config_dir()/skills_dir()`;工具 cwd → `workspace_root()`;gossip 进化同步加无 git 树优雅跳过(`main.py`)。
 
-### ✅ Phase 1.5(部分)— wheel 资源打包(T6)
+### ✅ Phase 1.5 — 装机可发布化(T6 wheel 打包 + A5 进化/spawn 装机禁用)
 让内核以 wheel 发布(无源码树)时仍能解析只读资产。
 - `setup.py` 增 `build_py` 钩子:构建期把 `config/ prompts/ skills/` 镜像进 `anima/_resources/`(单一事实源,**不在 git 里复制**;`anima/_resources/` 已 gitignore)。
 - `MANIFEST.in`:graft 上述资产、prune `data/ agents/ local/ eva-ui/`(sdist 不含任何私有态/灵魂)。
 - `pyproject.toml`:`[tool.setuptools.package-data] anima=["_resources/**/*"]`。
 - **A4 已通过**:仓库外干净 venv 装 wheel → `source_tree()` 为 None、`config_dir()/default.yaml` 为 True,prompts/skills/profiles/tool_selection 全部解析到包内资源。
 - **人格种子未打包(有意为之)**:`agents/` 现为活体实例(含私有灵魂),种子/实例劈分属 Phase 2;装机消费方(`anima init`)尚不存在。打包种子留到 Phase 2(用 `agents/_seed`)。
+
+**A5 — 进化/spawn/self-audit 装机模式优雅禁用**:在特性入口判 `source_tree() is None` → 记日志并禁用,绝不在 site-packages 里跑 git。
+- `evolution/engine.py::submit_proposal` 首句守卫(返回 `disabled: not a source checkout`);`core/self_audit.py` 构造期置 `_enabled=False`、`run_tier` 返回 benign disabled(passed=True 不误报 issue);`spawn/packager.py::create_spawn_package` 抛清晰 `RuntimeError`;`dashboard/hub.py::_get_git_info` 与 `core/response_handler.py::_maybe_trigger_reload` 装机时短路返回空/跳过。
+- 低优先残留(装饰性/不触发,有意未改):`llm/prompt_compiler.py:938`、`memory/store.py:162`、`utils/path_safety.py:80`。
+- **A5 已通过**:强制 `source_tree()=None` 时三大特性均优雅禁用;源码模式 `pytest -q` 零回归(456 passed,1 个既有无关 scheduler 失败)。
 
 ---
 
@@ -129,11 +134,12 @@ project_root()   -> Path            # 【已弃用 shim】= source_tree() or pac
 - **人格种子推迟到 Phase 2**(避免把活体灵魂打进发布包,且种子/实例尚未劈分)。
 - 验收 A4 已通过(仓库外干净 venv,`config_dir()/default.yaml` 为 True)。
 
-**进化/spawn 装机模式优雅禁用**(剩余 `project_root()` 均集中于此,装机时 `source_tree()` 为 None 会让 git 命令在 site-packages 乱跑)
-- 涉及:`evolution/engine.py`(222,446,461,524,525,604,613,615)、`evolution/sandbox.py`(39,69,119)、`evolution/deployer.py`(43)、`spawn/packager.py`(51)、`core/self_audit.py`(56)、`core/response_handler.py`(461)、`dashboard/hub.py`(287 git log)。
-- 做法:在**特性入口**(EvolutionEngine 构造/wire、spawn CLI 入口、self_audit 启用处)判 `source_tree() is None` → 记日志并禁用,而非逐个 git 调用改写。
-- 低优先剩余:`llm/prompt_compiler.py:938`(仅显示项目路径,装饰性)、`memory/store.py:162`(相对路径兜底,main 已传绝对路径不触发)、`utils/path_safety.py:80`(代码沙箱限定,源码操作语义)。
-- 验收(A5):把代码拷到无 `.git` 目录 `python -m anima --headless` 启动不抛异常,进化/spawn 优雅禁用。
+**✅ 进化/spawn/self-audit 装机模式优雅禁用 — 已完成(A5,详见 §3)**
+- 已在特性入口加 `source_tree() is None` 守卫:`evolution/engine.py::submit_proposal`、`core/self_audit.py`(构造期 `_enabled`)、`spawn/packager.py::create_spawn_package`、`dashboard/hub.py::_get_git_info`、`core/response_handler.py::_maybe_trigger_reload`。
+- 低优先残留(装饰性/不触发,有意未改):`llm/prompt_compiler.py:938`、`memory/store.py:162`、`utils/path_safety.py:80`。
+- 验收 A5 已通过:强制装机模式三大特性优雅禁用,源码模式 pytest 零回归。
+
+**至此 Phase 1.5 全部完成。** 下一步进入 Phase 2(数据外迁 + 人格种子/实例劈分)。
 
 ### Phase 2 — 数据外迁 + 人格种子/实例劈分
 - 新增 `anima init [--home X]` 命令:生成 `$ANIMA_HOME` 骨架,把**人格种子**(`agents/_seed`,从现 `agents/eva` 提炼初始 identity/rules)复制成用户的活体 `agents/<name>`。`seed_agents_dir()` 解析器已就位。

@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from anima.config import project_root, get
+from anima.config import get, source_tree
 from anima.network.discovery import get_local_ip
 from anima.network.node import NodeIdentity
 from anima.utils.ids import gen_id
@@ -48,7 +48,12 @@ def create_spawn_package(
     Returns:
         Path to the created tar.gz file.
     """
-    root = project_root()
+    root = source_tree()
+    if root is None:
+        raise RuntimeError(
+            "Cannot create a spawn package: ANIMA is not running from a source "
+            "checkout (an installed kernel has no source tree to package)."
+        )
     ts = int(time.time())
 
     if output_path is None:

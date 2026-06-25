@@ -283,8 +283,13 @@ class DashboardHub:
             return self._git_cache
         try:
             import subprocess
-            from anima.config import project_root
-            root = str(project_root())
+            from anima.config import source_tree
+            _src = source_tree()
+            if _src is None:
+                self._git_cache = {"branch": "", "recent_commits": []}
+                self._git_cache_ts = now
+                return self._git_cache
+            root = str(_src)
             git_log = subprocess.run(
                 ["git", "log", "--oneline", "-5"],
                 cwd=root,

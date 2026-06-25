@@ -18,7 +18,7 @@ import re
 import subprocess as _sp
 import time
 
-from anima.config import project_root, data_dir
+from anima.config import project_root, data_dir, source_tree
 from anima.evolution.proposal import Proposal, ProposalQueue, ProposalStatus
 from anima.evolution.consensus import ConsensusEngine
 from anima.evolution.sandbox import Worktree, TestRunner
@@ -91,6 +91,14 @@ class EvolutionEngine:
 
     async def submit_proposal(self, proposal: Proposal) -> str:
         """Submit a proposal through the pipeline. Returns final status."""
+        # Installed kernel (no source tree) cannot evolve code — disable cleanly
+        # instead of running git inside site-packages.
+        if source_tree() is None:
+            log.warning(
+                "Evolution disabled: not running from a source checkout "
+                "(installed kernel has no repository to evolve)"
+            )
+            return "disabled: not a source checkout"
         # Governance check — core module protection + failure cooldown
         if self._governance:
             gov = self._governance
