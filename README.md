@@ -131,6 +131,7 @@ Additional design documents live in [docs](docs):
 - [EDGE_ANIMA.md](docs/EDGE_ANIMA.md)
 - [ROBOTICS_PIDOG.md](docs/ROBOTICS_PIDOG.md)
 - [DEVELOPER_GUIDE.md](docs/DEVELOPER_GUIDE.md)
+- [REFACTOR.md](docs/REFACTOR.md) — kernel/frontend/data separation: progress & cross-machine handoff
 
 ## Development
 

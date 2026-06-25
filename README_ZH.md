@@ -131,6 +131,7 @@ ANIMA 把共享配置和本地敏感配置分开管理：
 - [EDGE_ANIMA.md](docs/EDGE_ANIMA.md)
 - [ROBOTICS_PIDOG.md](docs/ROBOTICS_PIDOG.md)
 - [DEVELOPER_GUIDE.md](docs/DEVELOPER_GUIDE.md)
+- [REFACTOR.md](docs/REFACTOR.md) — 代码/前端/数据分离重构:进度与跨机器交接
 
 ## 开发
 
