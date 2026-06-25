@@ -93,7 +93,7 @@ async def import_document(request: web.Request) -> web.Response:
 
     from anima.tools.builtin.document_tools import _document_store
     if not _document_store:
-        return web.json_response({"error": "document store not initialized"}, status=500)
+        return web.json_response({"error": "document store not initialized"}, status=503)
 
     result = await _document_store.import_document(
         data.get("file_path", ""),
@@ -122,7 +122,7 @@ async def delete_document(request: web.Request) -> web.Response:
 
     from anima.tools.builtin.document_tools import _document_store
     if not _document_store:
-        return web.json_response({"error": "document store not initialized"}, status=500)
+        return web.json_response({"error": "document store not initialized"}, status=503)
 
     result = await _document_store.delete_document(doc_id)
     return web.json_response(result)

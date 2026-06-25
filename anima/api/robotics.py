@@ -5,6 +5,7 @@ from __future__ import annotations
 from aiohttp import web
 
 from anima.api.context import get_hub
+from anima.api.responses import ApiError, read_json
 from anima.utils.logging import get_logger
 
 log = get_logger("api.robotics")
@@ -41,12 +42,11 @@ async def command(request: web.Request) -> web.Response:
     """POST /v1/robotics/nodes/{node_id}/command — structured command."""
     manager = _get_manager(request)
     node_id = request.match_info["node_id"]
-    data = await request.json()
-    result = await manager.execute_command(
-        node_id,
-        str(data.get("command", "")),
-        dict(data.get("params") or {}),
-    )
+    data = await read_json(request)
+    cmd = str(data.get("command", "")).strip()
+    if not cmd:
+        raise ApiError("command required")
+    result = await manager.execute_command(node_id, cmd, dict(data.get("params") or {}))
     return web.json_response(result)
 
 
@@ -54,8 +54,11 @@ async def nlp(request: web.Request) -> web.Response:
     """POST /v1/robotics/nodes/{node_id}/nlp — natural language command."""
     manager = _get_manager(request)
     node_id = request.match_info["node_id"]
-    data = await request.json()
-    result = await manager.run_nlp(node_id, str(data.get("text", "")))
+    data = await read_json(request)
+    text = str(data.get("text", "")).strip()
+    if not text:
+        raise ApiError("text required")
+    result = await manager.run_nlp(node_id, text)
     return web.json_response(result)
 
 
@@ -63,12 +66,11 @@ async def speak(request: web.Request) -> web.Response:
     """POST /v1/robotics/nodes/{node_id}/speak — TTS on robot."""
     manager = _get_manager(request)
     node_id = request.match_info["node_id"]
-    data = await request.json()
-    result = await manager.speak(
-        node_id,
-        str(data.get("text", "")),
-        blocking=bool(data.get("blocking", False)),
-    )
+    data = await read_json(request)
+    text = str(data.get("text", "")).strip()
+    if not text:
+        raise ApiError("text required")
+    result = await manager.speak(node_id, text, blocking=bool(data.get("blocking", False)))
     return web.json_response(result)
 
 
@@ -76,7 +78,7 @@ async def start_exploration(request: web.Request) -> web.Response:
     """POST /v1/robotics/nodes/{node_id}/exploration/start."""
     manager = _get_manager(request)
     node_id = request.match_info["node_id"]
-    data = await request.json() if request.can_read_body else {}
+    data = await read_json(request) if request.can_read_body else {}
     result = await manager.start_exploration(
         node_id,
         goal=str(data.get("goal", "wander")),
@@ -89,7 +91,7 @@ async def stop_exploration(request: web.Request) -> web.Response:
     """POST /v1/robotics/nodes/{node_id}/exploration/stop."""
     manager = _get_manager(request)
     node_id = request.match_info["node_id"]
-    data = await request.json() if request.can_read_body else {}
+    data = await read_json(request) if request.can_read_body else {}
     result = await manager.stop_exploration(node_id, reason=str(data.get("reason", "manual_stop")))
     return web.json_response(result)
 

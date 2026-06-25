@@ -68,7 +68,7 @@ async def install_skill(request: web.Request) -> web.Response:
         return web.json_response({"error": "invalid json"}, status=400)
 
     if not hub.skill_loader:
-        return web.json_response({"error": "skill loader not initialized"}, status=500)
+        return web.json_response({"error": "skill loader not initialized"}, status=503)
 
     result = await hub.skill_loader.install(data.get("source", ""), data.get("name", ""))
     return web.json_response(result)
@@ -79,7 +79,7 @@ async def uninstall_skill(request: web.Request) -> web.Response:
     hub = get_hub(request)
     name = request.match_info.get("name", "")
     if not hub.skill_loader:
-        return web.json_response({"error": "skill loader not initialized"}, status=500)
+        return web.json_response({"error": "skill loader not initialized"}, status=503)
     result = await hub.skill_loader.uninstall(name)
     return web.json_response(result)
 
@@ -88,8 +88,9 @@ async def system_info(request: web.Request) -> web.Response:
     """GET /v1/settings/system — system information."""
     hub = get_hub(request)
     snapshot = hub.get_full_snapshot()
+    from anima.api.health import _server_version
     return web.json_response({
-        "version": "0.2.0",
+        "version": _server_version(),
         "uptime_s": snapshot.get("uptime_s", 0),
         "agent_name": get("agent.name", "eva"),
         "runtime": snapshot.get("runtime", {}),
