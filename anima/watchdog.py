@@ -30,11 +30,14 @@ from pathlib import Path
 from anima.utils.logging import get_logger
 log = get_logger("watchdog")
 
-# Project root (one level up from anima/)
-PROJECT_ROOT = Path(__file__).parent.parent
-LOG_FILE = PROJECT_ROOT / "data" / "logs" / "anima.log"
-HEARTBEAT_FILE = PROJECT_ROOT / "data" / "watchdog_heartbeat.json"
-WATCHDOG_LOG = PROJECT_ROOT / "data" / "logs" / "watchdog.log"
+# Data paths honor ANIMA_HOME / installed mode via the config path API.
+# PROJECT_ROOT is only the cwd used to relaunch `python -m anima`.
+from anima.config import data_dir, source_tree
+_DATA = data_dir()
+LOG_FILE = _DATA / "logs" / "anima.log"
+HEARTBEAT_FILE = _DATA / "watchdog_heartbeat.json"
+WATCHDOG_LOG = _DATA / "logs" / "watchdog.log"
+PROJECT_ROOT = source_tree() or Path(__file__).parent.parent
 
 # Thresholds
 HEARTBEAT_TIMEOUT_S = 120       # No heartbeat for 2 min → consider hung

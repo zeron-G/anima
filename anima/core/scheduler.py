@@ -55,10 +55,19 @@ class Scheduler:
 
     def add_job(self, name: str, cron_expr: str, prompt: str,
                 recurring: bool = True, timeout_s: int = 120) -> CronJob:
-        """Add a new scheduled job. Deduplicates by name — skips if exists."""
-        # Dedup: if a job with the same name already exists, skip
+        """Add a scheduled job. If one with the same name already exists, refresh
+        it in place (update schedule + RE-ENABLE) instead of returning a stale,
+        possibly-disabled job — re-adding a name means 'reschedule it'."""
         for existing in self._jobs.values():
             if existing.name == name:
+                existing.cron_expr = cron_expr
+                existing.prompt = prompt
+                existing.recurring = recurring
+                existing.timeout_s = timeout_s
+                existing.enabled = True
+                existing.next_run = self._calc_next_run(cron_expr)
+                self._save()
+                log.info("Job refreshed: %s (%s) -> %s", name, cron_expr, existing.id)
                 return existing
         job = CronJob(name=name, cron_expr=cron_expr, prompt=prompt,
                       recurring=recurring, timeout_s=timeout_s)

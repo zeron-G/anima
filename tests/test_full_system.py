@@ -48,6 +48,17 @@ from anima.network.session_router import SessionRouter
 from anima.network.split_brain import SplitBrainDetector
 
 
+@pytest.fixture(autouse=True)
+def _isolate_data_dir(tmp_path):
+    """Isolate data_dir() to a per-test temp dir so these integration tests never
+    read or mutate the developer's real data/ (scheduler.json, anima.db, ...).
+    This is also the proper fix for the historical scheduler test-isolation bug."""
+    from anima.config import set_data_dir
+    set_data_dir(str(tmp_path))
+    yield
+    set_data_dir(None)
+
+
 @pytest.fixture
 async def full_system(tmp_path):
     """Create a complete ANIMA system for testing."""

@@ -66,20 +66,6 @@ def validate_path_within(path: Path, allowed_root: Path) -> Path:
     return resolved
 
 
-def safe_project_path(relative: str) -> Path:
-    """Resolve *relative* safely within the ANIMA project root.
-
-    >>> safe_project_path("anima/core/cognitive.py")
-    PosixPath('/path/to/anima/anima/core/cognitive.py')
-
-    >>> safe_project_path("../../../etc/passwd")  # raises
-    PathTraversalBlocked: ...
-    """
-    from anima.config import project_root
-
-    return validate_path_within(project_root() / relative, project_root())
-
-
 def safe_agent_path(relative: str) -> Path:
     """Resolve *relative* safely within the active agent directory.
 

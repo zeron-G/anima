@@ -417,7 +417,8 @@ class SoulContainer:
             drift_score = min(1.0, len(fired_checks) * 0.2 +
                             abs(len(text) - len(original_text)) / max(len(original_text), 1))
             try:
-                drift_path = Path(__file__).parent.parent.parent / "data" / "logs" / "drift.jsonl"
+                from anima.config import data_dir
+                drift_path = data_dir() / "logs" / "drift.jsonl"
                 drift_path.parent.mkdir(parents=True, exist_ok=True)
                 entry = _json.dumps({
                     "timestamp": _time.time(),
