@@ -78,6 +78,9 @@ Important backend areas:
 ## Running ANIMA
 
 ```bash
+# First run: initialize a private home from the persona seed (data + live instance + .env)
+python -m anima init                 # default home; or --home <dir> for a private location
+
 # Desktop app
 python -m anima
 

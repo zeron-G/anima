@@ -1,6 +1,7 @@
 """Entry point for `python -m anima`.
 
 Usage:
+    python -m anima init             # Bootstrap a private ANIMA home from the seed
     python -m anima                  # Desktop app (PyWebView native window)
     python -m anima --headless       # Backend only (browser access)
     python -m anima --edge           # Edge ANIMA for robot-dog Linux nodes
@@ -87,6 +88,9 @@ def main():
         run_watchdog(dry_run="--dry" in args)
     elif args and args[0] == "spawn":
         _handle_spawn(args[1:], default_profile=profile, edge_mode=edge_mode)
+    elif args and args[0] == "init":
+        from anima.bootstrap import handle_init
+        handle_init(args[1:])
     elif "--watch" in args:
         _run_with_watch()
     elif "--legacy" in args or edge_mode:

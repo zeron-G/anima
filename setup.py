@@ -8,10 +8,10 @@ To keep a single source of truth, those top-level asset directories are
 copied into ``anima/_resources/`` at build time rather than being duplicated
 in git. ``anima/_resources/`` is a build artifact (gitignored).
 
-NOTE: persona *seeds* (``agents/``) are intentionally NOT bundled here.
-The seed/instance split is Phase 2; bundling the live ``agents/`` tree would
-leak private soul/memory into a published wheel, and nothing consumes
-``seed_agents_dir()`` in installed mode until ``anima init`` exists.
+Includes the persona *seed* (``agents/_seed``) — the publishable born-state
+(identity/rules/examples/baseline persona, no lived memory). ``anima init``
+copies it from ``seed_agents_dir()`` into the user's private live instance.
+The live ``agents/<name>`` instance itself is gitignored and never bundled.
 """
 
 from __future__ import annotations
@@ -25,8 +25,9 @@ from setuptools.command.build_py import build_py
 _ROOT = Path(__file__).parent.resolve()
 _RESOURCES = _ROOT / "anima" / "_resources"
 
-# Top-level code assets bundled into the wheel for installed (no-source) use.
-_BUNDLE = ("config", "prompts", "skills")
+# Read-only assets bundled into the wheel for installed (no-source) use.
+# Includes the persona seed; excludes the private live instance (agents/<name>).
+_BUNDLE = ("config", "prompts", "skills", "agents/_seed")
 
 
 def _sync_resources() -> None:

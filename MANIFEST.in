@@ -4,10 +4,12 @@ graft config
 graft prompts
 graft skills
 
-# Keep private/runtime state out of the distribution.
+# Keep private/runtime state out of the distribution...
 prune data
 prune agents
 prune local
 prune eva-ui
 prune .claude
+# ...but DO ship the publishable persona seed (re-included after `prune agents`).
+graft agents/_seed
 global-exclude *.pyc __pycache__

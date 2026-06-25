@@ -217,11 +217,17 @@ def agents_dir() -> Path:
 
 
 def seed_agents_dir() -> Path:
-    """Read-only persona seeds shipped with the kernel (Phase 2 bootstrap source)."""
+    """Read-only persona *seed* shipped with the kernel (`anima init` source).
+
+    Returns the single seed persona template directory (``agents/_seed``).
+    ``anima init`` copies it into the user's live instance at ``agent_dir()``
+    (= ``home/agents/<name>``); the instance then evolves privately and never
+    flows back into the kernel.
+    """
     st = source_tree()
-    if st is not None and (st / "agents").exists():
-        return st / "agents"
-    return package_root() / _PACKAGED_RESOURCES / "agents"
+    if st is not None and (st / "agents" / "_seed").exists():
+        return st / "agents" / "_seed"
+    return package_root() / _PACKAGED_RESOURCES / "agents" / "_seed"
 
 
 def _default_config_path() -> Path:

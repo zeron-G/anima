@@ -18,7 +18,7 @@ import re
 import subprocess as _sp
 import time
 
-from anima.config import project_root, data_dir, source_tree
+from anima.config import project_root, data_dir, source_tree, get
 from anima.evolution.proposal import Proposal, ProposalQueue, ProposalStatus
 from anima.evolution.consensus import ConsensusEngine
 from anima.evolution.sandbox import Worktree, TestRunner
@@ -572,26 +572,32 @@ class EvolutionEngine:
 
             log.info("Evolution committed to local master: %s", commit_msg)
 
-            # Step 4: Push local master to remote
-            push = _sp.run(
-                ["git", "push", "origin", "master"],
-                cwd=main_root, capture_output=True, text=True, timeout=30,
-            )
-            if push.returncode != 0:
-                log.warning("Push to remote failed (will retry later): %s", push.stderr)
-                # Local is still updated — push failure is non-fatal
+            # Step 4: Push local master to remote (opt-in; local is authoritative)
+            pushed = False
+            if get("evolution.git_remote_sync", False):
+                push = _sp.run(
+                    ["git", "push", "origin", "master"],
+                    cwd=main_root, capture_output=True, text=True, timeout=30,
+                )
+                if push.returncode != 0:
+                    log.warning("Push to remote failed (will retry later): %s", push.stderr)
+                    # Local is still updated — push failure is non-fatal
+                pushed = push.returncode == 0
+            else:
+                log.info("Evolution remote sync off — committed to local master only")
 
             # Step 5: Restore stashed files
             _sp.run(["git", "stash", "pop"],
                     cwd=main_root, capture_output=True, timeout=10)
 
-            # Step 6: Clean up remote branch (if it was pushed earlier)
-            _sp.run(["git", "push", "origin", "--delete", branch],
-                    cwd=main_root, capture_output=True, timeout=15)
+            # Step 6: Clean up branches (remote delete only when sync enabled)
+            if get("evolution.git_remote_sync", False):
+                _sp.run(["git", "push", "origin", "--delete", branch],
+                        cwd=main_root, capture_output=True, timeout=15)
             _sp.run(["git", "branch", "-D", branch],
                     cwd=main_root, capture_output=True, timeout=15)
 
-            push_status = "pushed" if push.returncode == 0 else "local only (push failed)"
+            push_status = "pushed" if pushed else "local only"
             log.info("Deploy complete (%s): %s", push_status, commit_msg)
             return True, f"Deployed to local master ({push_status})"
 
@@ -619,8 +625,9 @@ class EvolutionEngine:
         try:
             _sp.run(["git", "reset", "--hard", tag_name],
                     cwd=str(project_root()), capture_output=True, timeout=15)
-            _sp.run(["git", "push", "origin", "private", "--force"],
-                    cwd=str(project_root()), capture_output=True, timeout=30)
+            if get("evolution.git_remote_sync", False):
+                _sp.run(["git", "push", "origin", "private", "--force"],
+                        cwd=str(project_root()), capture_output=True, timeout=30)
             log.warning("Auto-rolled back to tag %s: %s", tag_name, reason)
             self.memory.record_failure(
                 proposal.id, proposal.type.value if hasattr(proposal.type, 'value') else str(proposal.type),

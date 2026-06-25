@@ -537,6 +537,9 @@ async def _init_gossip(config: dict, core: dict, heartbeat_deps: dict) -> dict:
             if repo is None:
                 log.info("Evolution sync skipped: not running from a source checkout")
                 return
+            if not get("evolution.git_remote_sync", False):
+                log.info("Evolution remote sync disabled (evolution.git_remote_sync=false) — skipping auto-pull")
+                return
             try:
                 _sp.run(["git", "pull", "origin", "private"], cwd=str(repo), capture_output=True, timeout=30)
                 log.info("Auto-synced code from remote evolution")
@@ -1247,6 +1250,12 @@ def main_entry() -> None:
       2. This loop re-calls run()
       3. New run() loads checkpoint → restores state → continues
     """
+    # `anima init ...` subcommand (console-script path; `-m anima` routes via __main__)
+    if len(sys.argv) > 1 and sys.argv[1] == "init":
+        from anima.bootstrap import handle_init
+        handle_init(sys.argv[2:])
+        return
+
     restart_count = 0
     while True:
         try:

@@ -2,7 +2,7 @@
 
 > 本文件是"代码/状态分离"大重构的**单一事实源 + 跨机器交接说明**。
 > 换工作环境后,`git clone` 本仓库 → 读本文件即可接着干。
-> 最后更新:**Phase 1.5 全部完成(T6 wheel 打包 + A5 装机优雅禁用)**;本机灵魂实例已设为权威源(persona/feelings 以本机为准,见 §5)。
+> 最后更新:**Phase 2 完成(人格种子/实例劈分 + `anima init` + 进化只写 home)**;内核仓库现在只发布种子,活体灵魂已私有化(gitignore,见 §3/§5)。
 
 ---
 
@@ -63,6 +63,15 @@
 - `evolution/engine.py::submit_proposal` 首句守卫(返回 `disabled: not a source checkout`);`core/self_audit.py` 构造期置 `_enabled=False`、`run_tier` 返回 benign disabled(passed=True 不误报 issue);`spawn/packager.py::create_spawn_package` 抛清晰 `RuntimeError`;`dashboard/hub.py::_get_git_info` 与 `core/response_handler.py::_maybe_trigger_reload` 装机时短路返回空/跳过。
 - 低优先残留(装饰性/不触发,有意未改):`llm/prompt_compiler.py:938`、`memory/store.py:162`、`utils/path_safety.py:80`。
 - **A5 已通过**:强制 `source_tree()=None` 时三大特性均优雅禁用;源码模式 `pytest -q` 零回归(456 passed,1 个既有无关 scheduler 失败)。
+
+### ✅ Phase 2 — 数据外迁 + 人格种子/实例劈分
+内核仓库从此**只发布种子**,活体灵魂私有化、永不回流。
+- **种子/实例劈分**:新建 `agents/_seed`(identity / rules / examples / post_processing / config / manifest / soul + 出厂 persona 0.7 基线 + 空 feelings/growth/golden/lorebook)。`seed_agents_dir()` 指向它。
+- **`anima init [--home X] [--name N]`**(`anima/bootstrap.py`):建 `data/` 骨架 → 从种子复制出活体 `home/agents/<name>` → 写 `config.yaml` + `.env`(从 example)。幂等(不覆盖已有实例,除非 `--force`)。`python -m anima init` 与 `anima init`(console script)共用同一 `handle_init`。
+- **进化只动 home,不碰 git 跟踪代码**:活体实例(`agents/eva`,含 skills)+ 私有 data 残留(`env_catalog`/`issues/`/`user_profile.*.bak`)已 `git rm --cached` 并 gitignore(`/agents/*` + `!/agents/_seed/`),仍留磁盘 → 本机无缝运行;persona 自编辑写入 `agent_dir()`(已 gitignore),不再污染内核。
+- **远程 git 同步可禁用**:新增 `evolution.git_remote_sync`(默认 **off**),统一门控所有 push/pull origin(main.py 自动 pull、engine `_deploy_via_pr` push、`_auto_rollback` force-push)。顺手删除无人调用的 `Deployer.deploy/rollback/_git` 死路径(清理残余路线)。
+- **种子随 wheel 发布**:`setup.py` 把 `agents/_seed` 一并镜像进 `_resources`;`MANIFEST.in` 在 `prune agents` 后 `graft agents/_seed`(私有实例零泄漏)。
+- **验收已通过**:① 干净 venv 装 wheel(`source_tree()=None`)`anima init` 从打包种子建出可加载的 home(identity/rules/persona/lorebook 齐全);② sdist/wheel 无 `agents/eva`/doujin/`env_catalog`/`.bak`;③ `pytest -q` 零回归(456 passed)。
 
 ---
 
@@ -139,13 +148,11 @@ project_root()   -> Path            # 【已弃用 shim】= source_tree() or pac
 - 低优先残留(装饰性/不触发,有意未改):`llm/prompt_compiler.py:938`、`memory/store.py:162`、`utils/path_safety.py:80`。
 - 验收 A5 已通过:强制装机模式三大特性优雅禁用,源码模式 pytest 零回归。
 
-**至此 Phase 1.5 全部完成。** 下一步进入 Phase 2(数据外迁 + 人格种子/实例劈分)。
+**至此 Phase 1.5 与 Phase 2 全部完成**(详见 §3)。下一步:Phase 3(前端独立化)。
 
-### Phase 2 — 数据外迁 + 人格种子/实例劈分
-- 新增 `anima init [--home X]` 命令:生成 `$ANIMA_HOME` 骨架,把**人格种子**(`agents/_seed`,从现 `agents/eva` 提炼初始 identity/rules)复制成用户的活体 `agents/<name>`。`seed_agents_dir()` 解析器已就位。
-- 进化引擎改为**只写 `$ANIMA_HOME/agents/<name>`**,绝不碰已安装的内核代码;`evolution/engine.py` 的 `git pull origin private` 改可配置/可禁用。
-- 仓库内清理:`data/` 运行时残留、`agents/eva` 的实例态(留种子)。
-- 验收:`anima init` 后空 home 能跑;进化只动 home,不动 git 跟踪的代码。
+### ✅ Phase 2 — 数据外迁 + 人格种子/实例劈分(已完成,详见 §3)
+- `agents/_seed` 种子 + `anima init`(`anima/bootstrap.py`)+ `seed_agents_dir()` 已就位;活体实例与私有 data 已 untrack + gitignore;`evolution.git_remote_sync` 统一门控远程同步(默认 off);种子随 wheel 发布。
+- 小残留(非竞争路径,可后续处理):`core/event_routing.py` 的提示串仍硬编码 `agents/eva/...` —— 对默认 eva 实例在 dev/装机两模式下经 `workspace_root()` 都解析正确;多 agent 名时再模板化。
 
 ### Phase 3 — 前端独立化
 - 前端后端地址全部走 env:`eva-ui/.env.production`(`VITE_API_BASE`/`VITE_WS_BASE`)、`vite.config.ts:14-25` 代理目标、`src/api/client.ts:3`、`src/api/websocket.ts:24`。

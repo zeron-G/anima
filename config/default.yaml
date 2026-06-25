@@ -76,6 +76,13 @@ memory:
   summary_interval: 20      # Compress conversation every N messages
   keep_recent: 10            # Keep last N raw messages after compression
 
+# ── Evolution ──
+evolution:
+  # Push/pull evolution commits to/from `origin` (multi-node code propagation).
+  # Off by default: evolution stays LOCAL (commit + hot-reload), never touches a
+  # remote. Turn on only for a trusted multi-node mesh that shares one repo.
+  git_remote_sync: false
+
 # ── Emotion ──
 emotion:
   decay_rate: 0.05

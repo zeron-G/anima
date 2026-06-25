@@ -78,6 +78,9 @@ tests/             后端测试
 ## 运行方式
 
 ```bash
+# 首次使用：从人格种子初始化一个私有 home（data + 活体实例 + .env 模板）
+python -m anima init                 # 默认 home；或 --home <目录> 指定私有位置
+
 # 桌面应用
 python -m anima
 
