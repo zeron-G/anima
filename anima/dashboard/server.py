@@ -39,7 +39,7 @@ class DashboardServer:
                 port=int(voice_bridge_cfg.get("port", 9000)),
             )
 
-        # CORS middleware — allow Tauri (https://tauri.localhost) and dev server
+        # CORS middleware — allow dev server and cross-origin web clients
         @web.middleware
         async def cors_middleware(request, handler):
             if request.method == "OPTIONS":
@@ -63,7 +63,7 @@ class DashboardServer:
         self._app.router.add_post("/api/stt", self._handle_stt)
         self._app.router.add_get("/api/voice/{filename}", self._handle_voice_file)
 
-        # v1 API — structured RESTful endpoints for Vue SPA / Tauri / external clients
+        # v1 API — structured RESTful endpoints for Vue SPA / external clients
         from anima.api.router import APIRouter
         api = APIRouter(hub)
         api.register(self._app)

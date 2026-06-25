@@ -14,7 +14,7 @@ import { useEmotionStore } from '@/stores/emotionStore'
 
 type Mode = 'vrm' | 'live2d'
 
-// Backend base URL — needed for Tauri where frontend origin != backend origin
+// Backend base URL — needed when frontend origin != backend origin
 const API_BASE = import.meta.env.VITE_API_BASE || ''
 
 const emotion = useEmotionStore()

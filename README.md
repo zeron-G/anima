@@ -11,7 +11,7 @@ Instead of treating an agent as a single chat request, ANIMA treats it as a cont
 ANIMA includes several layers that work together:
 
 - A Python backend that runs the API, WebSocket streams, heartbeat loops, governance, memory, tools, and distributed-node services
-- A Vue frontend and Tauri desktop shell for the main operator-facing experience
+- A Vue frontend for the main operator-facing experience
 - A configuration system with committed profiles and local machine-specific overrides
 - A node network that supports discovery, delegation, remote deployment, and coordination between desktop, headless, and edge nodes
 - An embodied robotics layer that can connect ANIMA to PiDog-based robot endpoints
@@ -32,8 +32,8 @@ At a high level, ANIMA is organized like this:
 
 ```text
 Client Surfaces
-  - Tauri desktop app
   - Browser-based Vue interface
+  - Built-in pywebview desktop window
   - Terminal mode
   - Remote node and edge integrations
 
@@ -57,7 +57,6 @@ Embodiment and Deployment
 ```text
 anima/             Python backend and runtime modules
 eva-ui/            Vue frontend
-eva-desktop/       Tauri desktop shell
 config/            Default config and committed runtime profiles
 agents/            EVA identity, rules, and memory files
 docs/              Architecture and subsystem documents
@@ -90,11 +89,6 @@ python -m anima --terminal
 
 # Frontend development
 cd eva-ui
-npm install
-npm run dev
-
-# Desktop shell development
-cd eva-desktop
 npm install
 npm run dev
 ```
