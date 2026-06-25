@@ -15,7 +15,8 @@ from anima.utils.logging import get_logger
 
 log = get_logger("evolution.memory")
 
-MEMORY_FILE = data_dir() / "evolution_memory.yaml"
+def _memory_file():
+    return data_dir() / "evolution_memory.yaml"
 
 
 class EvolutionMemory:
@@ -29,10 +30,10 @@ class EvolutionMemory:
         self._load()
 
     def _load(self) -> None:
-        if not MEMORY_FILE.exists():
+        if not _memory_file().exists():
             return
         try:
-            with open(MEMORY_FILE, "r", encoding="utf-8") as f:
+            with open(_memory_file(), "r", encoding="utf-8") as f:
                 data = yaml.safe_load(f) or {}
             self.successes = data.get("successes", [])
             self.failures = data.get("failures", [])
@@ -51,8 +52,8 @@ class EvolutionMemory:
                 "anti_patterns": self.anti_patterns,
                 "goals": self.goals,
             }
-            MEMORY_FILE.parent.mkdir(parents=True, exist_ok=True)
-            with open(MEMORY_FILE, "w", encoding="utf-8") as f:
+            _memory_file().parent.mkdir(parents=True, exist_ok=True)
+            with open(_memory_file(), "w", encoding="utf-8") as f:
                 yaml.dump(data, f, allow_unicode=True, default_flow_style=False)
         except Exception as e:
             log.error("Failed to save evolution memory: %s", e)

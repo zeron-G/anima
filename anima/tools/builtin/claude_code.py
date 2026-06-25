@@ -14,7 +14,7 @@ import asyncio
 import os
 import subprocess
 
-from anima.config import project_root
+from anima.config import workspace_root
 from anima.models.tool_spec import ToolSpec, RiskLevel
 from anima.utils.logging import get_logger
 
@@ -26,7 +26,7 @@ CLAUDE_TIMEOUT_S = 300
 def _run_sync(prompt: str, working_directory: str = "", timeout: int = 120,
               max_budget: float = 2.0, max_turns: int = 15) -> dict:
     """Run Claude Code CLI synchronously (called in thread)."""
-    cwd = working_directory or str(project_root())
+    cwd = working_directory or str(workspace_root())
 
     cmd = [
         "claude",
@@ -71,7 +71,7 @@ async def _claude_code(prompt: str, working_directory: str = "", timeout: int = 
 
 async def _self_repair(error_description: str, max_budget: float = 1.5) -> dict:
     """Invoke Claude Code to repair your own code."""
-    root = str(project_root())
+    root = str(workspace_root())
     full_prompt = f"""You are being invoked by Eva (ANIMA's AI agent) to fix an issue in her own codebase.
 
 Project: ANIMA — a heartbeat-driven autonomous AI agent system

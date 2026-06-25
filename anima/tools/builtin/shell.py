@@ -37,8 +37,8 @@ def _run_shell_sync(command: str, timeout: int = 30, working_directory: str | No
     if working_directory:
         cwd = os.path.expandvars(os.path.expanduser(working_directory))
     else:
-        from anima.config import project_root
-        cwd = str(project_root())
+        from anima.config import workspace_root
+        cwd = str(workspace_root())
         if not os.path.isdir(cwd):
             return {
                 "returncode": -1,

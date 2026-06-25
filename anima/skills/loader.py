@@ -11,7 +11,7 @@ import subprocess
 from enum import Enum
 from pathlib import Path
 
-from anima.config import project_root
+from anima.config import skills_dir
 from anima.models.tool_spec import ToolSpec, RiskLevel
 from anima.utils.logging import get_logger
 
@@ -45,7 +45,7 @@ class SkillLoader:
 
     def __init__(self):
         self._skills: dict[str, SkillMeta] = {}
-        self._default_dir = project_root() / "skills"
+        self._default_dir = skills_dir()
         self._skill_dirs = [
             self._default_dir,           # ANIMA native
         ]

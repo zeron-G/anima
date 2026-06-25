@@ -11,19 +11,17 @@ from typing import Any
 
 import yaml
 
-from anima.config import project_root
+from anima.config import config_dir
 from anima.utils.logging import get_logger
 
 log = get_logger("tool_selector")
-
-_DEFAULT_PATH = project_root() / "config" / "tool_selection.yaml"
 
 
 class ToolSelector:
     """Select tool subsets based on event type and axis."""
 
     def __init__(self, config_path: Path | None = None) -> None:
-        self._path = config_path or _DEFAULT_PATH
+        self._path = config_path or (config_dir() / "tool_selection.yaml")
         self._config: dict[str, Any] = {}
         self._load()
 

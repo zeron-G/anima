@@ -23,7 +23,7 @@ if sys.platform == "win32":
                 pass  # Logger not initialized yet; reconfigure is best-effort
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
-from anima.config import load_config, get, agent_dir
+from anima.config import load_config, get, agent_dir, db_path
 from anima.utils.logging import setup_logging, get_logger
 
 log = get_logger("main")
@@ -67,7 +67,7 @@ async def _init_core(config: dict) -> dict:
     )
     diff_engine = DiffEngine.from_config(get("diff_rules", {}))
     working_memory = WorkingMemory(capacity=get("memory.working_capacity", 20))
-    memory_store = await MemoryStore.create(get("memory.db_path", "data/anima.db"))
+    memory_store = await MemoryStore.create(str(db_path()))
     emotion_state = EmotionState(baseline=get("emotion.baseline", {}))
 
     tool_registry = ToolRegistry()
@@ -532,12 +532,16 @@ async def _init_gossip(config: dict, core: dict, heartbeat_deps: dict) -> dict:
             log.info("Remote evolution deployed: %s (%s)", title, commit_hash[:8] if commit_hash else "?")
             # Auto git pull + hot-reload
             import subprocess as _sp
-            from anima.config import project_root
+            from anima.config import source_tree
+            repo = source_tree()
+            if repo is None:
+                log.info("Evolution sync skipped: not running from a source checkout")
+                return
             try:
-                _sp.run(["git", "pull", "origin", "private"], cwd=str(project_root()), capture_output=True, timeout=30)
+                _sp.run(["git", "pull", "origin", "private"], cwd=str(repo), capture_output=True, timeout=30)
                 log.info("Auto-synced code from remote evolution")
                 # Check if .py files changed — trigger reload
-                diff = _sp.run(["git", "diff", "HEAD~1", "--name-only"], cwd=str(project_root()), capture_output=True, text=True)
+                diff = _sp.run(["git", "diff", "HEAD~1", "--name-only"], cwd=str(repo), capture_output=True, text=True)
                 if diff.stdout and any(f.endswith(".py") for f in diff.stdout.strip().split("\n")):
                     with _cognitive_lock:
                         _cog = _cognitive_ref.get("cognitive")

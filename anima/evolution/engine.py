@@ -18,7 +18,7 @@ import re
 import subprocess as _sp
 import time
 
-from anima.config import project_root
+from anima.config import project_root, data_dir
 from anima.evolution.proposal import Proposal, ProposalQueue, ProposalStatus
 from anima.evolution.consensus import ConsensusEngine
 from anima.evolution.sandbox import Worktree, TestRunner
@@ -637,7 +637,7 @@ class EvolutionEngine:
             "timestamp": time.time(),
         }
         try:
-            log_path = os.path.join(str(project_root()), "data", "logs", "evolution_failures.jsonl")
+            log_path = os.path.join(str(data_dir()), "logs", "evolution_failures.jsonl")
             os.makedirs(os.path.dirname(log_path), exist_ok=True)
             with open(log_path, "a", encoding="utf-8") as f:
                 f.write(json.dumps(self._last_failure) + "\n")

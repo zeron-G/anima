@@ -27,7 +27,8 @@ from anima.voice.tts import _clean_text
 
 log = get_logger("voice.bridge")
 
-VOICE_CACHE_DIR = data_dir() / "voice" / "bridge_mp3"
+def _voice_cache_dir():
+    return data_dir() / "voice" / "bridge_mp3"
 
 
 async def synthesize_mp3(
@@ -49,7 +50,7 @@ async def synthesize_mp3(
     pitch = str(voice_cfg.get("pitch", "+5Hz"))
 
     cache_key = hashlib.md5(f"{voice}|{rate}|{pitch}|{clean}".encode("utf-8")).hexdigest()[:16]
-    cache_path = VOICE_CACHE_DIR / f"{cache_key}.mp3"
+    cache_path = _voice_cache_dir() / f"{cache_key}.mp3"
 
     if use_cache and cache_path.exists():
         return cache_path.read_bytes()

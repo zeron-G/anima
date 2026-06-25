@@ -19,8 +19,12 @@ from anima.utils.logging import get_logger
 
 log = get_logger("voice.tts")
 
-VOICE_DIR = data_dir() / "voice"
-REF_VOICE = data_dir() / "voice" / "eva_reference_voice.wav"
+def _voice_dir():
+    return data_dir() / "voice"
+
+
+def _ref_voice():
+    return data_dir() / "voice" / "eva_reference_voice.wav"
 DEFAULT_MODEL_ID = "Qwen/Qwen3-TTS-12Hz-1.7B-Base"  # Base model for voice clone
 
 _model: Any = None
@@ -73,9 +77,9 @@ def _load_model() -> Any:
             _model = model
 
             # Pre-build voice clone prompt from reference audio (cached for reuse)
-            ref_path = str(REF_VOICE)
-            if REF_VOICE.exists():
-                log.info("Building voice clone prompt from %s", REF_VOICE.name)
+            ref_path = str(_ref_voice())
+            if _ref_voice().exists():
+                log.info("Building voice clone prompt from %s", _ref_voice().name)
                 _voice_prompt = model.create_voice_clone_prompt(
                     ref_audio=ref_path,
                     x_vector_only_mode=True,  # Speaker embedding only, faster
@@ -127,7 +131,7 @@ def _synthesize_sync(clean: str, out_path: Path) -> bool:
                 wavs, sr = model.generate_voice_clone(
                     text=clean,
                     language=language,
-                    ref_audio=str(REF_VOICE) if REF_VOICE.exists() else None,
+                    ref_audio=str(_ref_voice()) if _ref_voice().exists() else None,
                     x_vector_only_mode=True,
                 )
 
@@ -160,8 +164,8 @@ async def synthesize(
         clean = clean[:500]
 
     cache_key = hashlib.md5(clean.encode()).hexdigest()[:12]
-    VOICE_DIR.mkdir(parents=True, exist_ok=True)
-    out_path = VOICE_DIR / f"tts_{cache_key}.wav"
+    _voice_dir().mkdir(parents=True, exist_ok=True)
+    out_path = _voice_dir() / f"tts_{cache_key}.wav"
 
     if out_path.exists():
         return out_path
@@ -183,10 +187,10 @@ async def synthesize(
 
 def cleanup_cache(max_files: int = 100) -> None:
     """Remove old TTS cache files (keeps reference voice)."""
-    if not VOICE_DIR.exists():
+    if not _voice_dir().exists():
         return
     files = sorted(
-        [f for f in VOICE_DIR.glob("tts_*.*") if f.name != "eva_reference_voice.wav"],
+        [f for f in _voice_dir().glob("tts_*.*") if f.name != "eva_reference_voice.wav"],
         key=lambda f: f.stat().st_mtime,
     )
     if len(files) > max_files:

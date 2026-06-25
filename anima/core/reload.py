@@ -27,7 +27,8 @@ from anima.utils.logging import get_logger
 
 log = get_logger("reload")
 
-CHECKPOINT_PATH = data_dir() / "restart_checkpoint.json"
+def _checkpoint_path():
+    return data_dir() / "restart_checkpoint.json"
 
 
 class ReloadManager:
@@ -70,8 +71,8 @@ class ReloadManager:
             "evolution_title": evolution_title,
         }
 
-        CHECKPOINT_PATH.parent.mkdir(parents=True, exist_ok=True)
-        CHECKPOINT_PATH.write_text(
+        _checkpoint_path().parent.mkdir(parents=True, exist_ok=True)
+        _checkpoint_path().write_text(
             json.dumps(checkpoint, indent=2, ensure_ascii=False),
             encoding="utf-8",
         )
@@ -83,16 +84,16 @@ class ReloadManager:
     @staticmethod
     def has_checkpoint() -> bool:
         """Check if a restart checkpoint exists."""
-        return CHECKPOINT_PATH.exists()
+        return _checkpoint_path().exists()
 
     @staticmethod
     def load_checkpoint() -> dict | None:
         """Load and consume the checkpoint (deletes file after reading)."""
-        if not CHECKPOINT_PATH.exists():
+        if not _checkpoint_path().exists():
             return None
         try:
-            data = json.loads(CHECKPOINT_PATH.read_text(encoding="utf-8"))
-            CHECKPOINT_PATH.unlink()
+            data = json.loads(_checkpoint_path().read_text(encoding="utf-8"))
+            _checkpoint_path().unlink()
             age = time.time() - data.get("timestamp", 0)
             if age > 300:  # Stale checkpoint (> 5 min) — discard
                 log.warning("Discarding stale checkpoint (%.0fs old)", age)
@@ -102,7 +103,7 @@ class ReloadManager:
         except Exception as e:
             log.error("Failed to load checkpoint: %s", e)
             try:
-                CHECKPOINT_PATH.unlink()
+                _checkpoint_path().unlink()
             except Exception as e2:
                 log.warning("Failed to delete corrupt checkpoint file: %s", e2)
             return None
@@ -111,7 +112,7 @@ class ReloadManager:
     def clear_checkpoint() -> None:
         """Remove checkpoint file if it exists."""
         try:
-            if CHECKPOINT_PATH.exists():
-                CHECKPOINT_PATH.unlink()
+            if _checkpoint_path().exists():
+                _checkpoint_path().unlink()
         except Exception as e:
             log.warning("Checkpoint file cleanup failed: %s", e)

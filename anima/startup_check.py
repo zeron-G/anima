@@ -132,14 +132,13 @@ def _check_semantic_search(issues: list) -> None:
 
 def _check_required_files(issues: list) -> None:
     """Check for required agent configuration files."""
-    from anima.config import project_root, agent_dir
+    from anima.config import config_dir, agent_dir
 
-    root = project_root()
     agent = agent_dir()
 
     required = [
         (agent / "identity" / "core.md", "Agent identity file"),
-        (root / "config" / "default.yaml", "Default configuration"),
+        (config_dir() / "default.yaml", "Default configuration"),
     ]
 
     for path, desc in required:
@@ -158,13 +157,9 @@ def _check_required_files(issues: list) -> None:
 
 def _check_database(issues: list, config: dict | None) -> None:
     """Check database accessibility."""
-    from anima.config import project_root
+    from anima.config import db_path as resolve_db_path
 
-    db_path = "data/anima.db"
-    if config:
-        db_path = config.get("memory", {}).get("db_path", db_path)
-
-    resolved = project_root() / db_path
+    resolved = resolve_db_path()
     if resolved.exists():
         # Quick integrity check
         try:

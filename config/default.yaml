@@ -72,7 +72,7 @@ decision:
 # ── Memory ──
 memory:
   working_capacity: 20
-  db_path: "data/anima.db"
+  db_path: ""              # blank → <ANIMA_HOME>/data/anima.db (relative paths resolve under the data dir; absolute paths used as-is)
   summary_interval: 20      # Compress conversation every N messages
   keep_recent: 10            # Keep last N raw messages after compression
 

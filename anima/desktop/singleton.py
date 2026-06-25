@@ -14,7 +14,8 @@ from anima.utils.logging import get_logger
 
 log = get_logger("singleton")
 
-LOCK_FILE = data_dir() / "anima.lock"
+def _lock_file():
+    return data_dir() / "anima.lock"
 
 
 def acquire_lock(*, experimental: bool = False) -> bool:
@@ -27,12 +28,12 @@ def acquire_lock(*, experimental: bool = False) -> bool:
         log.info("Experimental mode — singleton lock bypassed")
         return True
 
-    LOCK_FILE.parent.mkdir(parents=True, exist_ok=True)
+    _lock_file().parent.mkdir(parents=True, exist_ok=True)
 
     # Check if another instance is running
-    if LOCK_FILE.exists():
+    if _lock_file().exists():
         try:
-            old_pid = int(LOCK_FILE.read_text().strip())
+            old_pid = int(_lock_file().read_text().strip())
             if _is_process_alive(old_pid):
                 log.warning("ANIMA already running (PID %d). Use --experimental to bypass.", old_pid)
                 return False
@@ -43,7 +44,7 @@ def acquire_lock(*, experimental: bool = False) -> bool:
 
     # Write our PID
     try:
-        LOCK_FILE.write_text(str(os.getpid()))
+        _lock_file().write_text(str(os.getpid()))
         log.info("Singleton lock acquired (PID %d)", os.getpid())
         return True
     except OSError as e:
@@ -54,14 +55,14 @@ def acquire_lock(*, experimental: bool = False) -> bool:
 def release_lock() -> None:
     """Release the singleton lock."""
     try:
-        if LOCK_FILE.exists():
-            pid = int(LOCK_FILE.read_text().strip())
+        if _lock_file().exists():
+            pid = int(_lock_file().read_text().strip())
             if pid == os.getpid():
-                LOCK_FILE.unlink()
+                _lock_file().unlink()
                 log.info("Singleton lock released")
     except (ValueError, OSError):
         try:
-            LOCK_FILE.unlink(missing_ok=True)
+            _lock_file().unlink(missing_ok=True)
         except OSError as e:
             log.debug("release_lock: %s", e)
 
@@ -71,11 +72,11 @@ def kill_existing() -> bool:
 
     Returns True if a process was killed.
     """
-    if not LOCK_FILE.exists():
+    if not _lock_file().exists():
         return False
 
     try:
-        old_pid = int(LOCK_FILE.read_text().strip())
+        old_pid = int(_lock_file().read_text().strip())
         if _is_process_alive(old_pid) and old_pid != os.getpid():
             import signal
             try:

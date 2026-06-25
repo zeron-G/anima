@@ -8,7 +8,7 @@ from pathlib import Path
 
 from aiohttp import web, WSMsgType
 
-from anima.config import get, project_root
+from anima.config import get, data_dir
 from anima.dashboard.hub import DashboardHub
 from anima.models.event import Event, EventType, EventPriority
 from anima.utils.logging import get_logger
@@ -178,7 +178,7 @@ class DashboardServer:
         """Handle file upload via multipart form data."""
         if not self._check_auth(request):
             return web.json_response({"error": "unauthorized"}, status=401)
-        uploads_dir = project_root() / "data" / "uploads"
+        uploads_dir = data_dir() / "uploads"
         uploads_dir.mkdir(parents=True, exist_ok=True)
 
         reader = await request.multipart()
@@ -221,7 +221,7 @@ class DashboardServer:
         """List files in the uploads directory."""
         if not self._check_auth(request):
             return web.json_response({"error": "unauthorized"}, status=401)
-        uploads_dir = project_root() / "data" / "uploads"
+        uploads_dir = data_dir() / "uploads"
         if not uploads_dir.exists():
             return web.json_response({"files": []})
         files = []

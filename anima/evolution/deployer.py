@@ -10,7 +10,7 @@ import asyncio
 import re
 import subprocess
 
-from anima.config import project_root
+from anima.config import project_root, data_dir
 from anima.evolution.proposal import Proposal, ProposalStatus
 from anima.evolution.memory import EvolutionMemory
 from anima.utils.logging import get_logger
@@ -114,7 +114,7 @@ class Deployer:
         log.info("Verifying deployment (%ds)...", VERIFY_TIMEOUT_S)
         await asyncio.sleep(VERIFY_TIMEOUT_S)
 
-        log_file = project_root() / "data" / "logs" / "anima.log"
+        log_file = data_dir() / "logs" / "anima.log"
         if not log_file.exists():
             return False, "No log file"
         try:
