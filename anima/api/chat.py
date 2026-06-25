@@ -6,7 +6,6 @@ import asyncio
 
 from aiohttp import web
 
-from anima.api.auth import check_auth
 from anima.api.context import get_hub
 from anima.models.event import Event, EventType, EventPriority
 from anima.utils.ids import gen_id
@@ -25,8 +24,6 @@ async def send(request: web.Request) -> web.Response:
         return web.json_response({"error": str(e)}, status=500)
 
 async def _send_impl(request: web.Request) -> web.Response:
-    if not check_auth(request):
-        return web.json_response({"error": "unauthorized"}, status=401)
     hub = get_hub(request)
     try:
         data = await request.json()
@@ -62,8 +59,6 @@ async def _send_impl(request: web.Request) -> web.Response:
 
 async def stream(request: web.Request) -> web.StreamResponse:
     """POST /v1/chat/stream — SSE streaming response."""
-    if not check_auth(request):
-        return web.json_response({"error": "unauthorized"}, status=401)
     hub = get_hub(request)
     try:
         data = await request.json()
@@ -115,8 +110,6 @@ async def stream(request: web.Request) -> web.StreamResponse:
 
 async def history(request: web.Request) -> web.Response:
     """GET /v1/chat/history — chat history with pagination."""
-    if not check_auth(request):
-        return web.json_response({"error": "unauthorized"}, status=401)
     hub = get_hub(request)
 
     page = int(request.query.get("page", "1"))
@@ -142,8 +135,6 @@ async def history(request: web.Request) -> web.Response:
 
 async def sessions(request: web.Request) -> web.Response:
     """GET /v1/chat/sessions — list sessions."""
-    if not check_auth(request):
-        return web.json_response({"error": "unauthorized"}, status=401)
     hub = get_hub(request)
     if hub.session_manager:
         return web.json_response({"sessions": hub.session_manager.list_sessions()})
@@ -152,8 +143,6 @@ async def sessions(request: web.Request) -> web.Response:
 
 async def golden(request: web.Request) -> web.Response:
     """POST /v1/chat/golden — mark a reply as golden."""
-    if not check_auth(request):
-        return web.json_response({"error": "unauthorized"}, status=401)
     try:
         data = await request.json()
     except Exception:

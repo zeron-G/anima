@@ -8,7 +8,6 @@ from pathlib import Path
 
 from aiohttp import web
 
-from anima.api.auth import check_auth
 from anima.api.context import get_hub
 from anima.config import agent_dir, data_dir
 from anima.utils.logging import get_logger
@@ -18,16 +17,12 @@ log = get_logger("api.soulscape")
 
 async def emotion(request: web.Request) -> web.Response:
     """GET /v1/soulscape/emotion — current emotion state."""
-    if not check_auth(request):
-        return web.json_response({"error": "unauthorized"}, status=401)
     hub = get_hub(request)
     return web.json_response(hub.emotion_state.to_dict())
 
 
 async def persona(request: web.Request) -> web.Response:
     """GET /v1/soulscape/persona — persona_state.yaml values."""
-    if not check_auth(request):
-        return web.json_response({"error": "unauthorized"}, status=401)
     import yaml
     path = agent_dir() / "memory" / "persona_state.yaml"
     if not path.exists():
@@ -41,8 +36,6 @@ async def persona(request: web.Request) -> web.Response:
 
 async def update_persona(request: web.Request) -> web.Response:
     """PUT /v1/soulscape/persona — update persona_state values."""
-    if not check_auth(request):
-        return web.json_response({"error": "unauthorized"}, status=401)
     import yaml
     try:
         updates = await request.json()
@@ -65,8 +58,6 @@ async def update_persona(request: web.Request) -> web.Response:
 
 async def personality(request: web.Request) -> web.Response:
     """GET /v1/soulscape/personality — personality.md content."""
-    if not check_auth(request):
-        return web.json_response({"error": "unauthorized"}, status=401)
     path = agent_dir() / "identity" / "personality.md"
     content = path.read_text(encoding="utf-8") if path.exists() else ""
     return web.json_response({"content": content})
@@ -74,8 +65,6 @@ async def personality(request: web.Request) -> web.Response:
 
 async def update_personality(request: web.Request) -> web.Response:
     """PUT /v1/soulscape/personality — update personality.md."""
-    if not check_auth(request):
-        return web.json_response({"error": "unauthorized"}, status=401)
     try:
         data = await request.json()
     except Exception:
@@ -103,8 +92,6 @@ async def update_personality(request: web.Request) -> web.Response:
 
 async def relationship(request: web.Request) -> web.Response:
     """GET /v1/soulscape/relationship — relationship.md content."""
-    if not check_auth(request):
-        return web.json_response({"error": "unauthorized"}, status=401)
     path = agent_dir() / "identity" / "relationship.md"
     content = path.read_text(encoding="utf-8") if path.exists() else ""
     return web.json_response({"content": content})
@@ -112,8 +99,6 @@ async def relationship(request: web.Request) -> web.Response:
 
 async def update_relationship(request: web.Request) -> web.Response:
     """PUT /v1/soulscape/relationship — update relationship.md."""
-    if not check_auth(request):
-        return web.json_response({"error": "unauthorized"}, status=401)
     try:
         data = await request.json()
     except Exception:
@@ -135,8 +120,6 @@ async def update_relationship(request: web.Request) -> web.Response:
 
 async def growth_log(request: web.Request) -> web.Response:
     """GET /v1/soulscape/growth-log — growth log entries."""
-    if not check_auth(request):
-        return web.json_response({"error": "unauthorized"}, status=401)
     path = agent_dir() / "memory" / "growth_log.md"
     content = path.read_text(encoding="utf-8") if path.exists() else ""
     return web.json_response({"content": content})
@@ -144,8 +127,6 @@ async def growth_log(request: web.Request) -> web.Response:
 
 async def golden_replies(request: web.Request) -> web.Response:
     """GET /v1/soulscape/golden-replies — golden replies list."""
-    if not check_auth(request):
-        return web.json_response({"error": "unauthorized"}, status=401)
     path = agent_dir() / "memory" / "golden_replies.jsonl"
     entries = []
     if path.exists():
@@ -160,8 +141,6 @@ async def golden_replies(request: web.Request) -> web.Response:
 
 async def delete_golden_reply(request: web.Request) -> web.Response:
     """DELETE /v1/soulscape/golden-replies/:id"""
-    if not check_auth(request):
-        return web.json_response({"error": "unauthorized"}, status=401)
     reply_id = request.match_info.get("id", "")
     path = agent_dir() / "memory" / "golden_replies.jsonl"
     if not path.exists():
@@ -184,8 +163,6 @@ async def delete_golden_reply(request: web.Request) -> web.Response:
 
 async def style_rules(request: web.Request) -> web.Response:
     """GET /v1/soulscape/style-rules — style.md content."""
-    if not check_auth(request):
-        return web.json_response({"error": "unauthorized"}, status=401)
     path = agent_dir() / "rules" / "style.md"
     content = path.read_text(encoding="utf-8") if path.exists() else ""
     return web.json_response({"content": content})
@@ -193,8 +170,6 @@ async def style_rules(request: web.Request) -> web.Response:
 
 async def update_style_rules(request: web.Request) -> web.Response:
     """PUT /v1/soulscape/style-rules."""
-    if not check_auth(request):
-        return web.json_response({"error": "unauthorized"}, status=401)
     try:
         data = await request.json()
     except Exception:
@@ -206,8 +181,6 @@ async def update_style_rules(request: web.Request) -> web.Response:
 
 async def boundaries(request: web.Request) -> web.Response:
     """GET /v1/soulscape/boundaries."""
-    if not check_auth(request):
-        return web.json_response({"error": "unauthorized"}, status=401)
     path = agent_dir() / "rules" / "boundaries.md"
     content = path.read_text(encoding="utf-8") if path.exists() else ""
     return web.json_response({"content": content})
@@ -215,8 +188,6 @@ async def boundaries(request: web.Request) -> web.Response:
 
 async def drift(request: web.Request) -> web.Response:
     """GET /v1/soulscape/drift — recent drift scores."""
-    if not check_auth(request):
-        return web.json_response({"error": "unauthorized"}, status=401)
     limit = int(request.query.get("limit", "50"))
     path = data_dir() / "logs" / "drift.jsonl"
     entries = []

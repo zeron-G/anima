@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from aiohttp import web
 
-from anima.api.auth import check_auth
 from anima.api.context import get_hub
 from anima.utils.logging import get_logger
 
@@ -13,8 +12,6 @@ log = get_logger("api.memory")
 
 async def search(request: web.Request) -> web.Response:
     """GET /v1/memory/search?q=&limit=&type="""
-    if not check_auth(request):
-        return web.json_response({"error": "unauthorized"}, status=401)
     hub = get_hub(request)
     query = request.query.get("q", "")
     limit = min(int(request.query.get("limit", "10")), 50)
@@ -37,8 +34,6 @@ async def search(request: web.Request) -> web.Response:
 
 async def recent(request: web.Request) -> web.Response:
     """GET /v1/memory/recent?limit=&type="""
-    if not check_auth(request):
-        return web.json_response({"error": "unauthorized"}, status=401)
     hub = get_hub(request)
     limit = min(int(request.query.get("limit", "10")), 50)
     mem_type = request.query.get("type", None)
@@ -57,8 +52,6 @@ async def recent(request: web.Request) -> web.Response:
 
 async def stats(request: web.Request) -> web.Response:
     """GET /v1/memory/stats — memory statistics."""
-    if not check_auth(request):
-        return web.json_response({"error": "unauthorized"}, status=401)
     hub = get_hub(request)
 
     import asyncio
@@ -81,8 +74,6 @@ async def stats(request: web.Request) -> web.Response:
 
 async def documents(request: web.Request) -> web.Response:
     """GET /v1/memory/documents — document list."""
-    if not check_auth(request):
-        return web.json_response({"error": "unauthorized"}, status=401)
 
     from anima.tools.builtin.document_tools import _document_store
     if not _document_store:
@@ -95,8 +86,6 @@ async def documents(request: web.Request) -> web.Response:
 
 async def import_document(request: web.Request) -> web.Response:
     """POST /v1/memory/documents/import."""
-    if not check_auth(request):
-        return web.json_response({"error": "unauthorized"}, status=401)
     try:
         data = await request.json()
     except Exception:
@@ -115,8 +104,6 @@ async def import_document(request: web.Request) -> web.Response:
 
 async def search_documents(request: web.Request) -> web.Response:
     """GET /v1/memory/documents/search?q="""
-    if not check_auth(request):
-        return web.json_response({"error": "unauthorized"}, status=401)
     query = request.query.get("q", "")
     if not query:
         return web.json_response({"error": "q required"}, status=400)
@@ -131,8 +118,6 @@ async def search_documents(request: web.Request) -> web.Response:
 
 async def delete_document(request: web.Request) -> web.Response:
     """DELETE /v1/memory/documents/:id"""
-    if not check_auth(request):
-        return web.json_response({"error": "unauthorized"}, status=401)
     doc_id = request.match_info.get("id", "")
 
     from anima.tools.builtin.document_tools import _document_store

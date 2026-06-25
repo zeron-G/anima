@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from aiohttp import web
 
-from anima.api import auth, chat, soulscape, evolution, memory, network, robotics, settings
+from anima.api import auth, chat, health, soulscape, evolution, memory, network, robotics, settings
 from anima.api.context import HUB_APP_KEY
 from anima.utils.logging import get_logger
 
@@ -22,7 +22,13 @@ class APIRouter:
         # Store hub reference for handlers
         app[HUB_APP_KEY] = self._hub
 
-        # Auth (no auth check needed for login itself)
+        # Public (no auth) — liveness + version for probes / split-frontend boot.
+        # These three paths are the auth middleware's PUBLIC_PATHS allowlist.
+        app.router.add_get("/v1/health", health.health)
+        app.router.add_get("/v1/version", health.version)
+
+        # Auth (login itself is public; everything else below is gated centrally
+        # by the auth middleware in DashboardServer — handlers no longer self-check)
         app.router.add_post("/v1/auth/login", auth.handle_login)
         app.router.add_post("/v1/auth/change-password", auth.handle_change_password)
 

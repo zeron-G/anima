@@ -11,7 +11,6 @@ from urllib.parse import urlparse
 import aiohttp
 from aiohttp import web
 
-from anima.api.auth import check_auth
 from anima.api.context import get_hub
 from anima.robotics.nlp_supervisor import match_pidog_command_text
 from anima.utils.logging import get_logger
@@ -465,8 +464,6 @@ async def _chat_direct_robot_node(robot: dict, message: str, timeout: float) -> 
 
 async def nodes(request: web.Request) -> web.Response:
     """GET /v1/network/nodes — node list with topology and chat metadata."""
-    if not check_auth(request):
-        return web.json_response({"error": "unauthorized"}, status=401)
     hub = get_hub(request)
     if not hub.gossip_mesh:
         return web.json_response({"enabled": False, "nodes": []})
@@ -500,8 +497,6 @@ async def nodes(request: web.Request) -> web.Response:
 
 async def channels(request: web.Request) -> web.Response:
     """GET /v1/network/channels — channel status list."""
-    if not check_auth(request):
-        return web.json_response({"error": "unauthorized"}, status=401)
     hub = get_hub(request)
 
     channel_list = []
@@ -518,8 +513,6 @@ async def channels(request: web.Request) -> web.Response:
 
 async def conversation(request: web.Request) -> web.Response:
     """GET /v1/network/nodes/{node_id}/conversation — remote chat history."""
-    if not check_auth(request):
-        return web.json_response({"error": "unauthorized"}, status=401)
     hub = get_hub(request)
     _, get_fn = _conversation_hub_methods(hub)
 
@@ -533,8 +526,6 @@ async def conversation(request: web.Request) -> web.Response:
 
 async def chat_node(request: web.Request) -> web.Response:
     """POST /v1/network/nodes/{node_id}/chat — send a message to a remote EVA."""
-    if not check_auth(request):
-        return web.json_response({"error": "unauthorized"}, status=401)
     hub = get_hub(request)
     add_fn, get_fn = _conversation_hub_methods(hub)
     task_delegate = getattr(hub, "task_delegate", None)

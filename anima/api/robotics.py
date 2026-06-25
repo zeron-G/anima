@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from aiohttp import web
 
-from anima.api.auth import check_auth
 from anima.api.context import get_hub
 from anima.utils.logging import get_logger
 
@@ -21,8 +20,6 @@ def _get_manager(request: web.Request):
 
 async def nodes(request: web.Request) -> web.Response:
     """GET /v1/robotics/nodes — list configured robot dog nodes."""
-    if not check_auth(request):
-        return web.json_response({"error": "unauthorized"}, status=401)
     manager = _get_manager(request)
     if request.query.get("refresh", "1") != "0":
         await manager.refresh_all()
@@ -31,8 +28,6 @@ async def nodes(request: web.Request) -> web.Response:
 
 async def node_detail(request: web.Request) -> web.Response:
     """GET /v1/robotics/nodes/{node_id} — single node detail."""
-    if not check_auth(request):
-        return web.json_response({"error": "unauthorized"}, status=401)
     manager = _get_manager(request)
     node_id = request.match_info["node_id"]
     if request.query.get("refresh", "1") != "0":
@@ -44,8 +39,6 @@ async def node_detail(request: web.Request) -> web.Response:
 
 async def command(request: web.Request) -> web.Response:
     """POST /v1/robotics/nodes/{node_id}/command — structured command."""
-    if not check_auth(request):
-        return web.json_response({"error": "unauthorized"}, status=401)
     manager = _get_manager(request)
     node_id = request.match_info["node_id"]
     data = await request.json()
@@ -59,8 +52,6 @@ async def command(request: web.Request) -> web.Response:
 
 async def nlp(request: web.Request) -> web.Response:
     """POST /v1/robotics/nodes/{node_id}/nlp — natural language command."""
-    if not check_auth(request):
-        return web.json_response({"error": "unauthorized"}, status=401)
     manager = _get_manager(request)
     node_id = request.match_info["node_id"]
     data = await request.json()
@@ -70,8 +61,6 @@ async def nlp(request: web.Request) -> web.Response:
 
 async def speak(request: web.Request) -> web.Response:
     """POST /v1/robotics/nodes/{node_id}/speak — TTS on robot."""
-    if not check_auth(request):
-        return web.json_response({"error": "unauthorized"}, status=401)
     manager = _get_manager(request)
     node_id = request.match_info["node_id"]
     data = await request.json()
@@ -85,8 +74,6 @@ async def speak(request: web.Request) -> web.Response:
 
 async def start_exploration(request: web.Request) -> web.Response:
     """POST /v1/robotics/nodes/{node_id}/exploration/start."""
-    if not check_auth(request):
-        return web.json_response({"error": "unauthorized"}, status=401)
     manager = _get_manager(request)
     node_id = request.match_info["node_id"]
     data = await request.json() if request.can_read_body else {}
@@ -100,8 +87,6 @@ async def start_exploration(request: web.Request) -> web.Response:
 
 async def stop_exploration(request: web.Request) -> web.Response:
     """POST /v1/robotics/nodes/{node_id}/exploration/stop."""
-    if not check_auth(request):
-        return web.json_response({"error": "unauthorized"}, status=401)
     manager = _get_manager(request)
     node_id = request.match_info["node_id"]
     data = await request.json() if request.can_read_body else {}
@@ -111,8 +96,6 @@ async def stop_exploration(request: web.Request) -> web.Response:
 
 async def refresh(request: web.Request) -> web.Response:
     """POST /v1/robotics/nodes/{node_id}/refresh."""
-    if not check_auth(request):
-        return web.json_response({"error": "unauthorized"}, status=401)
     manager = _get_manager(request)
     node_id = request.match_info["node_id"]
     data = await manager.refresh_node(node_id)

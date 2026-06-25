@@ -125,8 +125,6 @@ async def handle_login(request: web.Request) -> web.Response:
 
 async def handle_change_password(request: web.Request) -> web.Response:
     """POST /v1/auth/change-password."""
-    if not check_auth(request):
-        return web.json_response({"error": "unauthorized"}, status=401)
     try:
         data = await request.json()
     except Exception:

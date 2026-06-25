@@ -184,6 +184,68 @@ async def test_dashboard_spa_catchall(dashboard):
                 assert '<div id="app">' not in (await resp.text())
 
 
+@pytest.fixture
+async def auth_dashboard():
+    """Dashboard with auth ENABLED, to exercise the unified JWT middleware."""
+    import anima.api.auth as _auth
+    config = load_config()
+    config.setdefault("dashboard", {}).setdefault("auth", {})
+    config["dashboard"]["auth"]["password"] = "testpass"
+    config["dashboard"]["auth"]["token"] = "test-signing-secret"
+    config.setdefault("voice_bridge", {})["enabled"] = False  # no port-9000 clash
+    _auth._SECRET = ""  # force re-read of the configured signing secret
+    hub = DashboardHub()
+    hub.config = config
+    hub.event_queue = EventQueue()
+    hub.emotion_state = EmotionState()
+    hub.working_memory = WorkingMemory(capacity=10)
+    hub.llm_router = LLMRouter("t1", "t2", daily_budget=0.0)
+    hub.tool_registry = ToolRegistry()
+    hub.tool_registry.register_builtins()
+    server = DashboardServer(hub, port=18421)
+    await server.start()
+    yield server, hub
+    await server.stop()
+    config["dashboard"]["auth"]["password"] = ""
+    config["dashboard"]["auth"]["token"] = ""
+    _auth._SECRET = ""
+
+
+@pytest.mark.asyncio
+async def test_auth_unified_rest_and_ws(auth_dashboard):
+    """Phase 4: ONE JWT scheme gates /v1 AND /ws. A token from /v1/auth/login
+    authenticates the WebSocket — the split-deployment path that was broken when
+    /ws validated the raw static token instead of the JWT."""
+    server, hub = auth_dashboard
+    base = "http://localhost:18421"
+    async with aiohttp.ClientSession() as session:
+        # /v1/health is public (no auth) and uses the standard envelope.
+        async with session.get(f"{base}/v1/health") as resp:
+            assert resp.status == 200
+            body = await resp.json()
+            assert body["ok"] is True and body["data"]["status"] == "ok"
+        # Protected REST without a token → 401 (central middleware).
+        async with session.get(f"{base}/v1/settings/system") as resp:
+            assert resp.status == 401
+        # Login → JWT.
+        async with session.post(f"{base}/v1/auth/login", json={"password": "testpass"}) as resp:
+            assert resp.status == 200
+            token = (await resp.json())["token"]
+        # Protected REST WITH the JWT → 200.
+        async with session.get(
+            f"{base}/v1/settings/system", headers={"Authorization": f"Bearer {token}"}
+        ) as resp:
+            assert resp.status == 200
+        # WS WITHOUT a token → handshake rejected (401).
+        with pytest.raises(aiohttp.WSServerHandshakeError):
+            async with session.ws_connect(f"{base}/ws"):
+                pass
+        # WS WITH the SAME JWT → snapshot delivered (the fix).
+        async with session.ws_connect(f"{base}/ws?token={token}") as ws:
+            msg = await ws.receive_json(timeout=5)
+            assert "heartbeat" in msg or "emotion" in msg
+
+
 @pytest.mark.asyncio
 async def test_dashboard_cors_allowlist(dashboard):
     """CORS (Phase 3): only allow-listed origins are reflected; others get none."""

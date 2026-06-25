@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from aiohttp import web
 
-from anima.api.auth import check_auth
 from anima.api.context import get_hub
 from anima.utils.logging import get_logger
 
@@ -13,8 +12,6 @@ log = get_logger("api.evolution")
 
 async def status(request: web.Request) -> web.Response:
     """GET /v1/evolution/status."""
-    if not check_auth(request):
-        return web.json_response({"error": "unauthorized"}, status=401)
     hub = get_hub(request)
     if not hub.evolution_engine:
         return web.json_response({"enabled": False})
@@ -23,8 +20,6 @@ async def status(request: web.Request) -> web.Response:
 
 async def history(request: web.Request) -> web.Response:
     """GET /v1/evolution/history — evolution history."""
-    if not check_auth(request):
-        return web.json_response({"error": "unauthorized"}, status=401)
     hub = get_hub(request)
     if not hub.evolution_engine:
         return web.json_response({"successes": [], "failures": []})
@@ -38,8 +33,6 @@ async def history(request: web.Request) -> web.Response:
 
 async def governance(request: web.Request) -> web.Response:
     """GET /v1/evolution/governance — governance status."""
-    if not check_auth(request):
-        return web.json_response({"error": "unauthorized"}, status=401)
     from anima.core.governance import get_governance
     gov = get_governance()
     return web.json_response({
@@ -51,8 +44,6 @@ async def governance(request: web.Request) -> web.Response:
 
 async def update_governance_mode(request: web.Request) -> web.Response:
     """PUT /v1/evolution/governance/mode — switch activity level."""
-    if not check_auth(request):
-        return web.json_response({"error": "unauthorized"}, status=401)
     try:
         data = await request.json()
     except Exception:

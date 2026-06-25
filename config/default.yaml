@@ -172,7 +172,13 @@ channels:
 dashboard:
   port: 8420
   auth:
-    token: ""     # Set in local/env.yaml for security
+    # password = the login secret typed at /v1/auth/login. BLANK = auth DISABLED
+    # (every endpoint open) — set it in local/env.yaml to require login. Gates the
+    # whole surface (/v1, /api, /ws) via the auth middleware.
+    password: ""
+    # token = HMAC secret used to SIGN session JWTs. Set a stable random string in
+    # local/env.yaml so issued tokens survive restarts (blank = random per-process).
+    token: ""
   # Built Vue SPA dir to serve. Blank → source-tree eva-ui/dist (dev); else API-only.
   ui_dist: ""
   cors:

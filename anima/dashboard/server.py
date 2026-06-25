@@ -9,6 +9,8 @@ from pathlib import Path
 from aiohttp import web, WSMsgType
 
 from anima.config import get, data_dir, source_tree
+from anima.api.auth import check_auth
+from anima.api.responses import ApiError, err
 from anima.dashboard.hub import DashboardHub
 from anima.models.event import Event, EventType, EventPriority
 from anima.utils.logging import get_logger
@@ -25,7 +27,6 @@ class DashboardServer:
         hub._server = self  # Back-reference for push_typed_event
         self._host = host
         self._port = port
-        self._auth_token = get("dashboard.auth.token", "")
         self._app = web.Application(client_max_size=0)  # No upload size limit
         self._ws_clients: list[web.WebSocketResponse] = []
         self._runner: web.AppRunner | None = None
@@ -62,6 +63,43 @@ class DashboardServer:
             return resp
 
         self._app.middlewares.append(cors_middleware)
+
+        # Error middleware — ApiError → clean 4xx; any unhandled exception →
+        # generic 500 logged server-side (never leaks str(e) to the client).
+        @web.middleware
+        async def error_middleware(request, handler):
+            try:
+                return await handler(request)
+            except ApiError as e:
+                return err(e.message, status=e.status)
+            except web.HTTPException:
+                raise
+            except Exception as e:
+                log.error("Unhandled API error: %s %s -> %s",
+                          request.method, request.path, e, exc_info=True)
+                return err("internal error", status=500)
+
+        self._app.middlewares.append(error_middleware)
+
+        # Auth middleware — ONE scheme (anima.api.auth.check_auth, JWT over
+        # dashboard.auth.password) for every protected surface: /v1, /api, /ws.
+        # Replaces the per-handler checks and the old raw-token scheme. Only the
+        # paths in PUBLIC_PATHS (login + liveness) skip auth; everything else
+        # under those prefixes requires a valid token. The SPA shell, /assets,
+        # /static and /desktop are not under these prefixes, so they stay public.
+        PUBLIC_PATHS = {"/v1/auth/login", "/v1/health", "/v1/version"}
+
+        @web.middleware
+        async def auth_middleware(request, handler):
+            if request.method == "OPTIONS":
+                return await handler(request)
+            path = request.path
+            if path.startswith(("/v1", "/api", "/ws")) and path not in PUBLIC_PATHS:
+                if not check_auth(request):
+                    return err("unauthorized", status=401)
+            return await handler(request)
+
+        self._app.middlewares.append(auth_middleware)
 
         # Core routes (kept)
         self._app.router.add_get("/ws", self._handle_ws)
@@ -150,21 +188,6 @@ class DashboardServer:
             await self._voice_bridge.stop()
         log.info("Dashboard stopped.")
 
-    # ── Auth ──
-
-    def _check_auth(self, request) -> bool:
-        """Check if request is authenticated. Returns True if auth passes."""
-        if not self._auth_token:
-            return True  # Auth disabled
-        # Check Authorization header
-        auth = request.headers.get("Authorization", "")
-        if auth == f"Bearer {self._auth_token}":
-            return True
-        # Check query param (for WebSocket)
-        if request.query.get("token") == self._auth_token:
-            return True
-        return False
-
     # ── Routes ──
 
     async def _handle_desktop(self, request: web.Request) -> web.Response:
@@ -174,8 +197,6 @@ class DashboardServer:
         return web.Response(text="Desktop frontend not found", status=404)
 
     async def _handle_ws(self, request: web.Request) -> web.WebSocketResponse:
-        if not self._check_auth(request):
-            return web.json_response({"error": "unauthorized"}, status=401)
         ws = web.WebSocketResponse()
         await ws.prepare(request)
         self._ws_clients.append(ws)
@@ -198,8 +219,6 @@ class DashboardServer:
 
     async def _handle_upload(self, request: web.Request) -> web.Response:
         """Handle file upload via multipart form data."""
-        if not self._check_auth(request):
-            return web.json_response({"error": "unauthorized"}, status=401)
         uploads_dir = data_dir() / "uploads"
         uploads_dir.mkdir(parents=True, exist_ok=True)
 
@@ -241,8 +260,6 @@ class DashboardServer:
 
     async def _handle_list_uploads(self, request: web.Request) -> web.Response:
         """List files in the uploads directory."""
-        if not self._check_auth(request):
-            return web.json_response({"error": "unauthorized"}, status=401)
         uploads_dir = data_dir() / "uploads"
         if not uploads_dir.exists():
             return web.json_response({"files": []})
@@ -256,8 +273,6 @@ class DashboardServer:
 
     async def _handle_tts(self, request: web.Request) -> web.Response:
         """Synthesize text to speech. Returns URL to audio file."""
-        if not self._check_auth(request):
-            return web.json_response({"error": "unauthorized"}, status=401)
         try:
             data = await request.json()
             text = data.get("text", "").strip()
@@ -288,8 +303,6 @@ class DashboardServer:
 
     async def _handle_debug(self, request: web.Request) -> web.Response:
         """Receive debug logs from frontend."""
-        if not self._check_auth(request):
-            return web.json_response({"error": "unauthorized"}, status=401)
         data = await request.json()
         level = data.get("level", "info").upper()
         msg = data.get("msg", "")
@@ -300,8 +313,6 @@ class DashboardServer:
 
     async def _handle_stt(self, request: web.Request) -> web.Response:
         """Transcribe uploaded audio via local Whisper."""
-        if not self._check_auth(request):
-            return web.json_response({"error": "unauthorized"}, status=401)
         try:
             import tempfile
             reader = await request.multipart()
@@ -342,8 +353,6 @@ class DashboardServer:
 
     async def _handle_voice_file(self, request: web.Request) -> web.Response:
         """Serve a generated voice audio file."""
-        if not self._check_auth(request):
-            return web.json_response({"error": "unauthorized"}, status=401)
         from anima.config import data_dir
         filename = request.match_info["filename"]
         # Security: only serve from voice dir, no path traversal
