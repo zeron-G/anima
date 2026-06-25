@@ -158,3 +158,45 @@ async def test_dashboard_voice_bridge_routes(dashboard, monkeypatch):
     event = await hub.event_queue.get_timeout(1.0)
     assert event is not None
     assert event.payload["text"] == "[PiDog Voice] 帮我看看周围"
+
+
+@pytest.mark.asyncio
+async def test_dashboard_spa_catchall(dashboard):
+    """Catch-all SPA routing (Phase 3): Vue Router paths get the shell, but
+    backend prefixes must 404 — the catch-all must never shadow the API."""
+    server, hub = dashboard
+    async with aiohttp.ClientSession() as session:
+        # Is the SPA dist being served? (index.html present)
+        async with session.get("http://localhost:18420/") as resp:
+            spa_active = '<div id="app">' in (await resp.text())
+
+        if spa_active:
+            # An arbitrary client-side route (NOT an explicitly registered path)
+            # must return the SPA shell via the catch-all.
+            async with session.get("http://localhost:18420/soulscape") as resp:
+                assert resp.status == 200
+                assert '<div id="app">' in (await resp.text())
+
+        # Unmatched API/WS prefixes must 404 (never the SPA shell), regardless of dist.
+        for path in ("/v1/__nope__", "/api/__nope__"):
+            async with session.get(f"http://localhost:18420{path}") as resp:
+                assert resp.status == 404
+                assert '<div id="app">' not in (await resp.text())
+
+
+@pytest.mark.asyncio
+async def test_dashboard_cors_allowlist(dashboard):
+    """CORS (Phase 3): only allow-listed origins are reflected; others get none."""
+    server, hub = dashboard
+    async with aiohttp.ClientSession() as session:
+        # Disallowed origin → no Access-Control-Allow-Origin header.
+        async with session.get(
+            "http://localhost:18420/", headers={"Origin": "http://evil.example"}
+        ) as resp:
+            assert "Access-Control-Allow-Origin" not in resp.headers
+
+        # Allow-listed dev origin (config default) → reflected back exactly.
+        async with session.get(
+            "http://localhost:18420/", headers={"Origin": "http://localhost:5173"}
+        ) as resp:
+            assert resp.headers.get("Access-Control-Allow-Origin") == "http://localhost:5173"

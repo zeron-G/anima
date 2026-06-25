@@ -8,7 +8,7 @@ from pathlib import Path
 
 from aiohttp import web, WSMsgType
 
-from anima.config import get, data_dir
+from anima.config import get, data_dir, source_tree
 from anima.dashboard.hub import DashboardHub
 from anima.models.event import Event, EventType, EventPriority
 from anima.utils.logging import get_logger
@@ -39,17 +39,26 @@ class DashboardServer:
                 port=int(voice_bridge_cfg.get("port", 9000)),
             )
 
-        # CORS middleware — allow dev server and cross-origin web clients
+        # CORS middleware — only reflect allow-listed origins (tightened for prod).
+        # dashboard.cors.allow_origins: explicit list; allow_all: reflect any (dev only).
+        # Same-origin requests (SPA served by this backend) need no CORS headers.
+        cors_cfg = get("dashboard.cors", {}) or {}
+        cors_allow_all = bool(cors_cfg.get("allow_all", False))
+        cors_origins = set(cors_cfg.get("allow_origins", []) or [])
+
         @web.middleware
         async def cors_middleware(request, handler):
             if request.method == "OPTIONS":
                 resp = web.Response()
             else:
                 resp = await handler(request)
-            resp.headers["Access-Control-Allow-Origin"] = request.headers.get("Origin", "*")
+            origin = request.headers.get("Origin", "")
+            if origin and (cors_allow_all or origin in cors_origins):
+                resp.headers["Access-Control-Allow-Origin"] = origin
+                resp.headers["Access-Control-Allow-Credentials"] = "true"
+                resp.headers["Vary"] = "Origin"
             resp.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
             resp.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
-            resp.headers["Access-Control-Allow-Credentials"] = "true"
             return resp
 
         self._app.middlewares.append(cors_middleware)
@@ -80,28 +89,41 @@ class DashboardServer:
             self._app.router.add_get("/desktop/", self._handle_desktop)
             self._app.router.add_static("/desktop/static/", desktop_dir)
 
-        # Vue SPA — serve from eva-ui/dist/ (production)
-        # IMPORTANT: SPA routes must NOT conflict with API routes.
-        # Use explicit SPA paths instead of catch-all to avoid 405 on POST /v1/*.
-        ui_dist = Path(__file__).parent.parent.parent / "eva-ui" / "dist"
-        if ui_dist.exists():
+        # Vue SPA — served from a configurable dist dir (Phase 3 frontend split).
+        # Resolution: dashboard.ui_dist (explicit) → source-tree eva-ui/dist (dev)
+        #             → none (API-only, no error). Registered LAST so the catch-all
+        # never shadows API/WS/static routes added above.
+        ui_dist_cfg = get("dashboard.ui_dist", "")
+        if ui_dist_cfg:
+            ui_dist = Path(ui_dist_cfg).expanduser()
+        else:
+            st = source_tree()
+            ui_dist = (st / "eva-ui" / "dist") if st is not None else None
+
+        if ui_dist is not None and ui_dist.exists():
             self._app.router.add_static("/assets/", ui_dist / "assets")
+            index_html = ui_dist / "index.html"
+            # Prefixes owned by the backend — never served the SPA shell.
+            spa_excluded = ("/v1", "/api", "/ws", "/static", "/desktop", "/assets")
 
             async def _serve_spa(request: web.Request) -> web.Response:
-                return web.FileResponse(ui_dist / "index.html")
+                # Catch-all for Vue Router client-side paths. A backend prefix that
+                # reached here is an unmatched API path → 404 (not the SPA shell).
+                if request.path.startswith(spa_excluded):
+                    return web.Response(status=404)
+                return web.FileResponse(index_html)
 
-            # Register SPA routes for Vue Router paths (not API paths)
-            for spa_path in ["/", "/login", "/soulscape", "/evolution",
-                             "/memory", "/network", "/robotics", "/settings"]:
-                self._app.router.add_get(spa_path, _serve_spa)
+            self._app.router.add_get("/{tail:.*}", _serve_spa)
+            log.info("Serving Vue SPA from %s", ui_dist)
         else:
-            # Fallback: show message if Vue SPA not built
             async def _no_ui(request):
                 return web.Response(
-                    text="Eva UI not built. Run: cd eva-ui && npm run build",
+                    text="Eva UI not present — API only. Build it (cd eva-ui && npm run build) "
+                         "or set dashboard.ui_dist to a built dist directory.",
                     content_type="text/plain",
                 )
             self._app.router.add_get("/", _no_ui)
+            log.info("No Vue SPA dist found — running API-only")
 
     async def start(self) -> None:
         self._runner = web.AppRunner(self._app)

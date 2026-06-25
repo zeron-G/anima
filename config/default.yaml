@@ -173,6 +173,13 @@ dashboard:
   port: 8420
   auth:
     token: ""     # Set in local/env.yaml for security
+  # Built Vue SPA dir to serve. Blank → source-tree eva-ui/dist (dev); else API-only.
+  ui_dist: ""
+  cors:
+    # Cross-origin browser clients allowed to call the API (e.g. a standalone
+    # frontend on another host). Same-origin (SPA served here) needs nothing.
+    allow_origins: ["http://localhost:5173", "http://127.0.0.1:5173"]
+    allow_all: false   # dev convenience: reflect ANY origin. Keep false in prod.
 
 voice_bridge:
   enabled: true
