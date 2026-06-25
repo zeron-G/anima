@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import time
 from typing import Any, Callable
 
@@ -584,6 +585,113 @@ class ToolOrchestrator:
         }
 
     # ------------------------------------------------------------------ #
+    #  Textual tool-call fallback                                         #
+    # ------------------------------------------------------------------ #
+
+    @staticmethod
+    def parse_text_tool_calls(content: str) -> tuple[str, list[dict]]:
+        """Recover tool calls from plain text output.
+
+        Some local/OpenAI-compatible models occasionally emit tool intent as text
+        instead of structured `tool_calls`, e.g.:
+            [Tool call: list_directory({"path":"anima/"})]
+
+        This parser extracts those blocks so the normal tool loop can continue.
+        Returns a tuple of:
+          - cleaned text content (tool-call blocks removed)
+          - recovered tool_calls in the standard dict format
+        """
+        if not content or "[Tool call:" not in content:
+            return content, []
+
+        recovered: list[dict] = []
+        chunks: list[str] = []
+        i = 0
+        n = len(content)
+        prefix = "[Tool call:"
+
+        while i < n:
+            start = content.find(prefix, i)
+            if start < 0:
+                chunks.append(content[i:])
+                break
+
+            chunks.append(content[i:start])
+            j = start + len(prefix)
+
+            # Parse tool name
+            while j < n and content[j].isspace():
+                j += 1
+            name_start = j
+            while j < n and (content[j].isalnum() or content[j] in {"_", "-", "."}):
+                j += 1
+            name = content[name_start:j].strip()
+
+            while j < n and content[j].isspace():
+                j += 1
+
+            if not name or j >= n or content[j] != "(":
+                # Not a valid tool-call block; keep literal text and advance.
+                chunks.append(content[start:start + 1])
+                i = start + 1
+                continue
+
+            # Parse argument section with balanced parentheses.
+            j += 1
+            args_start = j
+            depth = 1
+            in_string = False
+            quote_char = ""
+            escaped = False
+
+            while j < n:
+                ch = content[j]
+                if in_string:
+                    if escaped:
+                        escaped = False
+                    elif ch == "\\":
+                        escaped = True
+                    elif ch == quote_char:
+                        in_string = False
+                else:
+                    if ch in {'"', "'"}:
+                        in_string = True
+                        quote_char = ch
+                    elif ch == "(":
+                        depth += 1
+                    elif ch == ")":
+                        depth -= 1
+                        if depth == 0:
+                            break
+                j += 1
+
+            if j >= n:
+                chunks.append(content[start:start + 1])
+                i = start + 1
+                continue
+
+            args_text = content[args_start:j].strip() or "{}"
+            k = j + 1
+            while k < n and content[k].isspace():
+                k += 1
+
+            if k >= n or content[k] != "]":
+                chunks.append(content[start:start + 1])
+                i = start + 1
+                continue
+
+            recovered.append({
+                "id": f"text_tool_{len(recovered) + 1}",
+                "name": name,
+                "arguments": args_text,
+            })
+            i = k + 1
+
+        cleaned = "".join(chunks)
+        cleaned = re.sub(r"\n{3,}", "\n\n", cleaned).strip()
+        return cleaned, recovered
+
+    # ------------------------------------------------------------------ #
     #  Full tool-use loop                                                 #
     # ------------------------------------------------------------------ #
 
@@ -662,6 +770,17 @@ class ToolOrchestrator:
 
             content = resp.get("content", "")
             tool_calls = resp.get("tool_calls", [])
+
+            # Fallback: recover textual tool calls emitted by weaker local models.
+            if not tool_calls and content:
+                cleaned, recovered = self.parse_text_tool_calls(content)
+                if recovered:
+                    log.info(
+                        "Recovered %d text-format tool call(s) from model output",
+                        len(recovered),
+                    )
+                    content = cleaned
+                    tool_calls = recovered
 
             if not tool_calls:
                 # LLM is done — return final content

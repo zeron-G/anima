@@ -203,6 +203,32 @@ class TestToolOrchestrator:
         assert "email" not in tool_names
         assert "github" not in tool_names
 
+    @pytest.mark.asyncio
+    async def test_run_tool_loop_recovers_textual_tool_call(self):
+        """When model emits [Tool call: ...] text, loop should still execute it."""
+        orch = self._make_orchestrator()
+        llm_router = MagicMock()
+        llm_router.call_with_tools = AsyncMock(side_effect=[
+            {"content": '[Tool call: system_info({})]', "tool_calls": []},
+            {"content": "All set.", "tool_calls": []},
+        ])
+
+        result = await orch.run_tool_loop(
+            llm_router=llm_router,
+            messages=[
+                {"role": "system", "content": "You are helpful."},
+                {"role": "user", "content": "check status"},
+            ],
+            tools=orch.get_all_tool_schemas(),
+            tier=1,
+            max_turns=5,
+        )
+
+        assert result["error"] is None
+        assert result["content"] == "All set."
+        assert result["tool_calls_made"] == 1
+        assert llm_router.call_with_tools.await_count == 2
+
 
 # ── ResponseHandler tests ──
 
