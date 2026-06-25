@@ -2,7 +2,7 @@
 
 > 本文件是"代码/状态分离"大重构的**单一事实源 + 跨机器交接说明**。
 > 换工作环境后,`git clone` 本仓库 → 读本文件即可接着干。
-> 最后更新对应提交:`ac44fa4`(Phase 1)。
+> 最后更新:Phase 1.5 **T6(wheel 资源打包)完成**;本机灵魂实例已设为权威源(persona/feelings 以本机为准,见 §5)。
 
 ---
 
@@ -50,6 +50,14 @@
 - **T3** 数据库路径参数化:新增 `config.db_path()`,`config/default.yaml` 的 `db_path` 改为空(由 data_dir 决定),移除代码中 `"data/anima.db"` 硬编码(仅文档串残留)。
 - **T4** `data_dir()/agent_dir()` 消费方收口到 home(因解析器已重定向,消费方无需逐个改,已验证语义正确)。
 - **T5** `project_root()` 三类归位:用户数据(uploads/logs)→ `data_dir()`;代码资产(skills/default.yaml)→ `config_dir()/skills_dir()`;工具 cwd → `workspace_root()`;gossip 进化同步加无 git 树优雅跳过(`main.py`)。
+
+### ✅ Phase 1.5(部分)— wheel 资源打包(T6)
+让内核以 wheel 发布(无源码树)时仍能解析只读资产。
+- `setup.py` 增 `build_py` 钩子:构建期把 `config/ prompts/ skills/` 镜像进 `anima/_resources/`(单一事实源,**不在 git 里复制**;`anima/_resources/` 已 gitignore)。
+- `MANIFEST.in`:graft 上述资产、prune `data/ agents/ local/ eva-ui/`(sdist 不含任何私有态/灵魂)。
+- `pyproject.toml`:`[tool.setuptools.package-data] anima=["_resources/**/*"]`。
+- **A4 已通过**:仓库外干净 venv 装 wheel → `source_tree()` 为 None、`config_dir()/default.yaml` 为 True,prompts/skills/profiles/tool_selection 全部解析到包内资源。
+- **人格种子未打包(有意为之)**:`agents/` 现为活体实例(含私有灵魂),种子/实例劈分属 Phase 2;装机消费方(`anima init`)尚不存在。打包种子留到 Phase 2(用 `agents/_seed`)。
 
 ---
 
@@ -116,10 +124,10 @@ project_root()   -> Path            # 【已弃用 shim】= source_tree() or pac
 ## 7. 未来工作(按优先级)
 
 ### Phase 1.5 — 装机可发布化(只服务 pip install 场景,当前工作流不依赖)
-**T6 打成 PyPI wheel**
-- 把 `config/ prompts/ skills/` + 人格种子复制进 `anima/_resources/`(`config_dir()` 等解析器在无源码树时已会回退到此路径)。
-- `pyproject.toml` 加 `[tool.setuptools.package-data]` 纳入 `_resources/**`。
-- 验收(A4):干净 venv `pip install .` → `python -c "from anima.config import config_dir; print((config_dir()/'default.yaml').exists())"` 为 True。
+**✅ T6 打成 PyPI wheel — 已完成(详见 §3 Phase 1.5)**
+- 构建期 `setup.py` build_py 把 `config/ prompts/ skills/` 镜像进 `anima/_resources/`(单一事实源,gitignore);`pyproject.toml` 已加 `[tool.setuptools.package-data] anima=["_resources/**/*"]`;`MANIFEST.in` graft 资产、prune 私有目录。
+- **人格种子推迟到 Phase 2**(避免把活体灵魂打进发布包,且种子/实例尚未劈分)。
+- 验收 A4 已通过(仓库外干净 venv,`config_dir()/default.yaml` 为 True)。
 
 **进化/spawn 装机模式优雅禁用**(剩余 `project_root()` 均集中于此,装机时 `source_tree()` 为 None 会让 git 命令在 site-packages 乱跑)
 - 涉及:`evolution/engine.py`(222,446,461,524,525,604,613,615)、`evolution/sandbox.py`(39,69,119)、`evolution/deployer.py`(43)、`spawn/packager.py`(51)、`core/self_audit.py`(56)、`core/response_handler.py`(461)、`dashboard/hub.py`(287 git log)。

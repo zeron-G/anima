@@ -55,3 +55,8 @@ testpaths = ["tests"]
 
 [tool.setuptools.packages.find]
 include = ["anima*"]
+
+# Read-only assets mirrored into anima/_resources/ at build time (see setup.py)
+# so an installed kernel (no source tree) can still resolve config/prompts/skills.
+[tool.setuptools.package-data]
+anima = ["_resources/**/*"]

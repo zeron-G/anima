@@ -1,0 +1,13 @@
+# Bundle read-only code assets into the sdist so the build-time _resources
+# sync (see setup.py) can mirror them into the wheel's anima/_resources/.
+graft config
+graft prompts
+graft skills
+
+# Keep private/runtime state out of the distribution.
+prune data
+prune agents
+prune local
+prune eva-ui
+prune .claude
+global-exclude *.pyc __pycache__

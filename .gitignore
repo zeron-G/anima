@@ -7,6 +7,7 @@ dist/
 build/
 .eggs/
 *.egg
+anima/_resources/        # build artifact: mirrored config/prompts/skills (see setup.py)
 
 # Virtual environments
 .venv/
