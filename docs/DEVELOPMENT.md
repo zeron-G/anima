@@ -1,6 +1,12 @@
 # ANIMA 开发文档
 
-> **版本**: 0.3.0 (Prompt & Memory v3) · **更新日期**: 2026-03-17 · **运行节点**: Desktop (主) + Laptop (从)
+> ⚠️ **历史快照(v0.3.0,2026-03-17)。** 本文件是重构前的设计记录,部分内容已过时
+> (模块名如 `event_router.py`/`llm/prompts.py`、测试数、心跳间隔、机器 IP 等)。
+> **当前权威文档**:架构 → [ARCHITECTURE.md](ARCHITECTURE.md);路径/数据模型与重构进度
+> → [REFACTOR.md](REFACTOR.md);API 契约 → [API.md](API.md);部署 → [DEPLOYMENT.md](DEPLOYMENT.md)。
+> 保留本文件仅作设计沿革参考。
+
+> **版本**: 0.3.0 (Prompt & Memory v3) · **更新日期**: 2026-03-17(历史)
 
 ---
 

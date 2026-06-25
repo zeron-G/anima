@@ -58,7 +58,7 @@ Embodiment and Deployment
 anima/             Python backend and runtime modules
 eva-ui/            Vue frontend
 config/            Default config and committed runtime profiles
-agents/            EVA identity, rules, and memory files
+agents/_seed/      Published persona seed (anima init copies it into your private home)
 docs/              Architecture and subsystem documents
 local/             Machine-local config templates
 tests/             Backend test suite
@@ -87,8 +87,8 @@ python -m anima
 # Backend only
 python -m anima --headless
 
-# Terminal mode
-python -m anima --terminal
+# Terminal (legacy) mode
+python -m anima --legacy
 
 # Frontend development
 cd eva-ui
@@ -135,6 +135,8 @@ Additional design documents live in [docs](docs):
 - [ROBOTICS_PIDOG.md](docs/ROBOTICS_PIDOG.md)
 - [DEVELOPER_GUIDE.md](docs/DEVELOPER_GUIDE.md)
 - [REFACTOR.md](docs/REFACTOR.md) — kernel/frontend/data separation: progress & cross-machine handoff
+- [API.md](docs/API.md) — REST/WebSocket API contract (endpoints, auth, response envelope)
+- [DEPLOYMENT.md](docs/DEPLOYMENT.md) — backend + frontend deployment (same-origin & fully split)
 
 ## Development
 

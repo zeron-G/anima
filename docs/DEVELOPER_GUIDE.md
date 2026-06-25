@@ -15,9 +15,11 @@ pip install chromadb               # Vector database
 ## Running
 
 ```bash
+python -m anima init               # First run: bootstrap a home from the persona seed
 python -m anima                    # Desktop mode (PyWebView)
-python -m anima --headless         # Headless mode (terminal only)
-python -m anima --watchdog         # Watchdog mode (auto-restart)
+python -m anima --headless         # Headless (API + WebSocket only)
+python -m anima --legacy           # Terminal mode
+python -m anima watchdog           # Watchdog supervisor (subcommand, NOT a flag)
 ```
 
 ## Running Tests
@@ -67,14 +69,22 @@ self.register(get_my_tool())
 
 ## Modifying Prompts
 
-- **Identity**: Edit `agents/eva/identity/core.md` (auto-reloaded via mtime check)
-- **Rules**: Edit/add files in `agents/eva/rules/*.md`
-- **Lorebook**: Edit `agents/eva/lorebook/_index.yaml` + content files
-- **Examples**: Edit `agents/eva/examples/*.md`
+The persona has two halves (see `docs/REFACTOR.md`):
+- **Seed** (the published default) — edit under `agents/_seed/`: `identity/*.md`,
+  `rules/*.md` (boundaries/events/memory/output/safety/style/tools/evolution),
+  `lorebook/_index.yaml`, `examples/*.md`, `memory/persona_state.yaml` (baseline).
+- **Live instance** (private, created by `anima init`) — `<ANIMA_HOME>/agents/<name>/`
+  is where runtime self-edits + evolved memory land; it is gitignored. In a source
+  checkout that path is `agents/<name>/` (e.g. `agents/eva/`), also gitignored.
+
+Files auto-reload via mtime check.
 
 ## Configuration
 
-All config in `config/default.yaml`, overridden by `local/env.yaml`.
+Load order (later overrides earlier): `config/default.yaml` →
+`config/profiles/*.yaml` → `agents/<name>/config.yaml` → `<ANIMA_HOME>/config.yaml`
+→ (compat) `local/env.yaml` → `.env`. The home `config.yaml` is the canonical
+machine-local override; `local/env.yaml` is a backward-compat layer.
 
 Key settings:
 ```yaml

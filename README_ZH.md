@@ -58,7 +58,7 @@ ANIMA 主要由几层组成：
 anima/             Python 后端与运行时模块
 eva-ui/            Vue 前端
 config/            默认配置与 committed runtime profiles
-agents/            EVA 的身份、规则与记忆文件
+agents/_seed/      发布的人格种子（anima init 复制成你的私有活体实例）
 docs/              架构与子系统文档
 local/             本地配置模板
 tests/             后端测试
@@ -87,8 +87,8 @@ python -m anima
 # 仅后端
 python -m anima --headless
 
-# 终端模式
-python -m anima --terminal
+# 终端（legacy）模式
+python -m anima --legacy
 
 # 前端开发
 cd eva-ui
@@ -135,6 +135,8 @@ ANIMA 把共享配置和本地敏感配置分开管理：
 - [ROBOTICS_PIDOG.md](docs/ROBOTICS_PIDOG.md)
 - [DEVELOPER_GUIDE.md](docs/DEVELOPER_GUIDE.md)
 - [REFACTOR.md](docs/REFACTOR.md) — 代码/前端/数据分离重构:进度与跨机器交接
+- [API.md](docs/API.md) — REST/WebSocket API 契约（端点、鉴权、响应封装）
+- [DEPLOYMENT.md](docs/DEPLOYMENT.md) — 前后端部署（同源反代 & 完全分离）
 
 ## 开发
 

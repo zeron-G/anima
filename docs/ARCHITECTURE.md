@@ -4,6 +4,30 @@
 
 ANIMA is a heartbeat-driven, distributed, self-evolving AI agent with a 4-component cognitive pipeline, multi-tier memory system, and autonomous evolution capability.
 
+## Deployment & Data Model (Phases 0–4)
+
+The runtime is split into three layers (full detail in [REFACTOR.md](REFACTOR.md)):
+
+- **Kernel** — published code + read-only assets (`config/`, `prompts/`, `skills/`,
+  and the persona **seed** `agents/_seed`). Resolved via `config.package_root()` /
+  `source_tree()`; bundled into the wheel under `anima/_resources/`.
+- **Frontend** (`eva-ui/`) — Vue SPA whose backend address comes from build-time env
+  (`VITE_API_BASE`/`VITE_WS_BASE`); deployable same-origin or fully split — see
+  [DEPLOYMENT.md](DEPLOYMENT.md).
+- **ANIMA_HOME** — private user state: `data/` (anima.db, chroma, …) + the live
+  persona instance `agents/<name>` + `.env` + `config.yaml`. Resolved via
+  `config.home_dir()` (`$ANIMA_HOME` → source tree → `~/.anima`).
+
+`anima init` bootstraps a home from the seed. In installed mode (no source tree)
+evolution/spawn/self-audit gracefully disable (they need a git repo). The full
+path API is REFACTOR.md §4; the HTTP/WS contract is [API.md](API.md); auth is one
+JWT middleware over `dashboard.auth.password`.
+
+> Note: the module/line-count tables below predate the Phase 0–4 refactor and are
+> indicative only (e.g. `anima/llm/` is now a `providers/` package; `anima/core/`
+> adds governance, self_audit, idle_scheduler, scheduler, session_manager, …).
+> Treat REFACTOR.md + API.md as authoritative.
+
 ## Component Diagram
 
 ```
