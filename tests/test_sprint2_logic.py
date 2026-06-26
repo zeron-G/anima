@@ -53,6 +53,52 @@ class TestTierSelection:
         assert primary == "claude-sonnet-4-6"
 
 
+# ── Fallback cascade order tests ──
+
+
+class TestCascadeOrder:
+    """OAuth-first cascade: Codex leads, Claude is an API-key-gated fallback."""
+
+    def _router(self):
+        from anima.llm.router import LLMRouter
+        return LLMRouter(
+            tier1_model="codex/gpt-5.5",
+            tier2_model="codex/gpt-5.4-mini",
+            codex_fallback="codex/gpt-5.4-mini",
+            local_model="local/",
+        )
+
+    def test_codex_first_claude_dormant_without_key(self, monkeypatch):
+        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+        monkeypatch.delenv("ANTHROPIC_AUTH_TOKEN", raising=False)
+        r = self._router()
+        # tier1: primary → codex backup → local (no Claude, no key)
+        assert [m for m, _t, _to in r._build_cascade(1)] == [
+            "codex/gpt-5.5", "codex/gpt-5.4-mini", "local/",
+        ]
+        # tier2 primary already equals the backup → deduped to one entry
+        assert [m for m, _t, _to in r._build_cascade(2)] == [
+            "codex/gpt-5.4-mini", "local/",
+        ]
+
+    def test_claude_lights_up_with_api_key(self, monkeypatch):
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-api-test")
+        r = self._router()
+        chain = [m for m, _t, _to in r._build_cascade(1)]
+        assert chain == [
+            "codex/gpt-5.5", "codex/gpt-5.4-mini",
+            "claude-opus-4-8", "claude-sonnet-4-6", "local/",
+        ]
+
+    def test_borrowed_oauth_login_does_not_enable_claude(self, monkeypatch):
+        # A Claude Code OAuth login (sk-ant-oat…) must NOT count as a key.
+        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+        monkeypatch.setenv("ANTHROPIC_AUTH_TOKEN", "sk-ant-oat01-borrowed")
+        r = self._router()
+        chain = [m for m, _t, _to in r._build_cascade(1)]
+        assert "claude-opus-4-8" not in chain
+
+
 # ── Budget pricing tests ──
 
 

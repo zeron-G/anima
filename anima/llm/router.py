@@ -132,40 +132,78 @@ class LLMRouter:
                     elapsed, int(_CB_PROBE_INTERVAL_S - (time.time() - self._last_probe_at)))
         return False  # skip
 
-    # Anthropic fallback models for cascade
+    # Anthropic fallback models (used only when Anthropic credentials exist).
     OPUS_FALLBACK = "claude-opus-4-8"
     SONNET_FALLBACK = "claude-sonnet-4-6"
 
-    async def _try_call(self, messages, tier, temperature, tools=None):
-        """Core call logic: primary → fallback cascade → local.
+    @staticmethod
+    def _anthropic_available() -> bool:
+        """True only when a real Anthropic **API key** is configured.
 
-        Cascade order: primary → Opus → Sonnet → Codex → OpenAI → local.
+        Claude is an API-key fallback route. The borrowed Claude Code OAuth
+        login (``sk-ant-oat…``) is deliberately NOT counted — without an
+        explicit key Claude stays dormant, so OAuth-first (Codex) is the only
+        live path and a missing key never burns a cascade slot or trips the
+        circuit breaker. The route stays wired: set ANTHROPIC_API_KEY (or a
+        non-OAuth ANTHROPIC_AUTH_TOKEN) and it lights up automatically.
+        """
+        import os as _os
+        if _os.environ.get("ANTHROPIC_API_KEY", "").strip():
+            return True
+        auth = _os.environ.get("ANTHROPIC_AUTH_TOKEN", "").strip()
+        return bool(auth) and not auth.startswith("sk-ant-oat")
+
+    def _build_cascade(self, tier: int) -> list[tuple[str, int, int]]:
+        """Ordered (model, max_tokens, per_call_timeout) fallback cascade.
+
+        OAuth-first priority — Codex (ChatGPT subscription, free/fast) leads,
+        Claude is a paid API-key fallback, local is last resort:
+
+            1. configured tier model   (Codex OAuth, e.g. gpt-5.5 / gpt-5.4-mini)
+            2. Codex backup model       (codex_fallback, e.g. gpt-5.4-mini)
+            3. Claude opus → sonnet     (API key; skipped when no credentials)
+            4. OpenAI API               (paid; only if configured)
+            5. local LLM                (free; last resort)
+
+        Duplicate models are dropped, preserving first-seen order, so a tier
+        that already points at the backup model doesn't try it twice.
+        """
+        primary_model = self._tier1_model if tier == 1 else self._tier2_model
+        primary_max = self._tier1_max_tokens if tier == 1 else self._tier2_max_tokens
+
+        cascade: list[tuple[str, int, int]] = [(primary_model, primary_max, 120)]
+        # Same-provider (Codex/OAuth) backup first — still free, no Claude key needed.
+        if self._codex_fallback:
+            cascade.append((self._codex_fallback, self._codex_max_tokens, 90))
+        # Claude API-key route — kept selectable, but skipped without credentials.
+        if self._anthropic_available():
+            cascade.append((self.OPUS_FALLBACK, 16384, 90))
+            cascade.append((self.SONNET_FALLBACK, 8192, 90))
+        # OpenAI API fallback (paid per token).
+        if self._openai_fallback:
+            cascade.append((self._openai_fallback, self._openai_max_tokens, 120))
+        # Local LLM as last resort (free, no API cost).
+        if self._local_model:
+            cascade.append((self._local_model, self._local_max_tokens, 300))
+
+        seen: set[str] = set()
+        deduped: list[tuple[str, int, int]] = []
+        for model, max_tokens, timeout_s in cascade:
+            if model and model not in seen:
+                seen.add(model)
+                deduped.append((model, max_tokens, timeout_s))
+        return deduped
+
+    async def _try_call(self, messages, tier, temperature, tools=None):
+        """Core call logic: primary → fallback cascade (see _build_cascade).
+
         On 529 (overloaded), immediately tries next in cascade.
         Total cascade capped at 120s (user) / 60s (internal) to prevent
         SELF_THINKING from blocking the cognitive loop for 3+ minutes.
         """
         import asyncio as _aio
 
-        primary_model = self._tier1_model if tier == 1 else self._tier2_model
-        primary_max = self._tier1_max_tokens if tier == 1 else self._tier2_max_tokens
-        models_to_try = [
-            (primary_model, primary_max, 120),
-        ]
-        # Anthropic fallbacks (skip if primary is already one of them)
-        if self.OPUS_FALLBACK not in primary_model:
-            models_to_try.append((self.OPUS_FALLBACK, 16384, 90))
-        if self.SONNET_FALLBACK not in primary_model:
-            models_to_try.append((self.SONNET_FALLBACK, 8192, 90))
-        # Codex OAuth fallback (ChatGPT subscription, no extra cost)
-        if self._codex_fallback:
-            models_to_try.append((self._codex_fallback, self._codex_max_tokens, 120))
-        # OpenAI API fallback (paid per token)
-        if self._openai_fallback:
-            models_to_try.append((self._openai_fallback, self._openai_max_tokens, 120))
-        # Local LLM as last resort (free, no API cost)
-        if self._local_model:
-            models_to_try.append((self._local_model, self._local_max_tokens, 300))
-
+        models_to_try = self._build_cascade(tier)
         primary = models_to_try[0][0]
         failed_models: list[str] = []
 
@@ -317,15 +355,8 @@ class LLMRouter:
             return
 
 
-        # H-04: correct tier selection
-        primary_model = self._tier1_model if tier == 1 else self._tier2_model
-        primary_max = self._tier1_max_tokens if tier == 1 else self._tier2_max_tokens
-
-        models_to_try = [(primary_model, primary_max)]
-        if self.SONNET_FALLBACK not in primary_model:
-            models_to_try.append((self.SONNET_FALLBACK, 4096))
-        if self._local_model:
-            models_to_try.append((self._local_model, self._local_max_tokens))
+        # H-04: same OAuth-first cascade as non-streaming (codex → claude → local).
+        models_to_try = [(m, mt) for m, mt, _to in self._build_cascade(tier)]
 
         for model, max_tokens in models_to_try:
             try:
