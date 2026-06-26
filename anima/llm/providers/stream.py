@@ -75,12 +75,14 @@ async def completion_stream(
         except Exception as e:
             yield StreamEvent(type="error", error=f"Codex error: {str(e)[:300]}")
             return
-        content = resp.get("content", "") or ""
-        if content:
-            yield StreamEvent(type="text_delta", text=content)
+        # NOTE: no text_delta. Codex is non-incremental (one-shot), so emitting
+        # the full content as a "stream chunk" would fire stream_callback (live
+        # terminal/dashboard preview) AND then output_callback (final) — showing
+        # the reply twice, and leaking intermediate tool-turn text. Emit only
+        # message_complete; the final reply is displayed once by output_callback.
         yield StreamEvent(
             type="message_complete",
-            content=content,
+            content=resp.get("content", "") or "",
             tool_calls=resp.get("tool_calls", []),
             usage=resp.get("usage", {}),
             model=resp.get("model", model),

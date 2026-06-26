@@ -37,7 +37,9 @@ async def test_codex_stream_routes_to_codex_provider(monkeypatch):
 
     # Routed to the Codex provider (not Anthropic, which would 404)
     assert called.get("model") == "codex/gpt-5.5"
-    assert [e.type for e in events] == ["text_delta", "message_complete"]
+    # Only message_complete — no text_delta preview (codex is one-shot; a preview
+    # would double-display via stream_callback + output_callback).
+    assert [e.type for e in events] == ["message_complete"]
     assert events[-1].content == "你好主人"
     assert events[-1].tool_calls == []
 

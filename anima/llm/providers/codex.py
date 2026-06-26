@@ -232,9 +232,28 @@ async def _codex_completion(
                     # Text output
                     if etype == "response.output_text.delta":
                         content_parts.append(event.get("delta", ""))
-                    # Function call completed (collect from response.completed instead
-                    # to avoid duplicates -- intermediate events lack the name field)
-                    # Response completed -- extract usage
+                    # Function call: Codex delivers it via streaming item events and
+                    # leaves response.completed.output EMPTY, so we MUST capture it
+                    # here. output_item.done carries the complete item (name + final
+                    # arguments). Missing this made every tool call vanish → empty
+                    # replies on tool-using turns.
+                    elif etype == "response.output_item.done":
+                        item = event.get("item", {})
+                        if item.get("type") == "function_call":
+                            tc = {
+                                "id": item.get("call_id", item.get("id", "")),
+                                "name": item.get("name", ""),
+                                "arguments": item.get("arguments", "{}"),
+                            }
+                            if tc.get("name") and tc not in tool_calls_out:
+                                tool_calls_out.append(tc)
+                        elif item.get("type") == "message":
+                            for block in item.get("content", []):
+                                if block.get("type") == "output_text":
+                                    t = block.get("text", "")
+                                    if t and t not in "".join(content_parts):
+                                        content_parts.append(t)
+                    # Response completed -- extract usage (+ any output we missed)
                     elif etype == "response.completed":
                         r = event.get("response", {})
                         u = r.get("usage", {})
