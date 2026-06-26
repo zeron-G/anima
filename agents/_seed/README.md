@@ -12,7 +12,6 @@
 - `examples/` — 手写示范回复
 - `post_processing/` — 风格后处理规则
 - `config.yaml` / `manifest.yaml` / `soul.md` — agent 配置与（兼容用）灵魂总览
-- `memory/persona_state.yaml` — 出厂人格数值基线（warmth 0.7…）
 - `memory/feelings.md` · `memory/growth_log.md` — 空起点
 - `memory/golden_replies.jsonl` — 空
 - `lorebook/_index.yaml` — 空索引

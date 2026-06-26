@@ -309,15 +309,9 @@ class PromptCompiler:
         else:
             self._model_hints = {}
 
-        # Load persona_state.yaml for numerical personality injection
-        persona_path = self._agent_dir / "memory" / "persona_state.yaml"
-        self._persona_state: dict = {}
-        if persona_path.exists():
-            try:
-                self._persona_state = yaml.safe_load(persona_path.read_text("utf-8")) or {}
-            except Exception:
-                pass
-
+        # S3: personality is prose (core/personality/relationship .md), not a
+        # numeric vector. The former persona_state.yaml 6-dim was a redundant
+        # slow-emotion producing weak "warmth偏高" hints — removed.
         parts = [p for p in [
             core, extended,
             self._personality_cache, self._relationship_cache,
@@ -411,14 +405,6 @@ class PromptCompiler:
         identity_dir = self._agent_dir / "identity"
         self._personality_cache = _read_md(identity_dir / "personality.md")
         self._relationship_cache = _read_md(identity_dir / "relationship.md")
-
-        # Refresh persona_state.yaml
-        persona_path = self._agent_dir / "memory" / "persona_state.yaml"
-        if persona_path.exists():
-            try:
-                self._persona_state = yaml.safe_load(persona_path.read_text("utf-8")) or {}
-            except Exception:
-                pass
 
         # Rebuild identity cache from all sub-parts
         parts = [p for p in [
@@ -540,18 +526,6 @@ class PromptCompiler:
                     tone_hint = _emotion_to_tone_hint(emotion_state)
                     if tone_hint:
                         parts.append(tone_hint)
-
-            # Inject persona_state as brief text
-            if self._persona_state:
-                traits = []
-                for k, v in self._persona_state.items():
-                    if isinstance(v, (int, float)) and 0 <= v <= 1:
-                        if v >= 0.7:
-                            traits.append(f"{k}偏高")
-                        elif v <= 0.3:
-                            traits.append(f"{k}偏低")
-                if traits:
-                    parts.append(f"性格倾向：{', '.join(traits)}")
 
             # System state
             if system_state:

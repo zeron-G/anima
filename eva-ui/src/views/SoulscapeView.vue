@@ -1,9 +1,8 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, onMounted } from 'vue'
 import { useEmotionStore } from '@/stores/emotionStore'
 import { usePersonaStore } from '@/stores/personaStore'
 import SoulscapeAvatar from '@/components/soulscape/SoulscapeAvatar.vue'
-import PersonaPetals from '@/components/soulscape/PersonaPetals.vue'
 import PersonalityEditor from '@/components/soulscape/PersonalityEditor.vue'
 import GoldenReplyManager from '@/components/soulscape/GoldenReplyManager.vue'
 import * as api from '@/api/soulscape'
@@ -14,14 +13,6 @@ const persona = usePersonaStore()
 const activeTab = ref<'personality' | 'style' | 'golden'>('personality')
 const loading = ref(true)
 
-const petalData = computed<Record<string, number>>(() => {
-  const result: Record<string, number> = {}
-  for (const [key, value] of Object.entries(persona.state)) {
-    if (typeof value === 'number') result[key] = value
-  }
-  return result
-})
-
 const emotionDims = ['engagement', 'confidence', 'curiosity', 'concern'] as const
 
 function barColor(dim: string): string {
@@ -31,10 +22,9 @@ function barColor(dim: string): string {
 async function loadData() {
   loading.value = true
   try {
-    const [personaRes, personalityRes, relationshipRes, goldenRes, styleRes] = await Promise.all([
-      api.getPersona(), api.getPersonality(), api.getRelationship(), api.getGoldenReplies(), api.getStyleRules(),
+    const [personalityRes, relationshipRes, goldenRes, styleRes] = await Promise.all([
+      api.getPersonality(), api.getRelationship(), api.getGoldenReplies(), api.getStyleRules(),
     ])
-    persona.updateState(personaRes.data)
     persona.personality = personalityRes.data.content || ''
     persona.relationship = relationshipRes.data.content || ''
     persona.goldenReplies = goldenRes.data.replies || []
@@ -45,10 +35,6 @@ async function loadData() {
 
 onMounted(loadData)
 
-async function handlePetalUpdate(key: string, value: number) {
-  persona.state[key] = value
-  try { await api.updatePersona({ [key]: value }) } catch {}
-}
 async function savePersonality(content: string) {
   try { await api.updatePersonality(content); persona.personality = content } catch {}
 }
@@ -107,16 +93,16 @@ async function deleteGolden(id: string) {
               <span class="meta-k">Intensity</span>
               <span class="meta-v">{{ ((emotion.current.intensity || 0) * 100).toFixed(0) }}%</span>
             </div>
+            <div class="meta-chip">
+              <span class="meta-k">Arousal</span>
+              <span class="meta-v">{{ (((emotion.current as any).arousal || 0) * 100).toFixed(0) }}%</span>
+            </div>
+            <div class="meta-chip">
+              <span class="meta-k">Valence</span>
+              <span class="meta-v">{{ ((emotion.current as any).valence ?? 0).toFixed(2) }}</span>
+            </div>
           </div>
-        </div>
-
-        <!-- Right: Persona Petals -->
-        <div class="petals-card glass">
-          <h3 class="card-heading">Persona Dimensions</h3>
-          <p class="card-hint">Drag petal tips to adjust values</p>
-          <div class="petals-center">
-            <PersonaPetals :data="petalData" @update="handlePetalUpdate" />
-          </div>
+          <p class="card-hint">情感现在驱动记忆显著性与主动性 — 不再只是显示。性格 → 见下方 personality.md（散文）。</p>
         </div>
 
       </div>
@@ -208,12 +194,11 @@ async function deleteGolden(id: string) {
 
 .stats-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: 1fr;
   gap: var(--space-lg);
 }
 
-.emotion-card,
-.petals-card {
+.emotion-card {
   padding: var(--space-xl);
 }
 

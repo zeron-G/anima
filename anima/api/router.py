@@ -41,8 +41,6 @@ class APIRouter:
 
         # Soulscape
         app.router.add_get("/v1/soulscape/emotion", soulscape.emotion)
-        app.router.add_get("/v1/soulscape/persona", soulscape.persona)
-        app.router.add_put("/v1/soulscape/persona", soulscape.update_persona)
         app.router.add_get("/v1/soulscape/personality", soulscape.personality)
         app.router.add_put("/v1/soulscape/personality", soulscape.update_personality)
         app.router.add_get("/v1/soulscape/relationship", soulscape.relationship)

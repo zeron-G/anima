@@ -20,41 +20,6 @@ async def emotion(request: web.Request) -> web.Response:
     return web.json_response(hub.emotion_state.to_dict())
 
 
-async def persona(request: web.Request) -> web.Response:
-    """GET /v1/soulscape/persona — persona_state.yaml values."""
-    import yaml
-    path = agent_dir() / "memory" / "persona_state.yaml"
-    if not path.exists():
-        return web.json_response({})
-    try:
-        data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-        return web.json_response(data)
-    except Exception as e:
-        return web.json_response({"error": str(e)}, status=500)
-
-
-async def update_persona(request: web.Request) -> web.Response:
-    """PUT /v1/soulscape/persona — update persona_state values."""
-    import yaml
-    try:
-        updates = await request.json()
-    except Exception:
-        return web.json_response({"error": "invalid json"}, status=400)
-
-    path = agent_dir() / "memory" / "persona_state.yaml"
-    current = {}
-    if path.exists():
-        current = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-
-    for k, v in updates.items():
-        if isinstance(v, (int, float)):
-            current[k] = max(0.0, min(1.0, float(v)))
-
-    current["last_updated"] = time.strftime("%Y-%m-%d")
-    path.write_text(yaml.dump(current, allow_unicode=True), encoding="utf-8")
-    return web.json_response({"success": True, "persona": current})
-
-
 async def personality(request: web.Request) -> web.Response:
     """GET /v1/soulscape/personality — personality.md content."""
     path = agent_dir() / "identity" / "personality.md"

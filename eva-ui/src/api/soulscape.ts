@@ -1,8 +1,6 @@
 import client from './client'
 
 export const getEmotion = () => client.get('/v1/soulscape/emotion')
-export const getPersona = () => client.get('/v1/soulscape/persona')
-export const updatePersona = (data: Record<string, number>) => client.put('/v1/soulscape/persona', data)
 export const getPersonality = () => client.get('/v1/soulscape/personality')
 export const updatePersonality = (content: string) => client.put('/v1/soulscape/personality', { content })
 export const getRelationship = () => client.get('/v1/soulscape/relationship')
