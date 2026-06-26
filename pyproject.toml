@@ -8,18 +8,16 @@ version = "0.2.0"
 description = "Heartbeat-driven, distributed, self-evolving AI life system"
 requires-python = ">=3.11"
 dependencies = [
+    # Slim core: LLM + cognitive + memory + the API/WebSocket server. Optional
+    # subsystems (network mesh, desktop window, voice, discord) live in extras below.
     "litellm>=1.40.0",
     "psutil>=5.9.0",
     "rich>=13.0.0",
     "pyyaml>=6.0",
     "httpx>=0.28.0",
     "python-dotenv>=1.0.0",
-    "pyzmq>=25.0",
-    "msgpack>=1.0",
-    "zeroconf>=0.131",
-    "pywebview>=5.0",
+    "aiohttp>=3.9",
     "chromadb>=0.5.0",
-    "paramiko>=3.5.0",
 ]
 
 [project.optional-dependencies]
@@ -37,6 +35,12 @@ stt = ["faster-whisper"]
 vector = []  # chromadb moved to main dependencies
 watch = ["watchdog>=4.0.0"]
 discord = ["discord.py>=2.3"]
+# Distributed gossip mesh (zmq) + mDNS discovery + remote-node SSH deploy/spawn.
+network = ["pyzmq>=25.0", "msgpack>=1.0", "zeroconf>=0.131", "paramiko>=3.5.0"]
+# Native desktop window (pywebview). Server/headless deployments don't need it.
+desktop = ["pywebview>=5.0"]
+# Everything — a full single-machine install.
+all = ["anima[network,desktop,tts,stt,discord,watch]"]
 dev = [
     "pytest>=8.0.0",
     "pytest-asyncio>=0.23.0",

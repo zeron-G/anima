@@ -87,7 +87,12 @@ def main():
         from anima.watchdog import run_watchdog
         run_watchdog(dry_run="--dry" in args)
     elif args and args[0] == "spawn":
-        _handle_spawn(args[1:], default_profile=profile, edge_mode=edge_mode)
+        try:
+            _handle_spawn(args[1:], default_profile=profile, edge_mode=edge_mode)
+        except ImportError as e:
+            print(f"Spawn/remote deploy needs the [network] extra (paramiko/zeroconf): {e}")
+            print("Install it:  pip install anima[network]")
+            sys.exit(1)
     elif args and args[0] == "init":
         from anima.bootstrap import handle_init
         handle_init(args[1:])
@@ -99,8 +104,13 @@ def main():
     else:
         experimental = "--experimental" in args
         headless = "--headless" in args
-        from anima.desktop.app import launch_desktop
-        launch_desktop(headless=headless, experimental=experimental)
+        try:
+            from anima.desktop.app import launch_desktop
+            launch_desktop(headless=headless, experimental=experimental)
+        except ImportError as e:
+            print(f"Desktop mode needs the [desktop] extra (pywebview): {e}")
+            print("Install it:  pip install anima[desktop]   — or run headless:  python -m anima --headless")
+            sys.exit(1)
 
 
 def _extract_option(args: list[str], option: str) -> tuple[list[str], str]:

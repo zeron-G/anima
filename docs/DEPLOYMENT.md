@@ -12,10 +12,25 @@ separation model).
 
 ## 1. Backend
 
+**Install profiles (extras).** The base install is slim — LLM + cognitive +
+memory + the API/WebSocket server only. Add subsystems via extras:
+
+| install | adds |
+|---|---|
+| `pip install .` | slim core (headless API/WS, chat, memory) |
+| `pip install ".[network]"` | gossip mesh / mDNS discovery / remote-node SSH + spawn |
+| `pip install ".[desktop]"` | native pywebview window (`python -m anima`) |
+| `pip install ".[tts,stt]"` | voice (pulls **torch** — large) |
+| `pip install ".[discord]"` | Discord channel |
+| `pip install ".[all]"` | everything (single-machine full install) |
+
+If a feature is enabled in config but its extra isn't installed, ANIMA logs a
+clear message and disables that feature — it does not crash.
+
 ### Source-tree (development / single machine)
 ```bash
 git clone https://github.com/zeron-G/anima.git && cd anima
-pip install -e ".[dev]"        # conda 'anima' env, Python 3.11
+pip install -e ".[dev,all]"    # conda 'anima' env, Python 3.11 (base is slim; [all] = all features)
 # data/ + agents/eva live in the repo (gitignored); Eva runs as-is
 python -m anima --headless     # API + WS only (no desktop window)
 ```

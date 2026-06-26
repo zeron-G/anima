@@ -4,7 +4,7 @@
 
 ```bash
 conda activate anima
-pip install -e .
+pip install -e ".[dev,all]"        # base install is slim; [all] adds network/desktop/voice/discord
 # Optional but recommended:
 pip install sentence-transformers  # Local semantic search
 pip install anthropic              # Anthropic SDK (auto-retry, connection pooling)

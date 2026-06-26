@@ -814,23 +814,31 @@ async def _init_network(config: dict, core: dict, llm: dict, heartbeat_deps: dic
     Thin coordinator that delegates to _init_gossip and _init_channels.
     Returns dict with all network objects (None/empty values if network disabled).
     """
+    disabled = {
+        "gossip_mesh": None,
+        "active_channels": {},
+        "gossip_task_futures": {},
+        "gossip_task_buffers": {},
+        "channels": [],
+        "session_router": None,
+        "task_delegate": None,
+        "memory_sync": None,
+        "split_brain": None,
+        "_task_lock": None,
+        "_cognitive_ref": None,
+        "_cognitive_lock": None,
+    }
     if not get("network.enabled", False):
-        return {
-            "gossip_mesh": None,
-            "active_channels": {},
-            "gossip_task_futures": {},
-            "gossip_task_buffers": {},
-            "channels": [],
-            "session_router": None,
-            "task_delegate": None,
-            "memory_sync": None,
-            "split_brain": None,
-            "_task_lock": None,
-            "_cognitive_ref": None,
-            "_cognitive_lock": None,
-        }
+        return disabled
 
-    gossip = await _init_gossip(config, core, heartbeat_deps)
+    try:
+        gossip = await _init_gossip(config, core, heartbeat_deps)
+    except ImportError as e:
+        # network.enabled is true by default; a slim install lacks the mesh deps.
+        log.warning(
+            "Network mesh disabled — install `anima[network]` (pyzmq/zeroconf/msgpack) to enable it (%s)", e
+        )
+        return disabled
     channels = await _init_channels(config, core, gossip)
     return {**gossip, **channels}
 
