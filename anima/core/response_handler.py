@@ -245,7 +245,7 @@ class ResponseHandler:
         output_content = content
         if ctx.prompt_compiler and hasattr(ctx.prompt_compiler, "post_process"):
             try:
-                output_content = ctx.prompt_compiler.post_process(content)
+                output_content = ctx.prompt_compiler.post_process(content, emotion=ctx.emotion)
             except Exception as e:
                 log.debug("Soul Container post-processing failed: %s", e)
 

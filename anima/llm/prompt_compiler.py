@@ -893,13 +893,14 @@ class PromptCompiler:
     #  Post-processing                                                     #
     # ------------------------------------------------------------------ #
 
-    def post_process(self, response: str, *, is_user_facing: bool = True) -> str:
+    def post_process(self, response: str, *, is_user_facing: bool = True, emotion: object = None) -> str:
         """Apply SoulContainer transforms to a response.
 
-        Called after LLM generation, before output to the user.
+        Called after LLM generation, before output to the user. ``emotion``
+        (optional EmotionState) lets mood deterministically shape tone.
         """
         return self._soul_container.transform(
-            response, is_user_facing=is_user_facing,
+            response, is_user_facing=is_user_facing, emotion=emotion,
         )
 
     # ------------------------------------------------------------------ #

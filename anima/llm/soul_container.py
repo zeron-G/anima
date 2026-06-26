@@ -114,7 +114,7 @@ class SoulContainer:
     #  Public API                                                          #
     # ------------------------------------------------------------------ #
 
-    def transform(self, response: str, *, is_user_facing: bool = True) -> str:
+    def transform(self, response: str, *, is_user_facing: bool = True, emotion: Any = None) -> str:
         """Apply all loaded style rules to *response*.
 
         Parameters
@@ -124,6 +124,10 @@ class SoulContainer:
         is_user_facing:
             Set to ``False`` for self-thoughts and tool calls so that
             rules are not applied.
+        emotion:
+            Optional EmotionState. Its valence deterministically scales the
+            allowed emoji density (positive mood → more emoji, worried/negative
+            → fewer) — a drift-free way to let mood shape tone (S2 tail).
 
         Returns
         -------
@@ -135,13 +139,22 @@ class SoulContainer:
         self._message_counter += 1
         result = response
 
+        # Emotion → tone: scale emoji density by valence (clamped). No effect
+        # when emotion is absent (factor 1.0).
+        emoji_factor = 1.0
+        if emotion is not None:
+            try:
+                emoji_factor = max(0.4, min(1.8, 1.0 + 0.8 * emotion.valence()))
+            except Exception:
+                emoji_factor = 1.0
+
         for rule in self._rules:
             rtype = rule.get("type", "")
             try:
                 if rtype == "tone_particle":
                     result = self._apply_tone(result, rule)
                 elif rtype == "emoji_density":
-                    result = self._apply_emoji_density(result, rule)
+                    result = self._apply_emoji_density(result, rule, emoji_factor)
                 elif rtype == "length_guard":
                     result = self._apply_length_guard(result, rule)
                 elif rtype == "catchphrase_ensure":
@@ -219,15 +232,16 @@ class SoulContainer:
         return text
 
     @staticmethod
-    def _apply_emoji_density(text: str, rule: dict[str, Any]) -> str:
+    def _apply_emoji_density(text: str, rule: dict[str, Any], mood_factor: float = 1.0) -> str:
         """Strip excess emoji when density exceeds *max_density*.
 
         Density is defined as ``(emoji_match_count / character_count)``.
         When over the limit, randomly-selected emoji matches are removed
         until the count drops to ``floor(text_len * max_density)`` (at
-        least 1).
+        least 1). ``mood_factor`` (from emotion valence) scales the allowed
+        density: >1 in a positive mood (more emoji), <1 when worried.
         """
-        max_density: float = rule.get("max_density", 0.05)
+        max_density: float = rule.get("max_density", 0.05) * mood_factor
         strip_if_over: bool = rule.get("strip_if_over", True)
 
         matches = list(_EMOJI_RE.finditer(text))
