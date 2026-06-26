@@ -204,8 +204,8 @@ async def _init_llm(config: dict, tool_registry, tool_executor, memory_store) ->
     openai_cfg = get("llm.openai_fallback", {})
     codex_cfg = get("llm.codex_fallback", {})
     llm_router = LLMRouter(
-        tier1_model=get("llm.tier1.model", "claude-opus-4-6"),
-        tier2_model=get("llm.tier2.model", "claude-opus-4-6"),
+        tier1_model=get("llm.tier1.model", "claude-opus-4-8"),
+        tier2_model=get("llm.tier2.model", "claude-opus-4-8"),
         tier1_max_tokens=get("llm.tier1.max_tokens", 8192),
         tier2_max_tokens=get("llm.tier2.max_tokens", 8192),
         daily_budget=get("llm.budget.daily_limit_usd", 5.0),

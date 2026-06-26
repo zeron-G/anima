@@ -89,7 +89,7 @@ machine-local override; `local/env.yaml` is a backward-compat layer.
 Key settings:
 ```yaml
 llm:
-  tier1: { model: "claude-opus-4-6", max_tokens: 16384 }
+  tier1: { model: "claude-opus-4-8", max_tokens: 16384 }
   tier2: { model: "claude-sonnet-4-6", max_tokens: 8192 }
   budget: { daily_limit_usd: 10.0 }
 

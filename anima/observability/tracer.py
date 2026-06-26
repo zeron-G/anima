@@ -17,7 +17,7 @@ Usage:
             # ... do work ...
 
         with trace.span("llm_call") as s:
-            s.set("model", "claude-opus-4-6")
+            s.set("model", "claude-opus-4-8")
             s.set("prompt_tokens", 3000)
             # ... do work ...
 

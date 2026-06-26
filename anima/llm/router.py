@@ -133,7 +133,7 @@ class LLMRouter:
         return False  # skip
 
     # Anthropic fallback models for cascade
-    OPUS_FALLBACK = "claude-opus-4-6"
+    OPUS_FALLBACK = "claude-opus-4-8"
     SONNET_FALLBACK = "claude-sonnet-4-6"
 
     async def _try_call(self, messages, tier, temperature, tools=None):

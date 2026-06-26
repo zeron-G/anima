@@ -51,11 +51,11 @@ perception:
 
 # ── LLM ──
 llm:
-  tier1: { model: "claude-opus-4-6", max_tokens: 16384, max_context: 200000 }
+  tier1: { model: "claude-opus-4-8", max_tokens: 16384, max_context: 200000 }
   tier2: { model: "claude-sonnet-4-6", max_tokens: 16384, max_context: 200000 }
   # Model prefix routing:
   #   "codex/..."           → Codex OAuth (ChatGPT subscription, free)
-  #   "claude-opus-4-6"     → Anthropic API (OAuth/API key)
+  #   "claude-opus-4-8"     → Anthropic API (OAuth/API key)
   #   "local/"              → local server (llama.cpp/ollama/vLLM)
   #   "openai/gpt-4o"       → OpenAI cloud API
   # Hot-switch: POST /api/config {"key":"llm.tier1.model","value":"local/"}
