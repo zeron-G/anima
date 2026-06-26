@@ -8,7 +8,6 @@ Optionally calls external moderation API.
 from __future__ import annotations
 
 import re
-from typing import Any
 
 from anima.config import get
 from anima.core.pipeline import PipelineContext, PipelineStage

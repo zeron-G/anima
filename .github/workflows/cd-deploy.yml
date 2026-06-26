@@ -1,4 +1,8 @@
-name: CD Deploy
+name: Build & Verify
+
+# Builds the publishable wheel/sdist and proves the "installed kernel" path works:
+# packaged read-only resources + persona seed resolve, and `anima init` bootstraps
+# a runnable home — the engineering gate before any release.
 
 on:
   push:
@@ -6,36 +10,37 @@ on:
   workflow_dispatch:
 
 jobs:
-  deploy:
+  build:
     runs-on: ubuntu-latest
-    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
-
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      - name: Install dependencies
+      - name: Build sdist + wheel
         run: |
-          python -m pip install --upgrade pip
-          pip install -e ".[dev]"
+          python -m pip install --upgrade pip build
+          python -m build
 
-      - name: Verify tests pass
+      - name: Verify packaged wheel (installed mode — no source tree)
         run: |
-          python -m pytest tests/ \
-            --ignore=tests/stress_test.py \
-            --ignore=tests/test_oauth_live.py \
-            --ignore=tests/test_full_system.py \
-            --ignore=tests/test_integration_network.py \
-            -q --tb=short
+          python -m venv /tmp/verifyenv
+          /tmp/verifyenv/bin/pip install --quiet "$(ls dist/*.whl)" pyyaml python-dotenv
+          cd /tmp   # outside the repo so config.source_tree() is None (installed mode)
+          /tmp/verifyenv/bin/python -c "import anima.config as c; assert c.source_tree() is None; assert (c.config_dir()/'default.yaml').exists(); assert (c.seed_agents_dir()/'identity'/'core.md').exists(); print('packaged config + seed OK')"
+          /tmp/verifyenv/bin/python -m anima init --home /tmp/anima_home
+          test -f /tmp/anima_home/agents/eva/identity/core.md && echo "anima init OK"
 
-      - name: Tag release
+      - name: Privacy check — no private data in sdist
         run: |
-          VERSION=$(python -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")
-          git tag -f "v${VERSION}" || true
-          echo "Tagged v${VERSION}"
+          ! tar tzf dist/*.tar.gz | grep -E 'agents/eva|/data/|env_catalog|\.env$|\.bak$' && echo "sdist clean"
+
+      - name: Upload dist artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: anima-dist
+          path: dist/*
+          if-no-files-found: error

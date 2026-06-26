@@ -10,7 +10,7 @@ import asyncio
 import os
 import queue
 import threading
-from typing import Any, Callable
+from typing import Any
 
 from anima.channels.base import BaseChannel
 from anima.models.message import MessagePayload

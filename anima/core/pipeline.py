@@ -6,7 +6,6 @@ Setting ctx.handled = True short-circuits the remaining stages.
 
 from __future__ import annotations
 
-import asyncio
 from dataclasses import dataclass, field
 from typing import Any, TYPE_CHECKING
 

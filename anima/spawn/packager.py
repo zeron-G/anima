@@ -13,7 +13,6 @@ import time
 from pathlib import Path
 from typing import Any
 
-import yaml
 from anima.config import get, source_tree
 from anima.network.discovery import get_local_ip
 from anima.network.node import NodeIdentity

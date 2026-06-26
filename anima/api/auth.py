@@ -7,7 +7,6 @@ import hmac
 import json
 import secrets
 import time
-from typing import Any
 
 from aiohttp import web
 
