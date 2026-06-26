@@ -262,3 +262,28 @@ async def test_dashboard_cors_allowlist(dashboard):
             "http://localhost:18420/", headers={"Origin": "http://localhost:5173"}
         ) as resp:
             assert resp.headers.get("Access-Control-Allow-Origin") == "http://localhost:5173"
+
+
+@pytest.mark.asyncio
+async def test_snapshot_handles_deque_tick_history(dashboard):
+    """Regression: a REAL heartbeat keeps _tick_history as a deque(maxlen=30),
+    which is not sliceable — get_full_snapshot() must not crash with
+    'sequence index must be integer, not slice' (that broke the live WebSocket
+    feed at runtime even though the test hub, lacking a heartbeat, never hit it)."""
+    from collections import deque
+    server, hub = dashboard
+
+    class _StubHB:
+        _running = True
+        _tick_count = 3
+        _script_interval = 30
+        _llm_interval = 300
+        _major_interval = 900
+        _tick_history = deque([{"tick": 1}, {"tick": 2}], maxlen=30)
+        _consecutive_skips = 0
+        _recent_significance_scores = [0.1, 0.2]
+
+    hub.heartbeat = _StubHB()
+    snap = hub.get_full_snapshot()  # must not raise
+    th = snap["heartbeat"]["tick_history"]
+    assert isinstance(th, list) and len(th) == 2

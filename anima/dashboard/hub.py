@@ -348,7 +348,7 @@ class DashboardHub:
             "script_interval_s": hb._script_interval,
             "llm_interval_s": hb._llm_interval,
             "major_interval_s": hb._major_interval,
-            "tick_history": hb._tick_history[-30:],
+            "tick_history": list(hb._tick_history)[-30:],  # deque → list (deques aren't sliceable)
             "consecutive_llm_skips": hb._consecutive_skips,
             "recent_significance_scores": hb._recent_significance_scores[-10:],
         }

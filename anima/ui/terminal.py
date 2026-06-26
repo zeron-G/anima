@@ -165,7 +165,12 @@ class TerminalUI:
             try:
                 user_input = await asyncio.to_thread(self._blocking_input)
                 if user_input is None:
-                    continue
+                    # None = EOF / interrupt (stdin closed or non-interactive —
+                    # isatty() can wrongly report a TTY). STOP the loop instead of
+                    # `continue`, which tight-loops and floods stdout with "You> ".
+                    log.info("Terminal input closed (EOF) — disabling interactive prompt")
+                    self._running = False
+                    return
                 text = user_input.strip()
                 if not text:
                     continue
