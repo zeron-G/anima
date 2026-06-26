@@ -59,6 +59,34 @@ async def completion_stream(
     Falls back to non-streaming (yields a single message_complete event)
     if the provider doesn't support streaming.
     """
+    if model.startswith("codex/"):
+        # Codex (ChatGPT subscription) has no incremental SSE surface exposed here.
+        # Route to the non-streaming provider and emit the result as a single
+        # message_complete (+ one text_delta for display). Without this branch,
+        # codex/ models fell through to Anthropic streaming → 404, which made the
+        # tool loop fail and fall back messily — the bug where tool calls leaked
+        # into chat and replies stopped mid-sentence.
+        from anima.llm.providers.codex import _codex_completion
+        try:
+            resp = await _codex_completion(
+                model=model, messages=messages, max_tokens=max_tokens,
+                temperature=temperature, tools=tools,
+            )
+        except Exception as e:
+            yield StreamEvent(type="error", error=f"Codex error: {str(e)[:300]}")
+            return
+        content = resp.get("content", "") or ""
+        if content:
+            yield StreamEvent(type="text_delta", text=content)
+        yield StreamEvent(
+            type="message_complete",
+            content=content,
+            tool_calls=resp.get("tool_calls", []),
+            usage=resp.get("usage", {}),
+            model=resp.get("model", model),
+        )
+        return
+
     if model.startswith("local/"):
         base = os.environ.get("LOCAL_LLM_BASE_URL", _LOCAL_LLM_BASE)
         model_id = model.removeprefix("local/").strip() or None
