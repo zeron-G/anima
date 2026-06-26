@@ -85,8 +85,8 @@ def create_spawn_package(
                     "data", ".venv", "venv",
                 })
 
-        # pyproject.toml + requirements.txt
-        for f in ["pyproject.toml", "requirements.txt"]:
+        # pyproject.toml (the single source of dependencies)
+        for f in ["pyproject.toml"]:
             fp = root / f
             if fp.exists():
                 tar.add(str(fp), arcname=f)
@@ -233,11 +233,8 @@ cd "$ANIMA_DIR"
 # Create venv
 $PYTHON -m venv .venv
 source .venv/bin/activate
-# Install
-if [ -f requirements.txt ]; then
-  pip install -r requirements.txt --quiet 2>&1 | tail -3
-fi
-pip install -e . --quiet 2>&1 | tail -3
+# Install (slim core + [network] — a spawned node joins the gossip mesh)
+pip install -e ".[network]" --quiet 2>&1 | tail -3
 # Permissions
 chmod 600 .env 2>/dev/null || true
 {profile_env}{install_service_block}
@@ -289,10 +286,7 @@ Copy-Item -Recurse -Force .\\* $ANIMA_DIR\\
 Set-Location $ANIMA_DIR
 & $PYTHON -m venv .venv
 $venvPy = Join-Path $ANIMA_DIR ".venv\\Scripts\\python.exe"
-if (Test-Path .\\requirements.txt) {{
-  & $venvPy -m pip install -r .\\requirements.txt --quiet
-}}
-& $venvPy -m pip install -e . --quiet
+& $venvPy -m pip install -e ".[network]" --quiet
 New-Item -ItemType Directory -Force -Path (Join-Path $ANIMA_DIR "data\\logs") | Out-Null
 {profile_block}
 {service_block}

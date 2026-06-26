@@ -7,7 +7,8 @@ dist/
 build/
 .eggs/
 *.egg
-anima/_resources/        # build artifact: mirrored config/prompts/skills (see setup.py)
+# build artifact: config/prompts/skills/seed mirrored into the package at build (see setup.py)
+anima/_resources/
 
 # Virtual environments
 .venv/
@@ -50,6 +51,8 @@ local/env.yaml
 .env
 .env.*
 !.env.example
+# build-time config template (no secrets) — intentionally tracked
+!eva-ui/.env.production
 
 # Live persona instances are PRIVATE — only the published seed (agents/_seed)
 # is tracked. `anima init` copies the seed into $ANIMA_HOME/agents/<name>, which
@@ -88,13 +91,14 @@ anima/desktop/frontend/model/
 .pytest_cache/
 htmlcov/
 .coverage
-tests/_*.py
+tests/_[!_]*.py
 
 # Dev tools output
 tools/vrm_report.txt
 
-# Temporary/debug scripts (root level)
-_*.py
+# Temporary/debug scripts (root level only — anchored so it never ignores
+# nested package __init__.py / __main__.py)
+/_[!_]*.py
 tmp_*
 test_out*
 D*tmp*
@@ -105,8 +109,12 @@ data/deploy_*.sh
 # Live2D binary models (too large for git)
 anima/dashboard/static/model/PurpleBird/
 
-# Batch/shortcut files
+# Batch/shortcut files + machine-specific launchers (hardcode local abs paths)
 ANIMA.bat
+start_eva.bat
+start_eva.vbs
+launcher.py
+test_config.py
 create_shortcut.bat
 uv.lock
 eva-ui/node_modules
