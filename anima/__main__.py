@@ -77,7 +77,7 @@ def _launch_web(*, headless: bool = False, experimental: bool = False) -> None:
     open the browser. The native desktop window (pywebview) was removed — ANIMA is
     a web app; just point a browser at the dashboard URL."""
     import atexit
-    from anima.desktop.singleton import acquire_lock, release_lock
+    from anima.core.singleton import acquire_lock, release_lock
 
     if not acquire_lock(experimental=experimental):
         print("ANIMA is already running (use --experimental to allow a second instance).")
