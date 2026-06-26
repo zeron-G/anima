@@ -19,7 +19,6 @@ memory + the API/WebSocket server only. Add subsystems via extras:
 |---|---|
 | `pip install .` | slim core (headless API/WS, chat, memory) |
 | `pip install ".[network]"` | gossip mesh / mDNS discovery / remote-node SSH + spawn |
-| `pip install ".[desktop]"` | native pywebview window (`python -m anima`) |
 | `pip install ".[tts,stt]"` | voice (pulls **torch** — large) |
 | `pip install ".[discord]"` | Discord channel |
 | `pip install ".[all]"` | everything (single-machine full install) |

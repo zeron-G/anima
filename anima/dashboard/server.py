@@ -120,11 +120,11 @@ class DashboardServer:
         if static_dir.exists():
             self._app.router.add_static("/static/", static_dir)
 
-        # Desktop frontend (VRM/Live2D + chat window) — kept for backward compat
+        # Static assets for the SPA — the Flare VRM avatar lives here and eva-ui
+        # loads /desktop/static/model/flare/Flare.vrm (path kept for back-compat).
+        # The old standalone desktop HTML UI is gone — eva-ui is the single web UI.
         desktop_dir = Path(__file__).parent.parent / "desktop" / "frontend"
         if desktop_dir.exists():
-            self._app.router.add_get("/desktop", self._handle_desktop)
-            self._app.router.add_get("/desktop/", self._handle_desktop)
             self._app.router.add_static("/desktop/static/", desktop_dir)
 
         # Vue SPA — served from a configurable dist dir (Phase 3 frontend split).
@@ -189,12 +189,6 @@ class DashboardServer:
         log.info("Dashboard stopped.")
 
     # ── Routes ──
-
-    async def _handle_desktop(self, request: web.Request) -> web.Response:
-        desktop_index = Path(__file__).parent.parent / "desktop" / "frontend" / "index.html"
-        if desktop_index.exists():
-            return web.FileResponse(desktop_index)
-        return web.Response(text="Desktop frontend not found", status=404)
 
     async def _handle_ws(self, request: web.Request) -> web.WebSocketResponse:
         ws = web.WebSocketResponse()

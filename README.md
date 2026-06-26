@@ -32,8 +32,7 @@ At a high level, ANIMA is organized like this:
 
 ```text
 Client Surfaces
-  - Browser-based Vue interface
-  - Built-in pywebview desktop window
+  - Browser-based Vue web app (eva-ui) — the single frontend
   - Terminal mode
   - Remote node and edge integrations
 
@@ -81,10 +80,10 @@ Important backend areas:
 # First run: initialize a private home from the persona seed (data + live instance + .env)
 python -m anima init                 # default home; or --home <dir> for a private location
 
-# Desktop app
+# Start ANIMA + open the web UI in your browser
 python -m anima
 
-# Backend only
+# Headless (run the server without opening a browser — for servers)
 python -m anima --headless
 
 # Terminal (legacy) mode

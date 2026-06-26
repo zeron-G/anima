@@ -16,7 +16,7 @@ pip install chromadb               # Vector database
 
 ```bash
 python -m anima init               # First run: bootstrap a home from the persona seed
-python -m anima                    # Desktop mode (PyWebView)
+python -m anima                    # Start + open the web UI in a browser
 python -m anima --headless         # Headless (API + WebSocket only)
 python -m anima --legacy           # Terminal mode
 python -m anima watchdog           # Watchdog supervisor (subcommand, NOT a flag)

@@ -32,8 +32,7 @@ ANIMA 主要由几层组成：
 
 ```text
 交互层
-  - 基于浏览器的 Vue 界面
-  - 内置 pywebview 桌面窗口
+  - 基于浏览器的 Vue 网页应用(eva-ui)—— 唯一前端
   - 终端模式
   - 远程节点与 edge 节点接入
 
@@ -81,10 +80,10 @@ tests/             后端测试
 # 首次使用：从人格种子初始化一个私有 home（data + 活体实例 + .env 模板）
 python -m anima init                 # 默认 home；或 --home <目录> 指定私有位置
 
-# 桌面应用
+# 启动 ANIMA 并自动打开网页 UI
 python -m anima
 
-# 仅后端
+# Headless(只跑后端,不打开浏览器 —— 服务器用)
 python -m anima --headless
 
 # 终端（legacy）模式

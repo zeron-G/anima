@@ -2,8 +2,8 @@
 
 Usage:
     python -m anima init             # Bootstrap a private ANIMA home from the seed
-    python -m anima                  # Desktop app (PyWebView native window)
-    python -m anima --headless       # Backend only (browser access)
+    python -m anima                  # Start ANIMA + open the web UI in your browser
+    python -m anima --headless       # Start ANIMA without opening a browser (servers)
     python -m anima --edge           # Edge ANIMA for robot-dog Linux nodes
     python -m anima --legacy         # Legacy terminal mode
     python -m anima --experimental   # Allow second instance
@@ -72,6 +72,39 @@ if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
 
+def _launch_web(*, headless: bool = False, experimental: bool = False) -> None:
+    """Run the ANIMA backend (it serves the eva-ui web app) and, unless headless,
+    open the browser. The native desktop window (pywebview) was removed — ANIMA is
+    a web app; just point a browser at the dashboard URL."""
+    import atexit
+    from anima.desktop.singleton import acquire_lock, release_lock
+
+    if not acquire_lock(experimental=experimental):
+        print("ANIMA is already running (use --experimental to allow a second instance).")
+        sys.exit(1)
+    atexit.register(release_lock)
+
+    from anima.config import get
+    url = f"http://127.0.0.1:{get('dashboard.port', 8420)}/"
+    if not headless:
+        import threading
+        import time
+        import webbrowser
+
+        def _open_when_ready() -> None:
+            time.sleep(2.5)  # let the server bind first
+            try:
+                webbrowser.open(url)
+            except Exception:
+                pass
+
+        threading.Thread(target=_open_when_ready, daemon=True).start()
+        print(f"ANIMA web UI: {url}   (Ctrl+C to stop)")
+
+    from anima.main import main_entry
+    main_entry()
+
+
 def main():
     args = sys.argv[1:]
     args, profile = _extract_option(args, "--profile")
@@ -104,13 +137,7 @@ def main():
     else:
         experimental = "--experimental" in args
         headless = "--headless" in args
-        try:
-            from anima.desktop.app import launch_desktop
-            launch_desktop(headless=headless, experimental=experimental)
-        except ImportError as e:
-            print(f"Desktop mode needs the [desktop] extra (pywebview): {e}")
-            print("Install it:  pip install anima[desktop]   — or run headless:  python -m anima --headless")
-            sys.exit(1)
+        _launch_web(headless=headless, experimental=experimental)
 
 
 def _extract_option(args: list[str], option: str) -> tuple[list[str], str]:

@@ -37,10 +37,8 @@ watch = ["watchdog>=4.0.0"]
 discord = ["discord.py>=2.3"]
 # Distributed gossip mesh (zmq) + mDNS discovery + remote-node SSH deploy/spawn.
 network = ["pyzmq>=25.0", "msgpack>=1.0", "zeroconf>=0.131", "paramiko>=3.5.0"]
-# Native desktop window (pywebview). Server/headless deployments don't need it.
-desktop = ["pywebview>=5.0"]
 # Everything — a full single-machine install.
-all = ["anima[network,desktop,tts,stt,discord,watch]"]
+all = ["anima[network,tts,stt,discord,watch]"]
 dev = [
     "pytest>=8.0.0",
     "pytest-asyncio>=0.23.0",
