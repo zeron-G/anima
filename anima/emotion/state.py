@@ -156,6 +156,8 @@ class EmotionState:
             "user_state": self.user_state,
             "intensity":  round(self.intensity,  3),
             "mood_label": self.mood_label,
+            "arousal":    self.arousal(),
+            "valence":    self.valence(),
         }
 
     def dominant(self) -> str:
@@ -167,3 +169,55 @@ class EmotionState:
             "concern":    self.concern,
         }
         return max(d, key=d.get)  # type: ignore[arg-type]
+
+    # ── Derived affect signals (S2: emotion with consequences) ──────────────────
+    # These turn the previously decorative emotion vector into signals that other
+    # subsystems consume: memory salience, speaking tone, and proactive behaviour.
+
+    def arousal(self) -> float:
+        """How emotionally activated, 0 (calm/at-rest) .. 1 (highly charged).
+
+        Combines how far the dimensions have moved from their temperamental
+        baseline with the perceived intensity of the current user emotion.
+        Drives memory salience — charged moments are encoded more strongly.
+        """
+        dev = 0.0
+        for dim, base in self._baseline.items():
+            dev = max(dev, abs(getattr(self, dim) - base))
+        intensity_term = self.intensity if self.user_state != "neutral" else 0.0
+        return round(max(0.0, min(1.0, max(dev * 1.5, intensity_term))), 3)
+
+    def valence(self) -> float:
+        """Affective tone, -1 (negative) .. +1 (positive). Drives speaking tone."""
+        positive = (self.engagement + self.confidence) / 2.0
+        return round(max(-1.0, min(1.0, (positive - 0.5) * 2.0 - self.concern)), 3)
+
+    def salience_multiplier(self) -> float:
+        """Memory-encoding weight: 1.0 calm → ~1.6 highly aroused.
+
+        Applied to the importance score at save time so high-affect episodes are
+        remembered (and later recalled) more strongly — the emotion↔memory bridge.
+        """
+        return round(1.0 + 0.6 * self.arousal(), 3)
+
+    def thinking_interval_factor(self) -> float:
+        """Multiplier on the autonomous-thinking interval.
+
+        < 1 → think/explore more often (curious, engaged); > 1 → quieter
+        (deflated, low drive). Makes proactivity a measurable function of mood.
+        """
+        drive = (self.curiosity + self.engagement) / 2.0
+        return round(max(0.6, min(1.8, 1.7 - drive * 1.4)), 3)
+
+    def restore(self, data: dict) -> None:
+        """Restore dimensions from a persisted dict (DB row or checkpoint)."""
+        if not data:
+            return
+        self.engagement = float(data.get("engagement", self.engagement))
+        self.confidence = float(data.get("confidence", self.confidence))
+        self.curiosity = float(data.get("curiosity", self.curiosity))
+        self.concern = float(data.get("concern", self.concern))
+        if data.get("user_state"):
+            self.user_state = data["user_state"]
+        if data.get("intensity") is not None:
+            self.intensity = float(data["intensity"])

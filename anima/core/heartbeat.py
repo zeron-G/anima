@@ -374,6 +374,10 @@ class HeartbeatEngine:
                 elif activity == "minimal":
                     effective_interval = max(effective_interval, 1800)  # min 30 min
 
+                # S2: emotion paces autonomous thinking — curious/engaged Eva
+                # thinks & explores more; deflated/low-drive Eva stays quieter.
+                effective_interval = int(effective_interval * self._emotion.thinking_interval_factor())
+
                 if self._should_llm_think():
                     await self._on_llm_tick()
                     self._consecutive_skips = 0

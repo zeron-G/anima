@@ -238,11 +238,14 @@ class TestResponseHandler:
 
     def _make_ctx(self, **overrides):
         from anima.core.context import CognitiveContext
+        from anima.emotion.state import EmotionState
         defaults = {
             "event_queue": MagicMock(),
             "snapshot_cache": MagicMock(),
             "memory_store": MagicMock(),
-            "emotion": MagicMock(),
+            # Real EmotionState: emotion is now functionally consumed (S2 salience),
+            # so a bare MagicMock would break ctx.emotion.salience_multiplier().
+            "emotion": EmotionState(),
             "llm_router": MagicMock(),
             "tool_executor": MagicMock(),
             "tool_registry": MagicMock(),
@@ -250,6 +253,7 @@ class TestResponseHandler:
         }
         defaults["memory_store"].save_memory_async = AsyncMock()
         defaults["memory_store"].audit_async = AsyncMock()
+        defaults["memory_store"].log_emotion_async = AsyncMock()
         defaults.update(overrides)
         return CognitiveContext(**defaults)
 

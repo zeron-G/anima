@@ -650,6 +650,22 @@ class MemoryStore:
             engagement, confidence, curiosity, concern, trigger,
         )
 
+    def _get_latest_emotion_sync(self) -> dict | None:
+        """Most recent persisted emotion snapshot, or None if never logged."""
+        row = self._conn.execute(
+            "SELECT engagement, confidence, curiosity, concern, timestamp "
+            "FROM emotion_log ORDER BY timestamp DESC LIMIT 1"
+        ).fetchone()
+        return dict(row) if row else None
+
+    def get_latest_emotion(self) -> dict | None:
+        """Sync: latest emotion snapshot for restore-on-startup (S2)."""
+        return self._get_latest_emotion_sync()
+
+    async def get_latest_emotion_async(self) -> dict | None:
+        """Async: latest emotion snapshot for restore-on-startup (S2)."""
+        return await asyncio.to_thread(self._get_latest_emotion_sync)
+
     # ------------------------------------------------------------------ #
     #  State Snapshots                                                     #
     # ------------------------------------------------------------------ #

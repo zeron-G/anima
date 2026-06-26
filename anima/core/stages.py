@@ -88,6 +88,7 @@ class EventRoutingStage(PipelineStage):
         # Save user message to memory
         if event.type == EventType.USER_MESSAGE and pctx.user_message:
             imp = ctx.importance_scorer.score(pctx.user_message, "chat_user") if ctx.importance_scorer else 0.6
+            imp = min(1.0, imp * ctx.emotion.salience_multiplier())  # S2: emotion → memory salience
             await ctx.memory_store.save_memory_async(
                 content=pctx.user_message, type="chat", importance=imp,
                 metadata={"role": "user"}, session_id=pctx.session_id or "local",

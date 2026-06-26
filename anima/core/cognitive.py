@@ -178,6 +178,22 @@ class AgenticLoop:
             self._ctx.emotion.concern = emotion.get("concern", self._ctx.emotion.concern)
             log.info("Restored emotion state from checkpoint")
 
+    def restore_emotion_from_db(self) -> None:
+        """Restore the last persisted emotion so mood survives ANY restart (S2).
+
+        Before S2 emotion reset to baseline on every non-evolution restart. Now
+        it is logged to emotion_log on each interaction and recovered here, the
+        same way conversation is recovered from episodic.
+        """
+        try:
+            latest = self._ctx.memory_store.get_latest_emotion()
+        except Exception as e:
+            log.debug("Emotion restore query failed: %s", e)
+            return
+        if latest:
+            self._ctx.emotion.restore(latest)
+            log.info("Restored emotion from DB (mood=%s)", self._ctx.emotion.mood_label)
+
     def load_conversation_from_db(self) -> None:
         """Rebuild recent conversation from episodic — the single source of truth.
 

@@ -143,6 +143,17 @@ class ResponseHandler:
             else:
                 ctx.emotion.adjust(engagement=0.08)  # Minimal default
 
+            # S2: persist emotion so mood survives ANY restart (not just evolution
+            # checkpoints). Restored on startup via restore_emotion_from_db().
+            try:
+                e = ctx.emotion
+                await ctx.memory_store.log_emotion_async(
+                    e.engagement, e.confidence, e.curiosity, e.concern,
+                    trigger="interaction",
+                )
+            except Exception as ex:
+                log.debug("Emotion persist failed: %s", ex)
+
         # -- 5. Evolution phase transitions ------------------------------
         if event.payload and event.payload.get("evolution"):
             self._handle_evolution_transition(ctx, event)
@@ -258,6 +269,7 @@ class ResponseHandler:
             if ctx.importance_scorer
             else 0.6
         )
+        importance = min(1.0, importance * ctx.emotion.salience_multiplier())  # S2: emotion → salience
         await ctx.memory_store.save_memory_async(
             content=content,
             type="chat",

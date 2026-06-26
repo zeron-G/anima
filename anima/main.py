@@ -908,6 +908,7 @@ async def _init_cognitive(config: dict, core: dict, llm: dict, heartbeat_deps: d
     # Always load recent conversation from DB — works for ANY restart type
     # (cold restart, watchdog kill, evolution restart, manual restart)
     cognitive.load_conversation_from_db()
+    cognitive.restore_emotion_from_db()  # S2: mood survives any restart
 
     # Also check for evolution checkpoint (has extra state like emotion)
     checkpoint = ReloadManager.load_checkpoint()
