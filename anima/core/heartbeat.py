@@ -378,6 +378,13 @@ class HeartbeatEngine:
                 # thinks & explores more; deflated/low-drive Eva stays quieter.
                 effective_interval = int(effective_interval * self._emotion.thinking_interval_factor())
 
+                # S4: if recent autonomous thoughts produced nothing (all "quiet"),
+                # back off further — few & meaningful beats frequent & idle.
+                if self._governance:
+                    quiet = self._governance.recent_quiet_ratio()
+                    if quiet >= 0.6:
+                        effective_interval = int(effective_interval * (1.0 + quiet))
+
                 if self._should_llm_think():
                     await self._on_llm_tick()
                     self._consecutive_skips = 0

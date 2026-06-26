@@ -28,8 +28,10 @@ edge:
 # ── Heartbeat ──
 heartbeat:
   script_interval_s: 30
-  llm_interval_s: 300        # 5 min (was 10 min) — Eva thinks more often
-  major_interval_s: 900      # 15 min (was 30 min) — evolution checks more often
+  llm_interval_s: 600        # 10 min base — fewer, DEEPER autonomous thoughts (S4).
+                             # Emotion paces it (curious→shorter, deflated→longer) and
+                             # repeated low-value "quiet" thinking backs off further.
+  major_interval_s: 1800     # 30 min — evolution / major checks
 
 llm_trigger:
   min_significant_diffs: 3   # trigger on fewer changes (was 5)

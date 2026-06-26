@@ -125,6 +125,17 @@ class GovernanceEngine:
                 return False  # Should trigger style reset
         return True
 
+    def recent_quiet_ratio(self) -> float:
+        """Fraction of recent self-thoughts that produced no action (0..1).
+
+        A high ratio means Eva keeps thinking but doing nothing — the heartbeat
+        uses this to back off so autonomous thought stays few-but-meaningful (S4).
+        """
+        acts = self._recent_self_thinking_actions
+        if not acts:
+            return 0.0
+        return sum(1 for a in acts if a == "quiet") / len(acts)
+
     def get_activity_level(self) -> str:
         """Determine current activity level based on config."""
         return get("governance.default_mode", "active")

@@ -205,6 +205,11 @@ class PromptCompilationStage(PipelineStage):
                 else:
                     conv_buffer = [{k: v for k, v in m.items() if k in _API_KEYS}
                                    for m in ctx.conversation[-ctx.max_conversation_turns:]]
+            elif event_type_name == "SELF_THINKING":
+                # S4: anchor autonomous thought in recent conversation so reflection
+                # is grounded in what actually happened — deeper, not free-floating.
+                conv_buffer = [{k: v for k, v in m.items() if k in _API_KEYS}
+                               for m in ctx.get_recent_conversation(6)]
 
             tools_desc = self._orchestrator.build_tools_description(event_type_name, pctx.user_message) if decision.needs_tools else ""
             # Pass current model name for model_hints adaptation
