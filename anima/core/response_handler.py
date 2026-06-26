@@ -239,15 +239,19 @@ class ResponseHandler:
                 log.debug("Soul Container post-processing failed: %s", e)
 
         await self._output(ctx, output_content, current_source=current_source)
-        await self._save_chat(ctx, "assistant", output_content)
+        await self._save_chat(ctx, "assistant", output_content, session_id=current_source or "local")
 
     # ------------------------------------------------------------------ #
     #  Memory persistence                                                  #
     # ------------------------------------------------------------------ #
 
     @staticmethod
-    async def _save_chat(ctx: CognitiveContext, role: str, content: str) -> None:
-        """Save a chat message to episodic memory with dynamic importance."""
+    async def _save_chat(ctx: CognitiveContext, role: str, content: str, session_id: str = "local") -> None:
+        """Save a chat message to episodic memory with dynamic importance.
+
+        ``session_id`` scopes the turn so the conversation can be rebuilt from
+        episodic per session (S1). Episodic is the single source of truth.
+        """
         mem_type = "chat_user" if role == "user" else "chat_assistant"
         importance = (
             ctx.importance_scorer.score(content, mem_type)
@@ -259,6 +263,7 @@ class ResponseHandler:
             type="chat",
             importance=importance,
             metadata={"role": role},
+            session_id=session_id or "local",
         )
 
     # ------------------------------------------------------------------ #

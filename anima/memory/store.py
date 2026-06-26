@@ -190,7 +190,7 @@ class MemoryStore:
         store._conn = store._db.raw_connection
 
         # Migrate: add columns that may not exist in older DBs
-        for col, default in [("sync_seq", "0"), ("content_hash", "''"), ("decay_score", "NULL")]:
+        for col, default in [("sync_seq", "0"), ("content_hash", "''"), ("decay_score", "NULL"), ("session_id", "'local'")]:
             col_type = "INTEGER" if default == "0" else ("REAL" if default == "NULL" else "TEXT")
             await store._db.add_column_if_missing(
                 "episodic_memories", col, col_type, default,
@@ -202,6 +202,11 @@ class MemoryStore:
         )
         await store._db.create_index_if_missing(
             "idx_content_hash", "episodic_memories", "content_hash",
+        )
+        # S1: session_id scopes the conversation log so a session can be rebuilt
+        # from episodic (the single source of truth) after eviction/restart.
+        await store._db.create_index_if_missing(
+            "idx_episodic_session", "episodic_memories", "session_id",
         )
 
         log.info("Memory store initialized (via DatabaseManager): %s", store._db_path)
@@ -272,20 +277,22 @@ class MemoryStore:
         importance: float,
         metadata: dict,
         tags: list[str],
+        session_id: str = "",
     ) -> str:
         """Sync inner — runs in thread."""
         mid = gen_id("mem")
         now = time.time()
         seq = self._next_sync_seq()
         chash = self._content_hash(content, type)
+        sid = session_id or "local"
         self._db.write_sync(
             "INSERT INTO episodic_memories "
             "(id, type, content, importance, access_count, created_at, last_accessed, "
-            "metadata_json, tags_json, sync_seq, content_hash, decay_score) "
-            "VALUES (?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?)",
+            "metadata_json, tags_json, sync_seq, content_hash, decay_score, session_id) "
+            "VALUES (?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?)",
             (mid, type, content, importance, now, now,
              json.dumps(metadata), json.dumps(tags),
-             seq, chash, importance),
+             seq, chash, importance, sid),
         )
         return mid
 
@@ -296,10 +303,11 @@ class MemoryStore:
         importance: float = 0.5,
         metadata: dict | None = None,
         tags: list[str] | None = None,
+        session_id: str = "",
     ) -> str:
         """Save an episodic memory (sync backward-compat). Returns the ID."""
         mid = self._save_memory_sync(
-            content, type, importance, metadata or {}, tags or [],
+            content, type, importance, metadata or {}, tags or [], session_id,
         )
         # Add to ChromaDB
         try:
@@ -338,11 +346,12 @@ class MemoryStore:
         importance: float = 0.5,
         metadata: dict | None = None,
         tags: list[str] | None = None,
+        session_id: str = "",
     ) -> str:
         """Save an episodic memory (non-blocking). Returns the ID."""
         mid = await asyncio.to_thread(
             self._save_memory_sync, content, type, importance,
-            metadata or {}, tags or [],
+            metadata or {}, tags or [], session_id,
         )
 
         # Add to ChromaDB (also in thread)
@@ -555,6 +564,48 @@ class MemoryStore:
         return await asyncio.to_thread(
             self._get_recent_memories_sync, limit, type, source,
         )
+
+    # ── Conversation rebuild (S1: episodic = single source of truth) ──
+
+    def _get_session_conversation_sync(self, session_id: str, limit: int) -> list[dict]:
+        """Rebuild a session's recent chat turns from episodic (source of truth).
+
+        Returns chronological ``[{role, content, is_self_thought, created_at}]``.
+        ``session_id`` is matched exactly; pass ``"local"`` for the single-user /
+        main conversation. Only ``type='chat'`` rows participate. This is how a
+        conversation buffer is reconstructed after eviction, TTL expiry, or a
+        process restart — the in-memory buffers are caches, this is the truth.
+        """
+        # rowid tiebreaker → deterministic insertion order when two turns share
+        # a created_at (sub-second saves); rowid is monotonic and survives restart.
+        rows = self._conn.execute(
+            "SELECT content, metadata_json, created_at FROM episodic_memories "
+            "WHERE type = 'chat' AND session_id = ? "
+            "ORDER BY created_at DESC, rowid DESC LIMIT ?",
+            (session_id or "local", limit),
+        ).fetchall()
+        turns: list[dict] = []
+        for r in rows:
+            try:
+                meta = json.loads(r["metadata_json"] or "{}")
+            except (json.JSONDecodeError, TypeError):
+                meta = {}
+            turns.append({
+                "role": meta.get("role", "assistant"),
+                "content": r["content"] or "",
+                "is_self_thought": bool(meta.get("is_self_thought", False)),
+                "created_at": r["created_at"],
+            })
+        turns.reverse()  # chronological: oldest → newest
+        return turns
+
+    def get_session_conversation(self, session_id: str = "local", limit: int = 40) -> list[dict]:
+        """Sync: recent chat turns for a session, rebuilt from episodic."""
+        return self._get_session_conversation_sync(session_id, limit)
+
+    async def get_session_conversation_async(self, session_id: str = "local", limit: int = 40) -> list[dict]:
+        """Async: recent chat turns for a session, rebuilt from episodic."""
+        return await asyncio.to_thread(self._get_session_conversation_sync, session_id, limit)
 
     # ------------------------------------------------------------------ #
     #  Emotion Log                                                         #

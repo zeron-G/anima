@@ -179,21 +179,36 @@ class AgenticLoop:
             log.info("Restored emotion state from checkpoint")
 
     def load_conversation_from_db(self) -> None:
-        """Load recent conversation from SQLite on startup."""
-        recent = self._ctx.memory_store.get_recent_memories(limit=30, type="chat")
-        if not recent:
-            return
-        recent.reverse()
-        for mem in recent:
-            meta = {}
+        """Rebuild recent conversation from episodic — the single source of truth.
+
+        Populates BOTH the global conversation buffer AND the summarizer's raw
+        buffer from the SAME episodic rows, so the USER_MESSAGE prompt (which
+        reads ``summarizer.get_context()``) and ``ctx.conversation`` cannot
+        diverge after a restart. Before S1 the summarizer was never persisted or
+        restored, so it started empty on every launch — Eva lost all recent
+        conversation context whenever the process restarted.
+        """
+        # Restore the persisted rolling summary first (an expensive LLM artifact,
+        # not fully reconstructable from episodic); the raw buffer below then
+        # comes from episodic (the truth), so the two stay consistent.
+        if self._ctx.summarizer is not None:
             try:
-                meta = json.loads(mem.get("metadata_json", "{}"))
-            except Exception:
-                pass
-            role = meta.get("role", "assistant")
-            content = mem.get("content", "")
-            self._ctx.conversation.append({"role": role, "content": content})
-        log.info("Loaded %d conversation turns from DB", len(recent))
+                self._ctx.summarizer.restore_from_file()
+            except Exception as e:
+                log.debug("Summarizer summary restore failed: %s", e)
+        limit = max(30, self._ctx.max_conversation_turns * 2)
+        turns = self._ctx.memory_store.get_session_conversation("local", limit=limit)
+        if not turns:
+            return
+        self._ctx.conversation.clear()
+        for t in turns:
+            entry = {"role": t.get("role", "assistant"), "content": t.get("content", "")}
+            if t.get("is_self_thought"):
+                entry["is_self_thought"] = True
+            self._ctx.conversation.append(entry)
+        if self._ctx.summarizer is not None:
+            self._ctx.summarizer.restore_from_db(turns)
+        log.info("Rebuilt %d conversation turns from episodic (buffer + summarizer)", len(turns))
 
     # ── Main loop ──
 

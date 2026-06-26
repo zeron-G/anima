@@ -301,6 +301,11 @@ async def _init_llm(config: dict, tool_registry, tool_executor, memory_store) ->
         summary_interval=get("memory.summary_interval", 20),
         keep_recent=get("memory.keep_recent", 10),
     )
+    # S1: persist the rolling summary so it survives restarts. The raw buffer is
+    # rebuilt from episodic (source of truth) in load_conversation_from_db; only
+    # the LLM-generated summary text is loaded from this file.
+    from anima.config import data_dir as _data_dir
+    conversation_summarizer.set_save_path(_data_dir() / "conversation_summary.json")
 
     # ── v3: Register memory self-edit tools ──
     try:
@@ -868,6 +873,7 @@ async def _init_cognitive(config: dict, core: dict, llm: dict, heartbeat_deps: d
     session_manager = SessionManager(
         max_sessions=get("sessions.max_sessions", 50),
         session_ttl_s=get("sessions.ttl_s", 3600),
+        memory_store=core["memory_store"],
     )
     cognitive.set_session_manager(session_manager)
     heartbeat_deps["heartbeat"].set_session_manager(session_manager)

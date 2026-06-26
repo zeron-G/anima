@@ -43,10 +43,15 @@ class SessionManager:
         self,
         max_sessions: int = 50,
         session_ttl_s: int = 3600,
+        memory_store=None,
     ) -> None:
         self._sessions: dict[str, SessionState] = {}
         self._max_sessions = max_sessions
         self._session_ttl = session_ttl_s
+        # S1: episodic is the source of truth. The in-memory session is a cache;
+        # its conversation is rebuilt from episodic on a miss, so eviction and
+        # TTL expiry below drop only the cache — no conversation is ever lost.
+        self._memory_store = memory_store
 
     def get_or_create(
         self,
@@ -69,6 +74,20 @@ class SessionManager:
             user_id=user_id,
             channel=channel,
         )
+        # Rebuild recent conversation from episodic (source of truth) so a
+        # reconnect after eviction / TTL expiry / restart resumes context.
+        if self._memory_store is not None:
+            try:
+                turns = self._memory_store.get_session_conversation(session_id, limit=100)
+                session.conversation = [
+                    {"role": t.get("role", "assistant"), "content": t.get("content", "")}
+                    for t in turns
+                ]
+                if turns:
+                    log.info("Recovered %d turns for session %s from episodic",
+                             len(turns), session_id)
+            except Exception as e:
+                log.debug("Session conversation rebuild failed for %s: %s", session_id, e)
         self._sessions[session_id] = session
         log.info("New session: %s (user=%s, channel=%s)", session_id, user_id, channel)
         return session

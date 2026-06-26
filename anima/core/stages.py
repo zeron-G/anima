@@ -90,7 +90,7 @@ class EventRoutingStage(PipelineStage):
             imp = ctx.importance_scorer.score(pctx.user_message, "chat_user") if ctx.importance_scorer else 0.6
             await ctx.memory_store.save_memory_async(
                 content=pctx.user_message, type="chat", importance=imp,
-                metadata={"role": "user"},
+                metadata={"role": "user"}, session_id=pctx.session_id or "local",
             )
 
         # Track in summarizer
