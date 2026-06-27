@@ -47,6 +47,20 @@ python -m anima --headless
 (`data/`, `agents/<name>`, `.env`, `config.yaml`) lives under the home; nothing
 private is in the published kernel. See `docs/REFACTOR.md` §4–§5.
 
+### Data store (required)
+Memory runs on **Postgres + pgvector** — set the connection strings in
+`<home>/.env`:
+```bash
+DATABASE_URL=postgresql://…@…neon.tech/…?sslmode=require   # cloud primary (e.g. Neon)
+LOCAL_DATABASE_URL=postgresql://postgres:…@127.0.0.1:5432/anima   # local offline failover
+OPENAI_API_KEY=sk-…                                        # embeddings (else recall → keyword only)
+```
+At least one endpoint must be reachable at startup. With both set, the app
+serves the primary, keeps the local DB warm as a backup, and on a primary
+outage fails over to local and replays back on reconnect (see
+[ARCHITECTURE.md](ARCHITECTURE.md) → Data layer). Use `127.0.0.1`, not
+`localhost`. Apply `anima/memory/pg_schema.sql` to a fresh database.
+
 ### Enable auth (required for any non-localhost deploy)
 In `<home>/config.yaml` or `local/env.yaml`:
 ```yaml

@@ -74,11 +74,13 @@ decision:
   high_threshold: 0.7
 
 # ── Memory ──
+# Backend is Postgres + pgvector (Neon primary + local failover). Connection
+# strings live in .env: DATABASE_URL (primary) + LOCAL_DATABASE_URL (failover).
 memory:
   working_capacity: 20
-  db_path: ""              # blank → <ANIMA_HOME>/data/anima.db (relative paths resolve under the data dir; absolute paths used as-is)
   summary_interval: 20      # Compress conversation every N messages
   keep_recent: 10            # Keep last N raw messages after compression
+  sync_interval_s: 300       # Replica sync cadence: warm local while online; replay local→primary on reconnect
 
 # ── Evolution ──
 evolution:

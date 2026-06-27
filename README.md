@@ -19,7 +19,7 @@ ANIMA includes several layers that work together:
 ## Main Capabilities
 
 - Persistent runtime state with heartbeat-driven background processing
-- Memory and retrieval backed by SQLite and ChromaDB
+- Memory and semantic retrieval backed by Postgres + pgvector (Neon primary + local failover)
 - Multi-provider LLM routing, fallback, and tool-integrated execution
 - Desktop, browser, terminal, and headless operation modes
 - Distributed node communication and task delegation

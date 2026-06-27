@@ -58,8 +58,8 @@ class CognitiveContext:
     snapshot_cache: Any  # SnapshotCache
     """Cache of recent system state snapshots."""
 
-    memory_store: Any  # MemoryStore
-    """SQLite-backed episodic memory storage."""
+    memory_store: Any  # PgMemoryStore
+    """Postgres-backed episodic memory storage (pgvector)."""
 
     emotion: Any  # EmotionState
     """4-dimensional emotion vector (engagement, confidence, curiosity, concern)."""

@@ -6,10 +6,18 @@
 conda activate anima
 pip install -e ".[dev,all]"        # base install is slim; [all] adds network/desktop/voice/discord
 # Optional but recommended:
-pip install sentence-transformers  # Local semantic search
 pip install anthropic              # Anthropic SDK (auto-retry, connection pooling)
 pip install tiktoken               # Precise token counting
-pip install chromadb               # Vector database
+```
+
+Memory needs a Postgres + pgvector backend. Set `DATABASE_URL` (cloud primary,
+e.g. Neon) and/or `LOCAL_DATABASE_URL` (local failover) in `.env`. A quick local
+instance:
+
+```bash
+docker run -d --name anima-pg --restart unless-stopped \
+  -e POSTGRES_PASSWORD=... -e POSTGRES_DB=anima -p 5432:5432 pgvector/pgvector:pg17
+# LOCAL_DATABASE_URL=postgresql://postgres:...@127.0.0.1:5432/anima   (use 127.0.0.1, not localhost)
 ```
 
 ## Running
@@ -108,7 +116,7 @@ tools:
 
 1. **CognitiveContext over setters**: All dependencies in one dataclass, validated at construction
 2. **SafeSubprocess over shell=True**: Eliminates command injection by design
-3. **3-tier semantic search**: ChromaDB → local embedder → LIKE ensures search always works
+3. **Semantic search on pgvector**: OpenAI embeddings → pgvector cosine, with a keyword (ILIKE) fallback when no key, so search always works
 4. **Streaming-first**: USER_MESSAGE always streams; internal events use non-streaming
 5. **TokenBudget enforcement**: All prompts go through compile() with layer budgets
 6. **Emotion feedback loop**: LLM responses analyzed for sentiment signals

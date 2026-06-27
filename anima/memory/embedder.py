@@ -210,13 +210,10 @@ async def embed_openai_batch(texts: list[str]) -> list[list[float] | None]:
         return [None] * len(texts)
 
 
-# ── Serialization helpers for SQLite storage ──
+# ── Vector serialization helpers (compact byte packing) ──
 
 def vector_to_bytes(vec: list[float]) -> bytes:
-    """Pack a float vector into compact bytes for SQLite BLOB storage.
-
-    Uses struct.pack for 4-byte floats (384 dims * 4 bytes = 1536 bytes).
-    """
+    """Pack a float vector into compact bytes (4-byte floats via struct.pack)."""
     return struct.pack(f"{len(vec)}f", *vec)
 
 

@@ -54,8 +54,7 @@ async def stats(request: web.Request) -> web.Response:
     """GET /v1/memory/stats — memory statistics."""
     hub = get_hub(request)
 
-    # Backend-agnostic: go through _db.fetch (SQLite + Postgres both expose it);
-    # the SQL is standard. Aliased columns so dict rows work on both.
+    # Go through _db.fetch (the Postgres manager). Aliased columns for dict rows.
     db = hub.memory_store._db
     row = await db.fetch_one("SELECT COUNT(*) AS n FROM episodic_memories")
     total = (row or {}).get("n", 0)

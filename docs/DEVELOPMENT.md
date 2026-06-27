@@ -18,7 +18,7 @@ ANIMA 是一个**心跳驱动、分布式、自进化的 AI 生命系统**。不
 
 - **心跳驱动**：三级心跳（脚本 15s / LLM 5min / 进化 30min）维持持续存在
 - **六层编译式提示词** *(v3 新增)*：Identity → Rules → Context → Memory → Conversation → Tools
-- **四层记忆架构** *(v3 新增)*：强静态(文本) → 弱静态(SQLite 节点分区) → 大数据(向量) → 动态(时间衰减)
+- **四层记忆架构** *(v3 新增)*：强静态(文本) → 弱静态(static_knowledge 节点分区) → 大数据(pgvector 向量) → 动态(时间衰减)
 - **自主进化**：六层流水线（提案→共识→实现→测试→审查→部署）自动修改自身代码
 - **分布式**：Gossip 协议连接多节点，任务委派、记忆同步、共识投票
 - **空闲调度**：根据用户活动和系统负载动态调整后台任务强度
@@ -28,7 +28,7 @@ ANIMA 是一个**心跳驱动、分布式、自进化的 AI 生命系统**。不
 
 **当前人格**：Eva
 
-**技术栈**：Python 3.11+ / asyncio / SQLite / ChromaDB / ZMQ / PyWebView / Claude API (Opus + Sonnet)
+**技术栈**：Python 3.11+ / asyncio / Postgres + pgvector (Neon 主 + 本地故障转移) / OpenAI embeddings / ZMQ / PyWebView / Claude API (Opus + Sonnet)
 
 ---
 
@@ -60,8 +60,11 @@ anima/
 │   │   ├── snapshot_cache.py       # 线程安全快照缓存
 │   │   ├── user_activity.py        # 用户活跃度检测
 │   │   └── env_scanner.py          # 三层环境扫描器
-│   ├── memory/                     # 记忆 (v3 重构)
-│   │   ├── store.py                # SQLite 后端 (含 static_knowledge 表)
+│   ├── memory/                     # 记忆 (v3 重构;Postgres + pgvector 单引擎)
+│   │   ├── store.py                # create_memory_store() 工厂 → PgMemoryStore
+│   │   ├── pg_store.py             # 记忆存储 (episodic/emotion/static_knowledge/documents…)
+│   │   ├── pg_db.py                # PG 连接管理 (Neon 主→本地故障转移 + 运行期重连)
+│   │   ├── pg_sync.py              # 副本同步 (在线灌本地;离线回放本地→主)
 │   │   ├── working.py              # 工作记忆 (重要度淘汰)
 │   │   ├── importance.py           # ★ 动态重要性评分 (替代 hardcoded 0.6)
 │   │   ├── decay.py                # ★ Importance-weighted 时间衰减引擎
@@ -247,18 +250,18 @@ anima/
 │  ≤500 tok, 永驻 prompt, Agent 可自编辑          │
 │  分布式: 全量同步                                │
 ├───────────────────────────────────────────────┤
-│  Tier 1: 弱静态 (Warm / On-Demand)  SQLite     │
+│  Tier 1: 弱静态 (Warm / On-Demand)  Postgres    │
 │  static_knowledge 表 (category, key, value)    │
-│  scope='global' → 增量同步                      │
-│  scope='node:{id}' → 不同步 (本地环境独占)       │
+│  scope='global' → 全节点共享 (同一 PG 库)       │
+│  scope='node:{id}' → 节点本地环境独占            │
 ├───────────────────────────────────────────────┤
-│  Tier 2: 大数据 (Cold / Search-Only)  ChromaDB  │
-│  知识文档 / 文件摘要 / 归档记忆                   │
-│  检索: 向量 + BM25 双通道, RRF 融合              │
-│  分布式: 增量同步                                │
+│  Tier 2: 大数据 (Cold / Search-Only)  pgvector  │
+│  知识文档 / 文件摘要 / 归档记忆 (documents 表)   │
+│  检索: pgvector 余弦 + ILIKE 关键词兜底          │
+│  分布式: 共享 PG 库 (Neon 主 + 本地故障转移)     │
 ├───────────────────────────────────────────────┤
-│  Tier 3: 动态 (时间序列)  SQLite + 向量          │
-│  episodic_memory 表                             │
+│  Tier 3: 动态 (时间序列)  Postgres + pgvector   │
+│  episodic_memories 表                           │
 │  Importance-weighted 时间衰减                    │
 │  effective = imp × e^(-λ/imp × Δt) × boost    │
 │  分布式: 增量同步                                │
@@ -320,13 +323,16 @@ DEEP idle 时运行：衰减分 < 0.1 的旧记忆按 type+6h 窗口聚类 → L
 
 ### 5.8 分布式同步策略
 
-| 记忆层 | 同步方式 | 说明 |
-|--------|---------|------|
+记忆后端已统一到 **Postgres + pgvector**：所有节点共享**同一个云库**(Neon 主),
+本地 PG 是离线故障转移副本。因此跨节点的点对点记忆复制(旧 MemorySync)已移除 ——
+共享一个库时它是冗余的。同步只剩两类:
+
+| 记忆层 | 机制 | 说明 |
+|--------|------|------|
 | Tier 0 强静态 | 全量同步 (git) | 人格+用户画像所有节点一致 |
-| Tier 1 global | 增量同步 (MemorySync) | 项目状态、联系人共享 |
-| Tier 1 node:* | **不同步** | 每个节点只维护本地环境知识 |
-| Tier 2 大数据 | 增量同步 (Lamport Clock) | 知识库共享 |
-| Tier 3 动态 | 增量同步 (Lamport Clock) | 聊天记忆共享 |
+| Tier 1 global / Tier 2 / Tier 3 | 共享一个 PG 库 | 写入即对全节点可见,无需复制 |
+| Tier 1 node:* | **不共享** | `scope='node:{id}'` + env_catalog 是节点本地环境知识 |
+| 主库 ↔ 本地副本 | `PgSyncManager` | 在线灌本地(热备份);离线回放本地→主再切回(详见 [ARCHITECTURE.md](ARCHITECTURE.md) Data layer) |
 
 ---
 

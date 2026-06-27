@@ -15,7 +15,7 @@ Path model (Phase 1 — code/state separation):
                       3. ~/.anima                   (if it already exists)
                       4. bootstrap: create & use ~/.anima (installed, no home yet)
 
-  data_dir()      = home_dir()/data       (user runtime data: anima.db, chroma…)
+  data_dir()      = home_dir()/data       (user runtime data: logs, caches…)
   agent_dir()     = home_dir()/agents/<name>  (live persona instance)
   config_dir()    = source config/ when in a checkout, else packaged resources
   prompts_dir()   = source prompts/ when in a checkout, else packaged resources
@@ -156,23 +156,6 @@ def data_dir() -> Path:
     return d
 
 
-def db_path() -> Path:
-    """Resolve the SQLite database path under the data dir.
-
-    `memory.db_path` config is interpreted as: absolute path → used as-is;
-    relative path → placed under data_dir() (a legacy leading "data/" segment
-    is stripped so "data/anima.db" and "anima.db" both land in data_dir()).
-    """
-    raw = (get("memory.db_path", "") or "").strip()
-    if not raw:
-        return data_dir() / "anima.db"
-    p = Path(raw).expanduser()
-    if p.is_absolute():
-        return p
-    parts = list(p.parts)
-    if parts and parts[0] == "data":
-        parts = parts[1:]
-    return data_dir().joinpath(*parts) if parts else data_dir() / "anima.db"
 
 
 def config_dir() -> Path:

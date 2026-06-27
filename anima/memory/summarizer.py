@@ -137,7 +137,7 @@ class ConversationSummarizer:
             log.warning("Failed to load summary from %s: %s", self._save_path, e)
 
     def restore_from_db(self, recent_memories: list[dict]) -> None:
-        """Restore buffer from SQLite chat memories on startup.
+        """Restore buffer from persisted episodic chat memories on startup.
 
         Each entry is expected to have at least ``role`` and ``content`` keys.
         """

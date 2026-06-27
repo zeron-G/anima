@@ -4,8 +4,8 @@ Layer 1 (skeleton): All drives, top-level dirs (depth=2). ~5 seconds.
 Layer 2 (high-value): Projects, Desktop, Documents — full tree. ~minutes.
 Layer 3 (full disk): Everything else, chunk by chunk. ~hours to days.
 
-Results stored in SQLite env_catalog table. After initial scan, only
-incremental changes need to be detected.
+Results stored in the Postgres env_catalog table (node-local). After the
+initial scan, only incremental changes need to be detected.
 """
 
 from __future__ import annotations

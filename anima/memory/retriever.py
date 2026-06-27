@@ -112,7 +112,7 @@ class MemoryRetriever:
     All four store dependencies are optional — when ``None`` the
     corresponding pipeline stage is simply skipped.  This lets the
     retriever work in degraded mode during early bootstrap (before
-    ChromaDB or the lorebook are initialised).
+    the memory store or the lorebook are initialised).
 
     Parameters
     ----------
@@ -343,9 +343,9 @@ class MemoryRetriever:
     ) -> None:
         """Stage 5: Tier 2 semantic search.
 
-        Delegated to ``MemoryStore.search_memories_async`` — pgvector cosine on
-        the Postgres backend, ChromaDB on the SQLite backend. Async so the
-        Postgres path can await its OpenAI query embedding.
+        Delegated to ``PgMemoryStore.search_memories_async`` — pgvector cosine
+        search (with a keyword ILIKE fallback). Async so it can await the
+        OpenAI query embedding.
         """
         if self._store is None or not query:
             return

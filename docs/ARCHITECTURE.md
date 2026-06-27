@@ -14,8 +14,9 @@ The runtime is split into three layers (full detail in [REFACTOR.md](REFACTOR.md
 - **Frontend** (`eva-ui/`) — Vue SPA whose backend address comes from build-time env
   (`VITE_API_BASE`/`VITE_WS_BASE`); deployable same-origin or fully split — see
   [DEPLOYMENT.md](DEPLOYMENT.md).
-- **ANIMA_HOME** — private user state: `data/` (anima.db, chroma, …) + the live
-  persona instance `agents/<name>` + `.env` + `config.yaml`. Resolved via
+- **ANIMA_HOME** — private user state: `data/` (logs, caches, …) + the live
+  persona instance `agents/<name>` + `.env` + `config.yaml`. Memory itself lives
+  in Postgres (Neon primary + local failover), not under `data/`. Resolved via
   `config.home_dir()` (`$ANIMA_HOME` → source tree → `~/.anima`).
 
 `anima init` bootstraps a home from the seed. In installed mode (no source tree)
@@ -79,15 +80,47 @@ JWT middleware over `dashboard.auth.password`.
 | event_queue.py | ~90 | Priority async queue |
 
 ### Memory (anima/memory/)
+Backend is **Postgres + pgvector** (single engine). See [Data layer](#data-layer) below.
 | Module | Responsibility |
 |--------|---------------|
-| store.py | SQLite + ChromaDB + local embeddings |
+| store.py | `create_memory_store()` factory → PgMemoryStore |
+| pg_store.py | The memory store: episodic/emotion/static/usage/env_catalog/documents |
+| pg_db.py | Postgres connection manager: one conn + lock, Neon→local failover, runtime reconnect |
+| pg_sync.py | Replica sync: warm local while online, replay local→primary on reconnect |
+| pg_schema.sql | Schema (episodic + `vector(1536)` + HNSW; emotion; static_knowledge; documents; …) |
 | retriever.py | 4-tier RRF fusion retrieval |
-| embedder.py | Local sentence-transformer embeddings |
+| embedder.py | OpenAI `text-embedding-3-small` (1536-dim); legacy local ST fallback |
 | decay.py | Time-weighted importance decay + consolidation |
 | summarizer.py | Conversation compression |
 | importance.py | Dynamic memory importance scoring |
-| db_manager.py | Thread-safe SQLite (WAL + Lock + transactions) |
+
+#### Data layer
+
+ANIMA runs on a **single engine: Postgres + pgvector** — no SQLite, no ChromaDB.
+
+- **Topology**: a cloud **primary** (`DATABASE_URL`, e.g. Neon) plus a **local
+  failover** (`LOCAL_DATABASE_URL`, a local Postgres). `PgDatabaseManager`
+  connects to the primary first and falls back to local. Connection strings are
+  secrets (`.env` / secret store); `localhost` is pinned to `127.0.0.1` to avoid
+  a Windows IPv6 connect stall.
+- **One connection, one lock**: a psycopg3 connection isn't thread-safe, so all
+  reads/writes funnel through a single lock; async methods wrap the sync core in
+  `asyncio.to_thread`.
+- **Runtime failover**: every query routes through a locked runner that, on a
+  dropped connection mid-operation, reconnects (primary→local) and retries once —
+  a cloud blip degrades to local instead of crashing.
+- **Replica sync** (`pg_sync.PgSyncManager`, every `memory.sync_interval_s`):
+  while **online** it warms the local replica (primary→local) so local is always
+  a recent backup; while **offline** it waits for the primary, replays
+  local-only writes (local→primary), then switches the live connection back.
+  Reconciliation is per append-only table by `MAX(ts)` watermark +
+  `INSERT … ON CONFLICT DO NOTHING` (idempotent). Node-local tables
+  (`env_catalog`) are not synced.
+- **Embeddings**: only `episodic_memories` and `documents` are vectorized, via
+  OpenAI `text-embedding-3-small` (1536-dim) into a pgvector `vector(1536)`
+  column with an HNSW cosine index. Without `OPENAI_API_KEY`, recall degrades to
+  keyword search (ILIKE). Emotion is a numeric time-series (no vectors); persona
+  prose stays in files (durability via backups, not the DB).
 
 ### LLM (anima/llm/)
 | Module | Responsibility |
