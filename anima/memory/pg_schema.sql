@@ -76,3 +76,37 @@ CREATE TABLE IF NOT EXISTS llm_usage (
 );
 CREATE INDEX IF NOT EXISTS idx_llm_usage_ts    ON llm_usage(timestamp);
 CREATE INDEX IF NOT EXISTS idx_llm_usage_model ON llm_usage(model);
+
+-- ── Environment catalog (filesystem scan cache; node-local operational) ──
+CREATE TABLE IF NOT EXISTS env_catalog (
+    id           TEXT PRIMARY KEY,
+    path         TEXT NOT NULL UNIQUE,
+    type         TEXT NOT NULL DEFAULT 'file',
+    size_bytes   BIGINT DEFAULT 0,
+    modified_at  DOUBLE PRECISION DEFAULT 0,
+    scanned_at   DOUBLE PRECISION DEFAULT 0,
+    scan_layer   INTEGER DEFAULT 1,
+    category     TEXT DEFAULT 'other',
+    extension    TEXT DEFAULT '',
+    summary      TEXT DEFAULT '',
+    parent_dir   TEXT DEFAULT '',
+    is_important INTEGER DEFAULT 0,
+    is_deleted   INTEGER DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_env_parent    ON env_catalog(parent_dir);
+CREATE INDEX IF NOT EXISTS idx_env_category  ON env_catalog(category);
+CREATE INDEX IF NOT EXISTS idx_env_important ON env_catalog(is_important);
+CREATE INDEX IF NOT EXISTS idx_env_layer     ON env_catalog(scan_layer);
+CREATE INDEX IF NOT EXISTS idx_env_deleted   ON env_catalog(is_deleted);
+
+CREATE TABLE IF NOT EXISTS env_scan_progress (
+    id                TEXT PRIMARY KEY,
+    status            TEXT DEFAULT 'pending',
+    total_dirs        INTEGER DEFAULT 0,
+    scanned_dirs      INTEGER DEFAULT 0,
+    total_files       INTEGER DEFAULT 0,
+    last_scanned_path TEXT DEFAULT '',
+    started_at        DOUBLE PRECISION DEFAULT 0,
+    completed_at      DOUBLE PRECISION DEFAULT 0,
+    updated_at        DOUBLE PRECISION DEFAULT 0
+);

@@ -387,33 +387,157 @@ class PgMemoryStore:
         import asyncio
         return await asyncio.to_thread(self.delete_static_knowledge, category, key, scope)
 
-    # ── Operational tail (env_catalog scan, decay/consolidation): ported next. ──
-    # Logged no-ops so a cloud boot degrades gracefully instead of crashing.
-    def _na(self, name: str):
-        log.debug("PgMemoryStore.%s not yet on Postgres (no-op)", name)
+    # ── Environment catalog (filesystem scan cache) — real PG ──
 
-    def upsert_env_catalog_batch(self, entries): self._na("upsert_env_catalog_batch")
-    async def upsert_env_catalog_batch_async(self, entries): self._na("upsert_env_catalog_batch")
-    def update_scan_progress(self, *a, **k): self._na("update_scan_progress")
-    async def update_scan_progress_async(self, *a, **k): self._na("update_scan_progress")
-    def get_scan_progress(self, *a, **k): return None
-    async def get_scan_progress_async(self, *a, **k): return None
-    def search_env_catalog(self, *a, **k): return []
-    async def search_env_catalog_async(self, *a, **k): return []
-    def get_env_stats(self, *a, **k): return {}
-    async def get_env_stats_async(self, *a, **k): return {}
-    def get_scanned_dirs(self, *a, **k): return []
-    async def get_scanned_dirs_async(self, *a, **k): return []
-    def get_env_files_in_dir(self, *a, **k): return []
-    async def get_env_files_in_dir_async(self, *a, **k): return []
-    def get_unscanned_dirs(self, *a, **k): return []
-    async def get_unscanned_dirs_async(self, *a, **k): return []
-    def mark_env_deleted(self, *a, **k): self._na("mark_env_deleted")
-    async def mark_env_deleted_async(self, *a, **k): self._na("mark_env_deleted")
-    def update_env_entry(self, *a, **k): self._na("update_env_entry")
-    async def update_env_entry_async(self, *a, **k): self._na("update_env_entry")
-    def get_unsummarized_important_files(self, *a, **k): return []
-    async def get_unsummarized_important_files_async(self, *a, **k): return []
+    def _upsert_env_sync(self, entries: list[dict]) -> None:
+        if not entries:
+            return
+        rows = [(e["id"], e["path"], e["type"], e.get("size_bytes", 0), e.get("modified_at", 0),
+                 e.get("scanned_at", 0), e.get("scan_layer", 1), e.get("category", "other"),
+                 e.get("extension", ""), e.get("parent_dir", ""), e.get("is_important", 0))
+                for e in entries]
+        self._db.write_many_sync(
+            "INSERT INTO env_catalog (id,path,type,size_bytes,modified_at,scanned_at,scan_layer,"
+            "category,extension,parent_dir,is_important) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) "
+            "ON CONFLICT (path) DO UPDATE SET type=EXCLUDED.type,size_bytes=EXCLUDED.size_bytes,"
+            "modified_at=EXCLUDED.modified_at,scanned_at=EXCLUDED.scanned_at,scan_layer=EXCLUDED.scan_layer,"
+            "category=EXCLUDED.category,extension=EXCLUDED.extension,parent_dir=EXCLUDED.parent_dir,"
+            "is_important=EXCLUDED.is_important,is_deleted=0", rows)
+
+    def upsert_env_catalog_batch(self, entries): self._upsert_env_sync(entries)
+
+    async def upsert_env_catalog_batch_async(self, entries):
+        import asyncio; await asyncio.to_thread(self._upsert_env_sync, entries)
+
+    def _scan_progress_upsert(self, layer_id: str, status: str, **kwargs) -> None:
+        now = time.time()
+        cols = ["status", "updated_at"] + list(kwargs.keys())
+        vals = [status, now] + list(kwargs.values())
+        if status == "completed":
+            cols.append("completed_at"); vals.append(now)
+        insert_cols = ["id", "started_at"] + cols
+        insert_vals = [layer_id, now] + vals
+        ph = ",".join(["%s"] * len(insert_cols))
+        updates = ",".join(f"{c}=EXCLUDED.{c}" for c in cols)
+        self._db.write_sync(
+            f"INSERT INTO env_scan_progress ({','.join(insert_cols)}) VALUES ({ph}) "
+            f"ON CONFLICT (id) DO UPDATE SET {updates}", tuple(insert_vals))
+
+    def update_scan_progress(self, layer_id, status, **kwargs):
+        self._scan_progress_upsert(layer_id, status, **kwargs)
+
+    async def update_scan_progress_async(self, layer_id, status, **kwargs):
+        import asyncio; await asyncio.to_thread(lambda: self._scan_progress_upsert(layer_id, status, **kwargs))
+
+    def get_scan_progress(self, layer_id):
+        return self._db.fetch_one_sync("SELECT * FROM env_scan_progress WHERE id=%s", (layer_id,))
+
+    async def get_scan_progress_async(self, layer_id):
+        import asyncio; return await asyncio.to_thread(self.get_scan_progress, layer_id)
+
+    def _search_env_sync(self, query, category, extension, file_type, limit):
+        conds, params = ["is_deleted=0"], []
+        if query:
+            conds.append("(path ILIKE %s OR summary ILIKE %s)"); params += [f"%{query}%", f"%{query}%"]
+        if category:
+            conds.append("category=%s"); params.append(category)
+        if extension:
+            conds.append("extension=%s"); params.append(extension)
+        if file_type:
+            conds.append("type=%s"); params.append(file_type)
+        where = " AND ".join(conds)
+        return self._db.fetch_sync(
+            f"SELECT path,type,size_bytes,category,extension,summary,is_important,scan_layer,modified_at "
+            f"FROM env_catalog WHERE {where} ORDER BY is_important DESC, modified_at DESC LIMIT %s",
+            (*params, limit))
+
+    def search_env_catalog(self, query="", category="", extension="", file_type="", limit=20):
+        return self._search_env_sync(query, category, extension, file_type, limit)
+
+    async def search_env_catalog_async(self, query="", category="", extension="", file_type="", limit=20):
+        import asyncio
+        return await asyncio.to_thread(self._search_env_sync, query, category, extension, file_type, limit)
+
+    def _env_stats_sync(self):
+        def n(sql): return self._db.fetch_one_sync(sql)["n"]
+        by_cat = {r["category"]: r["c"] for r in self._db.fetch_sync(
+            "SELECT category, COUNT(*) AS c FROM env_catalog WHERE is_deleted=0 GROUP BY category")}
+        prog = {}
+        for lid in ("layer1", "layer2", "layer3"):
+            p = self.get_scan_progress(lid); prog[lid] = p if p else {"status": "pending"}
+        return {
+            "total_files": n("SELECT COUNT(*) AS n FROM env_catalog WHERE type='file' AND is_deleted=0"),
+            "total_dirs": n("SELECT COUNT(*) AS n FROM env_catalog WHERE type='directory' AND is_deleted=0"),
+            "important_files": n("SELECT COUNT(*) AS n FROM env_catalog WHERE is_important=1 AND is_deleted=0"),
+            "summarized": n("SELECT COUNT(*) AS n FROM env_catalog WHERE summary<>'' AND is_deleted=0"),
+            "by_category": by_cat, "scan_progress": prog,
+        }
+
+    def get_env_stats(self): return self._env_stats_sync()
+
+    async def get_env_stats_async(self):
+        import asyncio; return await asyncio.to_thread(self._env_stats_sync)
+
+    def _scanned_dirs_sync(self, max_layer):
+        return self._db.fetch_sync(
+            "SELECT path, scan_layer FROM env_catalog WHERE type='directory' "
+            "AND scan_layer <= %s AND is_deleted=0", (max_layer,))
+
+    def get_scanned_dirs(self, max_layer=2): return self._scanned_dirs_sync(max_layer)
+
+    async def get_scanned_dirs_async(self, max_layer=2):
+        import asyncio; return await asyncio.to_thread(self._scanned_dirs_sync, max_layer)
+
+    def _files_in_dir_sync(self, dir_path):
+        return self._db.fetch_sync(
+            "SELECT path, modified_at, size_bytes FROM env_catalog WHERE parent_dir=%s AND is_deleted=0",
+            (dir_path.replace("\\", "/"),))
+
+    def get_env_files_in_dir(self, dir_path): return self._files_in_dir_sync(dir_path)
+
+    async def get_env_files_in_dir_async(self, dir_path):
+        import asyncio; return await asyncio.to_thread(self._files_in_dir_sync, dir_path)
+
+    def _unscanned_dirs_sync(self):
+        rows = self._db.fetch_sync(
+            "SELECT path FROM env_catalog WHERE type='directory' AND scan_layer=1 AND is_deleted=0 "
+            "AND path NOT IN (SELECT DISTINCT parent_dir FROM env_catalog WHERE scan_layer >= 2)")
+        return [r["path"] for r in rows]
+
+    def get_unscanned_dirs(self): return self._unscanned_dirs_sync()
+
+    async def get_unscanned_dirs_async(self):
+        import asyncio; return await asyncio.to_thread(self._unscanned_dirs_sync)
+
+    def _mark_env_deleted_sync(self, path):
+        self._db.write_sync("UPDATE env_catalog SET is_deleted=1 WHERE path=%s", (path.replace("\\", "/"),))
+
+    def mark_env_deleted(self, path): self._mark_env_deleted_sync(path)
+
+    async def mark_env_deleted_async(self, path):
+        import asyncio; await asyncio.to_thread(self._mark_env_deleted_sync, path)
+
+    def _update_env_entry_sync(self, path, updates):
+        if not updates:
+            return
+        sets = ", ".join(f"{k}=%s" for k in updates)  # keys are scanner-controlled column names
+        self._db.write_sync(f"UPDATE env_catalog SET {sets} WHERE path=%s",
+                            (*updates.values(), path.replace("\\", "/")))
+
+    def update_env_entry(self, path, updates): self._update_env_entry_sync(path, updates)
+
+    async def update_env_entry_async(self, path, updates):
+        import asyncio; await asyncio.to_thread(self._update_env_entry_sync, path, updates)
+
+    def _unsummarized_sync(self, limit):
+        return self._db.fetch_sync(
+            "SELECT path, category, extension FROM env_catalog WHERE is_important=1 "
+            "AND summary='' AND is_deleted=0 ORDER BY modified_at DESC LIMIT %s", (limit,))
+
+    def get_unsummarized_important_files(self, limit=10): return self._unsummarized_sync(limit)
+
+    async def get_unsummarized_important_files_async(self, limit=10):
+        import asyncio; return await asyncio.to_thread(self._unsummarized_sync, limit)
     # ── Memory decay / consolidation / archive (real PG; soul maintenance) ──
 
     def _below_threshold_sync(self, threshold: float) -> list[dict]:
