@@ -300,17 +300,14 @@ class TestTokenBudgetRounding:
 
 
 class TestEmbeddingsSchema:
-    """Test that the memory_embeddings table is created."""
+    """Embeddings live as a pgvector column on episodic_memories (not a side table)."""
 
     @pytest.mark.asyncio
-    async def test_embeddings_table_exists(self, tmp_path):
-        from anima.memory.store import MemoryStore
-        db_path = str(tmp_path / "test_embed.db")
-        store = await MemoryStore.create(db_path)
-        # Check table exists
-        row = store._conn.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name='memory_embeddings'"
-        ).fetchone()
+    async def test_embeddings_column_exists(self, pg_store):
+        store = pg_store
+        row = store._db.fetch_one_sync(
+            "SELECT data_type, udt_name FROM information_schema.columns "
+            "WHERE table_name = 'episodic_memories' AND column_name = 'embedding'"
+        )
         assert row is not None
-        assert row[0] == "memory_embeddings"
-        await store.close()
+        assert row["udt_name"] == "vector"  # pgvector type

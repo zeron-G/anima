@@ -12,13 +12,13 @@ from __future__ import annotations
 
 import pytest
 
-from anima.memory.store import MemoryStore
 from anima.memory.summarizer import ConversationSummarizer
 from anima.core.session_manager import SessionManager
+from pgutil import make_test_store
 
 
 async def _store(tmp_path):
-    return await MemoryStore.create(str(tmp_path / "anima.db"))
+    return await make_test_store()
 
 
 async def _save_turn(store, role, content, session_id="local"):
@@ -31,7 +31,11 @@ async def _save_turn(store, role, content, session_id="local"):
 @pytest.mark.asyncio
 async def test_session_id_column_migrated(tmp_path):
     store = await _store(tmp_path)
-    cols = [r[1] for r in store._conn.execute("PRAGMA table_info(episodic_memories)").fetchall()]
+    rows = store._db.fetch_sync(
+        "SELECT column_name FROM information_schema.columns "
+        "WHERE table_name = 'episodic_memories'"
+    )
+    cols = [r["column_name"] for r in rows]
     assert "session_id" in cols
     await store.close()
 

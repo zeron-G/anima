@@ -10,7 +10,6 @@ from anima.core.event_routing import EventRouter
 from anima.core.tool_orchestrator import ToolOrchestrator
 from anima.emotion.state import EmotionState
 from anima.llm.router import LLMRouter
-from anima.memory.store import MemoryStore
 from anima.models.event import Event, EventType, EventPriority
 from anima.perception.snapshot_cache import SnapshotCache
 from anima.llm.prompt_compiler import PromptCompiler
@@ -19,11 +18,11 @@ from anima.tools.registry import ToolRegistry
 
 
 @pytest.fixture
-async def cognitive_deps(tmp_path):
+async def cognitive_deps(pg_store):
     config = load_config()
     eq = EventQueue()
     sc = SnapshotCache()
-    ms = await MemoryStore.create(str(tmp_path / "test.db"))
+    ms = pg_store
     em = EmotionState()
     lr = LLMRouter("test/model1", "test/model2")
     tr = ToolRegistry()
@@ -32,7 +31,6 @@ async def cognitive_deps(tmp_path):
     al = AgenticLoop(eq, sc, ms, em, lr, te, tr, config)
     al.set_prompt_compiler(PromptCompiler())
     yield al, eq, sc, ms
-    await ms.close()
 
 
 @pytest.mark.asyncio

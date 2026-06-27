@@ -29,14 +29,11 @@ class TestEmbedderIntegration:
     """Test embedding save/search pipeline in MemoryStore."""
 
     @pytest.mark.asyncio
-    async def test_save_creates_embedding_row(self, tmp_path):
-        """When embedder is available, save_memory should create an embedding."""
-        from anima.memory.store import MemoryStore
+    async def test_save_creates_embedding_row(self, pg_store):
+        """Saving an episodic memory persists a row; episodic carries the
+        pgvector embedding column (NULL here — OpenAI is mocked off in tests)."""
+        store = pg_store
 
-        db_path = str(tmp_path / "test_embed.db")
-        store = await MemoryStore.create(db_path)
-
-        # Save a memory (embedding happens if sentence-transformers installed)
         mid = await store.save_memory_async(
             content="This is a test memory about Python programming",
             type="chat",
@@ -44,25 +41,16 @@ class TestEmbedderIntegration:
         )
         assert mid.startswith("mem_")
 
-        # Check if embedding was created (may be absent if sentence-transformers not installed)
-        row = store._conn.execute(
-            "SELECT * FROM memory_embeddings WHERE mem_id = ?", (mid,)
-        ).fetchone()
-        # We can't assert row exists (depends on sentence-transformers),
-        # but if it exists, vector should be non-empty
-        if row:
-            assert len(row["vector"]) > 0
-            assert row["vector"] is not None
-
-        await store.close()
+        row = store._db.fetch_one_sync(
+            "SELECT id, embedding FROM episodic_memories WHERE id = %s", (mid,)
+        )
+        assert row is not None and row["id"] == mid
+        assert "embedding" in row  # the vector(1536) column exists
 
     @pytest.mark.asyncio
-    async def test_search_returns_results(self, tmp_path):
+    async def test_search_returns_results(self, pg_store):
         """Search should return results regardless of backend."""
-        from anima.memory.store import MemoryStore
-
-        db_path = str(tmp_path / "test_search.db")
-        store = await MemoryStore.create(db_path)
+        store = pg_store
 
         # Save some memories
         await store.save_memory_async("Python is a programming language", "chat", 0.8)
@@ -74,99 +62,48 @@ class TestEmbedderIntegration:
         assert len(results) >= 1
         assert any("Python" in r.get("content", "") for r in results)
 
-        await store.close()
-
-    @pytest.mark.asyncio
-    async def test_local_vector_search_returns_none_without_embedder(self, tmp_path):
-        """When embedder is unavailable, _local_vector_search_sync returns None."""
-        from anima.memory.store import MemoryStore
-
-        db_path = str(tmp_path / "test_novector.db")
-        store = await MemoryStore.create(db_path)
-
-        with patch("anima.memory.embedder.is_available", return_value=False):
-            result = store._local_vector_search_sync("test query", None, 5)
-            # Should return None when embedder unavailable
-            assert result is None
-        await store.close()
-
-
 # ── Database safety tests ──
 
 
 class TestDatabaseSafety:
-    """Test C-06 WAL mode and write safety."""
+    """Write safety + schema sanity on Postgres."""
 
     @pytest.mark.asyncio
-    async def test_wal_mode_enabled(self, tmp_path):
-        from anima.memory.store import MemoryStore
-
-        db_path = str(tmp_path / "test_wal.db")
-        store = await MemoryStore.create(db_path)
-
-        # Check WAL mode
-        row = store._conn.execute("PRAGMA journal_mode").fetchone()
-        assert row[0] == "wal"
-
-        # Check busy timeout
-        row = store._conn.execute("PRAGMA busy_timeout").fetchone()
-        assert row[0] == 5000
-
-        await store.close()
+    async def test_write_lock_exists(self, pg_store):
+        """The store funnels writes through a single threading.Lock (psycopg
+        connections are not thread-safe). It lives on the db manager."""
+        store = pg_store
+        lock = store._db._sync_write_lock
+        assert hasattr(lock, "acquire")  # duck-type check for a Lock
 
     @pytest.mark.asyncio
-    async def test_write_lock_exists(self, tmp_path):
-        """MemoryStore should have a threading.Lock for writes."""
-        from anima.memory.store import MemoryStore
-        import threading
+    async def test_touch_uses_transaction(self, pg_store):
+        """M-16/M-17: touch_memories increments access_count."""
+        store = pg_store
 
-        db_path = str(tmp_path / "test_lock.db")
-        store = await MemoryStore.create(db_path)
-        assert hasattr(store, "_write_lock")
-        assert hasattr(store._write_lock, "acquire")  # duck-type check for Lock
-        await store.close()
-
-    @pytest.mark.asyncio
-    async def test_touch_uses_transaction(self, tmp_path):
-        """M-16/M-17: touch_memories should use BEGIN IMMEDIATE."""
-        from anima.memory.store import MemoryStore
-
-        db_path = str(tmp_path / "test_touch.db")
-        store = await MemoryStore.create(db_path)
-
-        # Save some memories
         mid1 = store.save_memory("Memory 1", "chat")
         mid2 = store.save_memory("Memory 2", "chat")
 
-        # Touch them
         store.touch_memories([mid1, mid2])
 
-        # Verify access_count incremented
-        row1 = store._conn.execute(
-            "SELECT access_count FROM episodic_memories WHERE id = ?", (mid1,)
-        ).fetchone()
+        row1 = store._db.fetch_one_sync(
+            "SELECT access_count FROM episodic_memories WHERE id = %s", (mid1,)
+        )
         assert row1["access_count"] == 1
 
-        await store.close()
-
     @pytest.mark.asyncio
-    async def test_composite_indexes_exist(self, tmp_path):
-        """L-05: Composite indexes should be created."""
-        from anima.memory.store import MemoryStore
+    async def test_composite_indexes_exist(self, pg_store):
+        """L-05: schema indexes (composite + operational) are created."""
+        store = pg_store
 
-        db_path = str(tmp_path / "test_idx.db")
-        store = await MemoryStore.create(db_path)
+        rows = store._db.fetch_sync(
+            "SELECT indexname FROM pg_indexes WHERE schemaname = 'public'"
+        )
+        index_names = {r["indexname"] for r in rows}
 
-        indexes = store._conn.execute(
-            "SELECT name FROM sqlite_master WHERE type='index'"
-        ).fetchall()
-        index_names = {r[0] for r in indexes}
-
-        assert "idx_env_important_category" in index_names
-        assert "idx_env_deleted" in index_names
         assert "idx_episodic_type_created" in index_names
-
-        await store.close()
+        assert "idx_env_deleted" in index_names
+        assert "idx_env_important" in index_names
 
 
 # ── StaticKnowledge JSON deserialization tests ──
@@ -176,12 +113,10 @@ class TestStaticKnowledgeJSON:
     """Test M-19: auto-deserialization of JSON values."""
 
     @pytest.mark.asyncio
-    async def test_dict_value_deserialized(self, tmp_path):
-        from anima.memory.store import MemoryStore
+    async def test_dict_value_deserialized(self, pg_store):
         from anima.memory.static_store import StaticKnowledgeStore
 
-        db_path = str(tmp_path / "test_static.db")
-        store = await MemoryStore.create(db_path)
+        store = pg_store
         static = StaticKnowledgeStore(store, node_id="test")
 
         # Store a dict value
@@ -197,15 +132,11 @@ class TestStaticKnowledgeJSON:
                 assert val["root"] == "/data"
                 break
 
-        await store.close()
-
     @pytest.mark.asyncio
-    async def test_string_value_unchanged(self, tmp_path):
-        from anima.memory.store import MemoryStore
+    async def test_string_value_unchanged(self, pg_store):
         from anima.memory.static_store import StaticKnowledgeStore
 
-        db_path = str(tmp_path / "test_static2.db")
-        store = await MemoryStore.create(db_path)
+        store = pg_store
         static = StaticKnowledgeStore(store, node_id="test")
 
         # Store a plain string value
@@ -217,8 +148,6 @@ class TestStaticKnowledgeJSON:
                 assert r["value"] == "Eva"
                 assert isinstance(r["value"], str)
                 break
-
-        await store.close()
 
 
 # ── Heartbeat tick lock test ──

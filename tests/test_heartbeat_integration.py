@@ -21,7 +21,6 @@ from anima.core.cognitive import AgenticLoop
 from anima.emotion.state import EmotionState
 from anima.llm.prompt_compiler import PromptCompiler
 from anima.llm.router import LLMRouter
-from anima.memory.store import MemoryStore
 from anima.memory.working import WorkingMemory
 from anima.models.event import Event, EventType, EventPriority
 from anima.perception.diff_engine import DiffEngine
@@ -31,7 +30,7 @@ from anima.tools.registry import ToolRegistry
 
 
 @pytest.mark.asyncio
-async def test_heartbeat_integration_file_detection(tmp_path):
+async def test_heartbeat_integration_file_detection(tmp_path, pg_store):
     """End-to-end: heartbeat detects file change → event queue → cognitive processes it.
 
     This is the Phase 0 milestone demo scenario (without LLM).
@@ -49,7 +48,7 @@ async def test_heartbeat_integration_file_detection(tmp_path):
     diff_engine = DiffEngine.from_config(config.get("diff_rules", {}))
     emotion_state = EmotionState(baseline=config.get("emotion", {}).get("baseline", {}))
     working_memory = WorkingMemory(capacity=20)
-    memory_store = await MemoryStore.create(str(tmp_path / "test.db"))
+    memory_store = pg_store
     # LLM router with zero budget → LLM calls return None
     llm_router = LLMRouter("test/m1", "test/m2", daily_budget=0.0)
     tool_registry = ToolRegistry()
@@ -132,7 +131,6 @@ async def test_heartbeat_integration_file_detection(tmp_path):
         print(f"  [{i}] CPU: {state.get('cpu_percent', '?')}%, MEM: {state.get('memory_percent', '?')}%")
 
     # Cleanup
-    await memory_store.close()
     print("\n[PASS] Integration test complete - heartbeat detected file changes and cognitive cycle processed them!")
 
 
@@ -201,7 +199,7 @@ async def test_heartbeat_integration_emotion_decay():
 
 
 @pytest.mark.asyncio
-async def test_heartbeat_integration_user_message_flow(tmp_path):
+async def test_heartbeat_integration_user_message_flow(pg_store):
     """Simulate user message → queue → cognitive cycle → agentic loop.
 
     Without a real LLM, the loop breaks on LLM failure. We verify the
@@ -211,7 +209,7 @@ async def test_heartbeat_integration_user_message_flow(tmp_path):
 
     event_queue = EventQueue()
     snapshot_cache = SnapshotCache()
-    memory_store = await MemoryStore.create(str(tmp_path / "test.db"))
+    memory_store = pg_store
     emotion_state = EmotionState()
     llm_router = LLMRouter("t1", "t2", daily_budget=0.0)
     tool_registry = ToolRegistry()
@@ -245,5 +243,3 @@ async def test_heartbeat_integration_user_message_flow(tmp_path):
     print(f"Outputs: {outputs}")
     print(f"Emotion after interaction: {emotion_state.to_dict()}")
     print("[PASS] User message flow runs without errors")
-
-    await memory_store.close()

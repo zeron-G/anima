@@ -205,11 +205,9 @@ class TestSoulContainer:
 
 class TestStaticKnowledge:
     @pytest.fixture
-    async def store(self, tmp_path):
+    async def store(self, pg_store):
         """Create a real MemoryStore with static_knowledge table."""
-        from anima.memory.store import MemoryStore
-        db_path = str(tmp_path / "test.db")
-        return await MemoryStore.create(db_path)
+        return pg_store
 
     async def test_upsert_and_query(self, store):
         from anima.memory.static_store import StaticKnowledgeStore
@@ -312,13 +310,11 @@ class TestMemoryTools:
 
 class TestStoreNewMethods:
     @pytest.fixture
-    async def store(self, tmp_path):
-        from anima.memory.store import MemoryStore
-        db_path = str(tmp_path / "test.db")
-        return await MemoryStore.create(db_path)
+    async def store(self, pg_store):
+        return pg_store
 
     async def test_touch_memories(self, store):
-        mid = store._save_memory_sync("test content", "chat", 0.5, {}, [])
+        mid = store.save_memory("test content", type="chat", importance=0.5)
         store.touch_memories([mid])
         mem = store.get_recent_memories(limit=1)[0]
         assert mem["access_count"] == 1
@@ -334,7 +330,7 @@ class TestStoreNewMethods:
         assert len(results) == 0
 
     async def test_batch_update_decay_scores(self, store):
-        mid = store._save_memory_sync("test", "chat", 0.5, {}, [])
+        mid = store.save_memory("test", type="chat", importance=0.5)
         store.batch_update_decay_scores([(mid, 0.42)])
         mems = store.get_unconsolidated_memories(limit=1)
         assert len(mems) >= 1

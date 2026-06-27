@@ -7,7 +7,6 @@ from __future__ import annotations
 import pytest
 
 from anima.emotion.state import EmotionState
-from anima.memory.store import MemoryStore
 
 
 def test_arousal_low_when_calm():
@@ -73,10 +72,10 @@ def test_to_dict_exposes_arousal_and_valence():
 
 
 @pytest.mark.asyncio
-async def test_emotion_persists_and_restores_across_restart(tmp_path):
+async def test_emotion_persists_and_restores_across_restart(pg_store):
     """Emotion logged on interaction must be recoverable on the next startup
     (before S2 it reset to baseline on every non-evolution restart)."""
-    store = await MemoryStore.create(str(tmp_path / "anima.db"))
+    store = pg_store
     assert store.get_latest_emotion() is None  # nothing logged yet
 
     await store.log_emotion_async(0.82, 0.33, 0.91, 0.12, trigger="interaction")
@@ -88,4 +87,3 @@ async def test_emotion_persists_and_restores_across_restart(tmp_path):
     restored.restore(latest)
     assert restored.engagement == pytest.approx(0.82)
     assert restored.curiosity == pytest.approx(0.91)
-    await store.close()

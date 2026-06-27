@@ -28,7 +28,6 @@ from anima.core.event_queue import EventQueue
 from anima.perception.snapshot_cache import SnapshotCache
 from anima.perception.diff_engine import DiffEngine
 from anima.memory.working import WorkingMemory
-from anima.memory.store import MemoryStore
 from anima.emotion.state import EmotionState
 from anima.tools.registry import ToolRegistry
 from anima.tools.executor import ToolExecutor
@@ -60,7 +59,7 @@ def _isolate_data_dir(tmp_path):
 
 
 @pytest.fixture
-async def full_system(tmp_path):
+async def full_system(pg_store):
     """Create a complete ANIMA system for testing."""
     config = load_config()
     scheduler = Scheduler()
@@ -72,7 +71,7 @@ async def full_system(tmp_path):
     sc = SnapshotCache()
     de = DiffEngine.from_config(config.get("diff_rules", {}))
     wm = WorkingMemory()
-    ms = await MemoryStore.create(str(tmp_path / "test.db"))
+    ms = pg_store
     em = EmotionState()
     tr = ToolRegistry()
     tr.register_builtins()
@@ -106,8 +105,6 @@ async def full_system(tmp_path):
         "scheduler": scheduler, "ut": ut, "outputs": outputs,
         "statuses": statuses, "config": config,
     }
-
-    await ms.close()
 
 
 @pytest.mark.asyncio

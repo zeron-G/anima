@@ -60,6 +60,50 @@ def pytest_unconfigure(config):
         os._exit(_exit_code)
 
 
+# ── Postgres test backend (E3) ──
+# Tests run against the REAL Postgres store (local Docker PG, database
+# 'anima_test'), so they exercise production code — not a different SQLite
+# dialect. Embeddings are mocked to None (no OpenAI): the PG store then stores
+# no vectors and semantic search falls back to deterministic ILIKE — offline,
+# free, and stable for assertions.
+
+import anima.config  # noqa: E402  — loads .env (LOCAL_DATABASE_URL) for the fixtures
+
+sys.path.insert(0, os.path.dirname(__file__))  # make sibling pgutil importable
+from pgutil import _PG_TABLES, ensure_test_db, test_dsn  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def _mock_embeddings(monkeypatch):
+    """No OpenAI in tests. embed→None makes the PG store skip vectors and the
+    semantic search fall back to deterministic ILIKE (offline, free, stable)."""
+    from anima.memory import embedder
+
+    async def _none(_text):
+        return None
+
+    async def _none_batch(texts):
+        return [None] * len(texts)
+
+    monkeypatch.setattr(embedder, "embed_openai", _none)
+    monkeypatch.setattr(embedder, "embed_openai_batch", _none_batch)
+
+
+@pytest.fixture
+async def pg_store():
+    """A PgMemoryStore on a freshly-truncated local Postgres test DB."""
+    dsn = test_dsn()
+    if not dsn or not ensure_test_db():
+        pytest.skip("local Postgres (LOCAL_DATABASE_URL) unavailable")
+    from anima.memory.pg_store import PgMemoryStore
+    store = await PgMemoryStore.create(dsn=dsn)
+    store._db.write_sync(f"TRUNCATE {_PG_TABLES}")
+    try:
+        yield store
+    finally:
+        await store.close()
+
+
 @pytest.fixture
 def sample_event():
     return Event(

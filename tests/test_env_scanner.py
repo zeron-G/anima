@@ -158,16 +158,12 @@ def test_skip_dirs():
 # ── Tests: store integration ──
 
 @pytest.mark.asyncio
-async def test_store_env_catalog():
+async def test_store_env_catalog(pg_store):
     """Test the actual MemoryStore env_catalog methods."""
-    from anima.memory.store import MemoryStore
-    import tempfile
-    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
-        db_path = os.path.join(tmpdir, "test.db")
-        store = await MemoryStore.create(db_path)
+    store = pg_store
 
-        # Insert entries
-        store.upsert_env_catalog_batch([
+    # Insert entries
+    store.upsert_env_catalog_batch([
             {"id": "abc123", "path": "/tmp/test.py", "type": "file",
              "size_bytes": 100, "modified_at": time.time(), "scanned_at": time.time(),
              "scan_layer": 1, "category": "code", "extension": ".py",
@@ -178,27 +174,25 @@ async def test_store_env_catalog():
              "parent_dir": "/tmp", "is_important": 1},
         ])
 
-        # Search
-        results = store.search_env_catalog(query="test")
-        assert len(results) == 1
-        assert results[0]["path"] == "/tmp/test.py"
+    # Search
+    results = store.search_env_catalog(query="test")
+    assert len(results) == 1
+    assert results[0]["path"] == "/tmp/test.py"
 
-        results = store.search_env_catalog(category="document")
-        assert len(results) == 1
+    results = store.search_env_catalog(category="document")
+    assert len(results) == 1
 
-        # Stats
-        stats = store.get_env_stats()
-        assert stats["total_files"] == 2
-        assert stats["important_files"] == 1
+    # Stats
+    stats = store.get_env_stats()
+    assert stats["total_files"] == 2
+    assert stats["important_files"] == 1
 
-        # Progress tracking
-        store.update_scan_progress("layer1", "completed", total_files=2)
-        p = store.get_scan_progress("layer1")
-        assert p["status"] == "completed"
+    # Progress tracking
+    store.update_scan_progress("layer1", "completed", total_files=2)
+    p = store.get_scan_progress("layer1")
+    assert p["status"] == "completed"
 
-        # Delete
-        store.mark_env_deleted("/tmp/test.py")
-        results = store.search_env_catalog(query="test")
-        assert len(results) == 0
-
-        await store.close()
+    # Delete
+    store.mark_env_deleted("/tmp/test.py")
+    results = store.search_env_catalog(query="test")
+    assert len(results) == 0

@@ -247,17 +247,14 @@ class TestChromaDBBackfill:
     """Test M-15: backfill on init."""
 
     @pytest.mark.asyncio
-    async def test_backfill_code_exists(self, tmp_path):
+    async def test_backfill_code_exists(self, pg_store):
         """Verify backfill code path exists in store create."""
-        from anima.memory.store import MemoryStore
         # Just verify store creates without error
-        db_path = str(tmp_path / "test_backfill.db")
-        store = await MemoryStore.create(db_path)
+        store = pg_store
         # Save some memories
         store.save_memory("test content", "chat")
         # ChromaDB backfill only runs if chromadb is installed
         # We just verify it doesn't crash
-        await store.close()
 
 
 # ── MCP backoff ──
