@@ -71,6 +71,10 @@ class Sentinel:
                         self._observe(hr)
                     except Exception as e:  # noqa: BLE001 — observe must never kill the loop
                         log.warning("guardian: observe(%s) failed: %s", probe.component.value, e)
+                # Stamp the cross-process liveness token: the external limb reads
+                # this to tell "process alive but Sentinel frozen" from "healthy".
+                from anima.guardian import handoff
+                handoff.write_sentinel_tick(self._tick)
                 await asyncio.sleep(self._interval)
             except asyncio.CancelledError:
                 break

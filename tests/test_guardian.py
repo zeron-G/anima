@@ -150,3 +150,65 @@ async def test_sentinel_rollup_and_isolation():
     assert snap["components"]["llm"]["health"] == "down"
     assert snap["components"]["db"]["health"] == "degraded"
     assert snap["components"]["mesh"]["health"] == "unknown"  # bad probe isolated, not crashed
+
+
+# ── P1: external limb decision logic (pure) ──
+def test_classify_exit():
+    from anima.watchdog import classify_exit
+    assert classify_exit(0, None) == "stop"            # clean exit, nobody asked
+    assert classify_exit(1, None) == "crash"
+    assert classify_exit(137, None) == "crash"
+    assert classify_exit(0, {"reason": "x"}) == "requested_restart"  # marker wins
+    assert classify_exit(1, {"reason": "x"}) == "requested_restart"
+
+
+def test_liveness_verdict():
+    from anima.watchdog import liveness_verdict
+    # draining (graceful restart in progress) → never killed
+    assert liveness_verdict(hb_age=9999, healthz_ok=False, tick_frozen=True, draining=True) == "alive"
+    # body answers HTTP but Sentinel tick stuck → brain frozen
+    assert liveness_verdict(hb_age=1, healthz_ok=True, tick_frozen=True, draining=False) == "brain_frozen"
+    # heartbeat stale AND healthz unreachable (two signals) → hung
+    assert liveness_verdict(hb_age=999, healthz_ok=False, tick_frozen=False, draining=False) == "hung"
+    # stale heartbeat but healthz OK → NOT hung (single signal insufficient)
+    assert liveness_verdict(hb_age=999, healthz_ok=True, tick_frozen=False, draining=False) == "alive"
+    # all good
+    assert liveness_verdict(hb_age=1, healthz_ok=True, tick_frozen=False, draining=False) == "alive"
+
+
+# ── P1: cross-process ledger ──
+def test_ledger_restart_budget(tmp_path):
+    from anima.guardian.handoff import Ledger
+    led = Ledger(path=tmp_path / "ledger.json")
+    now = 1000.0
+    assert led.can_restart(now, max_n=3, window_s=600)
+    for i in range(3):
+        led.record_restart("crash", now + i, window_s=600)
+    assert led.restart_count(now + 3, window_s=600) == 3
+    assert not led.can_restart(now + 3, max_n=3, window_s=600)   # budget exhausted
+    # old restarts fall out of the window
+    assert led.restart_count(now + 1000, window_s=600) == 0
+    assert led.can_restart(now + 1000, max_n=3, window_s=600)
+
+
+def test_ledger_defeated(tmp_path):
+    from anima.guardian.handoff import Ledger
+    led = Ledger(path=tmp_path / "ledger.json")
+    assert not led.is_defeated("db")
+    led.mark_defeated("db")
+    assert led.is_defeated("db")
+    assert Ledger(path=tmp_path / "ledger.json").is_defeated("db")  # persisted across instances
+    led.clear_defeated("db")
+    assert not led.is_defeated("db")
+
+
+def test_handoff_tick_and_marker(tmp_path, monkeypatch):
+    from anima.guardian import handoff
+    monkeypatch.setattr(handoff, "guardian_dir", lambda: tmp_path)
+    handoff.write_sentinel_tick(42)
+    assert handoff.read_sentinel_tick()["tick"] == 42
+    assert handoff.write_restart_marker("evolution") is True
+    assert handoff.read_restart_marker()["reason"] == "evolution"
+    consumed = handoff.consume_restart_marker()
+    assert consumed["reason"] == "evolution"
+    assert handoff.read_restart_marker() is None    # archived, not re-read
