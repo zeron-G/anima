@@ -45,6 +45,8 @@ class LLMRouter:
         openai_max_tokens: int = 16384,
         codex_fallback: str = "",
         codex_max_tokens: int = 16384,
+        deepseek_fallback: str = "",
+        deepseek_max_tokens: int = 8192,
     ) -> None:
         self._tier1_model = tier1_model
         self._tier2_model = tier2_model
@@ -56,6 +58,8 @@ class LLMRouter:
         self._openai_max_tokens = openai_max_tokens
         self._codex_fallback = codex_fallback    # e.g. "codex/gpt-4o"
         self._codex_max_tokens = codex_max_tokens
+        self._deepseek_fallback = deepseek_fallback  # e.g. "deepseek/deepseek-v4-flash"
+        self._deepseek_max_tokens = deepseek_max_tokens
         self._daily_budget = daily_budget
         self._usage: list[dict] = []
         self._day_start = self._today()
@@ -175,6 +179,10 @@ class LLMRouter:
         # Same-provider (Codex/OAuth) backup first — still free, no Claude key needed.
         if self._codex_fallback:
             cascade.append((self._codex_fallback, self._codex_max_tokens, 90))
+        # DeepSeek API fallback (OpenAI-compatible, real key) — the live safety net
+        # when Codex is down, ahead of the API-key-gated (and keyless) Claude route.
+        if self._deepseek_fallback:
+            cascade.append((self._deepseek_fallback, self._deepseek_max_tokens, 120))
         # Claude API-key route — kept selectable, but skipped without credentials.
         if self._anthropic_available():
             cascade.append((self.OPUS_FALLBACK, 16384, 90))
@@ -416,6 +424,7 @@ class LLMRouter:
         "o3": (2.0, 8.0),
         "o4-mini": (1.1, 4.4),
         "codex": (0.0, 0.0),   # Codex OAuth uses ChatGPT subscription (free)
+        "deepseek": (0.3, 1.2),  # approx USD/1M tok (v4-flash, cheap) — refine if needed
         "local": (0.0, 0.0),  # local models are free
     }
 

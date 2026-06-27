@@ -23,3 +23,9 @@ _CREDENTIALS_PATH = Path.home() / ".claude" / ".credentials.json"
 # ── OpenAI ──
 _OPENAI_API_BASE = "https://api.openai.com"
 _LOCAL_LLM_BASE = "http://localhost:8080"
+
+# ── DeepSeek (OpenAI-compatible; key via DEEPSEEK_API_KEY) ──
+_DEEPSEEK_API_BASE = (
+    os.environ.get("DEEPSEEK_API_BASE", "").strip()
+    or "https://api.deepseek.com"
+).rstrip("/")

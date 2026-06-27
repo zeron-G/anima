@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import os
 
-from anima.llm.providers.constants import _LOCAL_LLM_BASE, _OPENAI_API_BASE
+from anima.llm.providers.constants import _LOCAL_LLM_BASE, _OPENAI_API_BASE, _DEEPSEEK_API_BASE
 from anima.llm.providers.anthropic_sdk import _get_anthropic_client, _anthropic_sdk_completion
 from anima.llm.providers.anthropic_http import _anthropic_completion
 from anima.llm.providers.openai_compat import _openai_completion
@@ -46,6 +46,17 @@ async def completion(
         base = os.environ.get("OPENAI_API_BASE", _OPENAI_API_BASE)
         model_id = model.removeprefix("openai/").strip()
         api_key = os.environ.get("OPENAI_API_KEY", "")
+        return await _openai_completion(
+            base_url=base, model_id=model_id, api_key=api_key,
+            messages=messages, max_tokens=max_tokens,
+            temperature=temperature, tools=tools,
+        )
+
+    if model.startswith("deepseek/"):
+        # DeepSeek is OpenAI-compatible (POST {base}/v1/chat/completions, Bearer key).
+        base = os.environ.get("DEEPSEEK_API_BASE", _DEEPSEEK_API_BASE)
+        model_id = model.removeprefix("deepseek/").strip()
+        api_key = os.environ.get("DEEPSEEK_API_KEY", "")
         return await _openai_completion(
             base_url=base, model_id=model_id, api_key=api_key,
             messages=messages, max_tokens=max_tokens,

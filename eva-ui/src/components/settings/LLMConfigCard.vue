@@ -35,6 +35,7 @@ const modelPresets: Record<string, string[]> = {
   anthropic: ['claude-opus-4-8', 'claude-sonnet-4-6', 'claude-haiku-4-5-20251001'],
   openai: ['gpt-4o', 'gpt-4o-mini', 'o3-mini'],
   codex: ['codex/gpt-5.5', 'codex/gpt-5.4', 'codex/gpt-5.4-mini'],
+  deepseek: ['deepseek/deepseek-v4-flash', 'deepseek/deepseek-v4-pro'],
   local: ['local/llama3', 'local/mistral', 'local/deepseek-r1'],
 }
 

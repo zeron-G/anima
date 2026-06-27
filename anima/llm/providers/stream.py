@@ -12,7 +12,7 @@ import httpx
 from anima.llm.providers.constants import (
     ANTHROPIC_API_BASE, ANTHROPIC_VERSION, CLAUDE_CODE_IDENTITY,
     CLAUDE_CODE_VERSION, OAUTH_BETA_HEADERS,
-    _LOCAL_LLM_BASE, _OPENAI_API_BASE,
+    _LOCAL_LLM_BASE, _OPENAI_API_BASE, _DEEPSEEK_API_BASE,
 )
 from anima.llm.providers.auth import _get_anthropic_token, _is_oauth_token
 from anima.llm.providers.message_convert import _fix_api_messages
@@ -86,6 +86,33 @@ async def completion_stream(
             tool_calls=resp.get("tool_calls", []),
             usage=resp.get("usage", {}),
             model=resp.get("model", model),
+        )
+        return
+
+    if model.startswith("deepseek/"):
+        # DeepSeek (OpenAI-compatible). Emitted as a single message_complete — same
+        # rationale as codex/: a streamed text_delta preview would fire
+        # stream_callback AND output_callback → double-display. content holds the
+        # answer (deepseek-v4-flash is a reasoner; reasoning_content is separate).
+        from anima.llm.providers.openai_compat import _openai_completion
+        base = os.environ.get("DEEPSEEK_API_BASE", _DEEPSEEK_API_BASE)
+        model_id = model.removeprefix("deepseek/").strip()
+        api_key = os.environ.get("DEEPSEEK_API_KEY", "")
+        try:
+            resp = await _openai_completion(
+                base_url=base, model_id=model_id, api_key=api_key,
+                messages=messages, max_tokens=max_tokens,
+                temperature=temperature, tools=tools,
+            )
+        except Exception as e:
+            yield StreamEvent(type="error", error=f"DeepSeek error: {str(e)[:300]}")
+            return
+        yield StreamEvent(
+            type="message_complete",
+            content=resp.get("content", "") or "",
+            tool_calls=resp.get("tool_calls", []),
+            usage=resp.get("usage", {}),
+            model=resp.get("model", model_id),
         )
         return
 
