@@ -34,6 +34,8 @@ KNOWN_SECRETS: list[str] = [
     "ANIMA_DASHBOARD_PASSWORD", "ANIMA_DASHBOARD_JWT_SECRET",
     # Distributed mesh + remote nodes
     "ANIMA_NETWORK_SECRET", "ANIMA_LAPTOP_SSH_PASSWORD",
+    # Data store (Neon / Postgres + pgvector). Contains an embedded password.
+    "DATABASE_URL",
 ]
 
 
