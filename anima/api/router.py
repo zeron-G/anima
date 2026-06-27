@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from aiohttp import web
 
-from anima.api import auth, chat, health, soulscape, evolution, memory, network, robotics, settings
+from anima.api import auth, chat, health, soulscape, evolution, memory, network, robotics, settings, status as status_api
 from anima.api.context import HUB_APP_KEY
 from anima.utils.logging import get_logger
 
@@ -26,6 +26,10 @@ class APIRouter:
         # These three paths are the auth middleware's PUBLIC_PATHS allowlist.
         app.router.add_get("/v1/health", health.health)
         app.router.add_get("/v1/version", health.version)
+        app.router.add_get("/v1/healthz", status_api.healthz)   # Sentinel liveness (public)
+
+        # Readiness — rich component health (authed; 503 on overall down)
+        app.router.add_get("/v1/status", status_api.status)
 
         # Auth (login itself is public; everything else below is gated centrally
         # by the auth middleware in DashboardServer — handlers no longer self-check)

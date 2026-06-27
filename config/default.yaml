@@ -82,6 +82,14 @@ memory:
   keep_recent: 10            # Keep last N raw messages after compression
   sync_interval_s: 300       # Replica sync cadence: warm local while online; replay local→primary on reconnect
 
+# ── Guardian / Sentinel (self-healing supervisor) ──
+# P0 is PASSIVE: detect + surface only, no repair actions. Repair phases (P2+)
+# add per-component mode/budget keys. See docs/SENTINEL_DESIGN.md.
+guardian:
+  enabled: true
+  interval_s: 5             # health poll cadence
+  probe_timeout_s: 3        # per-probe timeout (a hung probe never blocks the loop)
+
 # ── Evolution ──
 evolution:
   # Push/pull evolution commits to/from `origin` (multi-node code propagation).

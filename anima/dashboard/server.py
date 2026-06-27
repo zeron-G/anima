@@ -87,7 +87,7 @@ class DashboardServer:
         # paths in PUBLIC_PATHS (login + liveness) skip auth; everything else
         # under those prefixes requires a valid token. The SPA shell, /assets,
         # /static and /desktop are not under these prefixes, so they stay public.
-        PUBLIC_PATHS = {"/v1/auth/login", "/v1/health", "/v1/version"}
+        PUBLIC_PATHS = {"/v1/auth/login", "/v1/health", "/v1/version", "/v1/healthz"}
 
         @web.middleware
         async def auth_middleware(request, handler):

@@ -1130,6 +1130,25 @@ async def run() -> bool:
     hub, dashboard = _init_dashboard(core, llm, hb, cog, net, config)
     _wire_callbacks(cog["cognitive"], cog["terminal"], hub, core["agent_manager"], hb["heartbeat"], net)
 
+    # ── Sentinel: self-healing supervisor (P0 — passive observe-only) ──
+    sentinel = None
+    if get("guardian.enabled", True):
+        from anima.guardian import Sentinel, TaskProbe, LlmProbe, DbProbe, MeshProbe, ResourceProbe
+        _node_identity = net.get("node_identity")
+        sentinel = Sentinel(
+            probes=[
+                TaskProbe(),
+                LlmProbe(hub.llm_router),
+                DbProbe(getattr(core["memory_store"], "_db", None)),
+                MeshProbe(net.get("gossip_mesh"), _node_identity, net.get("split_brain")),
+                ResourceProbe(),
+            ],
+            config=get("guardian", {}),
+            node_id=getattr(_node_identity, "node_id", "local"),
+        )
+        hub.safety_monitor = sentinel
+        core["sentinel"] = sentinel
+
     # Start all subsystems
     await dashboard.start()
 
@@ -1140,11 +1159,19 @@ async def run() -> bool:
     gossip_mesh = net.get("gossip_mesh")
     mcp_manager = core.get("mcp_manager")
 
-    tasks = [
-        asyncio.create_task(heartbeat.start(), name="heartbeat"),
-        asyncio.create_task(cognitive.run(), name="cognitive"),
-        asyncio.create_task(terminal.start(), name="terminal"),
-    ]
+    tasks = []
+    for _tname, _tcoro in (
+        ("heartbeat", heartbeat.start()),
+        ("cognitive", cognitive.run()),
+        ("terminal", terminal.start()),
+    ):
+        _t = asyncio.create_task(_tcoro, name=_tname)
+        if sentinel:
+            sentinel.watch_task(_t, kind=_tname)   # add_done_callback → surfaces silent death
+        tasks.append(_t)
+    # The supervisor runs as its own task (must outlive what it watches).
+    if sentinel:
+        tasks.append(asyncio.create_task(sentinel.run(), name="sentinel"))
 
     # ── Environment scanner: Layer 1 on startup ──
     idle_cfg = hb["idle_cfg"]
@@ -1188,6 +1215,11 @@ async def run() -> bool:
         log.info("Shutdown for evolution restart: %s", cognitive.reload_manager.restart_reason)
     else:
         log.info("Shutdown signal received...")
+
+    # Stop the Sentinel observing FIRST, so teardown isn't misread as failures.
+    sentinel = core.get("sentinel")
+    if sentinel:
+        sentinel.begin_shutdown()
 
     # Graceful shutdown sequence
     timeout = get("shutdown.timeout_s", 5)

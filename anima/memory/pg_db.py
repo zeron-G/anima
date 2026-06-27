@@ -115,6 +115,29 @@ class PgDatabaseManager:
     def local_dsn(self) -> str:
         return self._local_dsn
 
+    def status(self) -> dict:
+        """A cheap, side-effect-free snapshot for the Sentinel health probe."""
+        return {
+            "is_open": self.is_open,
+            "using_local": self._using_local,
+            "primary_configured": bool(self._dsn),
+            "local_configured": bool(self._local_dsn),
+        }
+
+    def primary_reachable(self, *, connect_timeout: int = 5) -> bool:
+        """Read-only probe of the PRIMARY endpoint (no side effects on the live
+        connection, no failover). Used to decide whether failback is possible.
+        Returns False if no primary is configured or it can't be reached."""
+        if not self._dsn:
+            return False
+        try:
+            with psycopg.connect(self._dsn, connect_timeout=connect_timeout,
+                                 autocommit=True) as c:
+                c.execute("SELECT 1")
+            return True
+        except Exception:  # noqa: BLE001 — unreachable is the answer, not an error
+            return False
+
     # ── Runtime failover ──
     # psycopg raises OperationalError/InterfaceError when the connection drops
     # mid-operation (e.g. Neon goes away after we connected). We catch those,

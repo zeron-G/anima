@@ -40,6 +40,7 @@ class DashboardHub:
         self.idle_scheduler = None
         self.session_manager = None
         self.robotics_manager = None
+        self.safety_monitor = None   # guardian.Sentinel (P0: passive health)
         self.config: dict = {}
         self._server = None  # Set by DashboardServer after init
         self._start_time = time.time()
@@ -177,6 +178,10 @@ class DashboardHub:
             snapshot["idle_scheduler"] = self.idle_scheduler.get_status()
         else:
             snapshot["idle_scheduler"] = {}
+
+        # Sentinel self-healing supervisor (P0: passive health)
+        if self.safety_monitor:
+            snapshot["safety"] = self.safety_monitor.snapshot()
 
         # Multi-user session info
         if self.session_manager:
