@@ -37,8 +37,10 @@ watch = ["watchdog>=4.0.0"]
 discord = ["discord.py>=2.3"]
 # Distributed gossip mesh (zmq) + mDNS discovery + remote-node SSH deploy/spawn.
 network = ["pyzmq>=25.0", "msgpack>=1.0", "zeroconf>=0.131", "paramiko>=3.5.0"]
+# Postgres + pgvector memory backend (Neon cloud / local). Embeddings via OpenAI.
+postgres = ["psycopg[binary]>=3.2", "pgvector>=0.4"]
 # Everything — a full single-machine install.
-all = ["anima[network,tts,stt,discord,watch]"]
+all = ["anima[network,tts,stt,discord,watch,postgres]"]
 dev = [
     "pytest>=8.0.0",
     "pytest-asyncio>=0.23.0",

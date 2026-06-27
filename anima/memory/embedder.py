@@ -145,6 +145,71 @@ def cosine_similarity(a: list[float], b: list[float]) -> float:
     return dot
 
 
+# ── OpenAI embeddings (cloud / Postgres+pgvector path) ──
+# text-embedding-3-small → 1536-dim. Used when ANIMA runs on Postgres (the
+# pgvector column is vector(1536)). Key via secret_store (.env OPENAI_API_KEY).
+OPENAI_EMBED_MODEL = "text-embedding-3-small"
+OPENAI_EMBED_DIM = 1536
+_OPENAI_EMBED_URL = "https://api.openai.com/v1/embeddings"
+
+
+def openai_available() -> bool:
+    from anima.secret_store import get_secret
+    return bool(get_secret("OPENAI_API_KEY"))
+
+
+async def embed_openai(text: str) -> list[float] | None:
+    """Embed one string via OpenAI text-embedding-3-small (1536-dim).
+
+    Returns None if no key or the call fails (callers degrade gracefully).
+    """
+    from anima.secret_store import get_secret
+    key = get_secret("OPENAI_API_KEY")
+    if not key:
+        return None
+    import httpx
+    payload = {"model": OPENAI_EMBED_MODEL, "input": (text or "")[:8000]}
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.post(
+                _OPENAI_EMBED_URL,
+                headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
+                json=payload,
+            )
+        if resp.status_code != 200:
+            log.warning("OpenAI embed %d: %s", resp.status_code, resp.text[:200])
+            return None
+        return resp.json()["data"][0]["embedding"]
+    except Exception as e:
+        log.warning("OpenAI embed failed: %s", e)
+        return None
+
+
+async def embed_openai_batch(texts: list[str]) -> list[list[float] | None]:
+    """Embed multiple strings in one OpenAI call (cheaper/faster)."""
+    from anima.secret_store import get_secret
+    key = get_secret("OPENAI_API_KEY")
+    if not key or not texts:
+        return [None] * len(texts)
+    import httpx
+    payload = {"model": OPENAI_EMBED_MODEL, "input": [(t or "")[:8000] for t in texts]}
+    try:
+        async with httpx.AsyncClient(timeout=60) as client:
+            resp = await client.post(
+                _OPENAI_EMBED_URL,
+                headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
+                json=payload,
+            )
+        if resp.status_code != 200:
+            log.warning("OpenAI embed batch %d: %s", resp.status_code, resp.text[:200])
+            return [None] * len(texts)
+        data = sorted(resp.json()["data"], key=lambda d: d["index"])
+        return [d["embedding"] for d in data]
+    except Exception as e:
+        log.warning("OpenAI embed batch failed: %s", e)
+        return [None] * len(texts)
+
+
 # ── Serialization helpers for SQLite storage ──
 
 def vector_to_bytes(vec: list[float]) -> bytes:
