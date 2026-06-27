@@ -35,7 +35,8 @@ class TelegramChannel(BaseChannel):
         allowed_users: list[int] | None = None,
     ) -> None:
         super().__init__("telegram")
-        self._token = token or os.environ.get("TELEGRAM_BOT_TOKEN", "")
+        from anima.secret_store import get_secret
+        self._token = token or get_secret("TELEGRAM_BOT_TOKEN")
         self._allowed_users = set(allowed_users or [])
         self._connected = False
         self._thread: threading.Thread | None = None

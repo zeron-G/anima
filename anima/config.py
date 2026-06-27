@@ -284,7 +284,8 @@ def load_config(
     # Inject Discord token from environment variable if not set
     discord_cfg = _config.setdefault("channels", {}).setdefault("discord", {})
     if not discord_cfg.get("token"):
-        env_token = os.environ.get("DISCORD_BOT_TOKEN", "")
+        from anima.secret_store import get_secret
+        env_token = get_secret("DISCORD_BOT_TOKEN")
         if env_token:
             discord_cfg["token"] = env_token
 

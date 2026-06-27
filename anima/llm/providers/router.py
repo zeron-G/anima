@@ -45,7 +45,8 @@ async def completion(
     if model.startswith("openai/"):
         base = os.environ.get("OPENAI_API_BASE", _OPENAI_API_BASE)
         model_id = model.removeprefix("openai/").strip()
-        api_key = os.environ.get("OPENAI_API_KEY", "")
+        from anima.secret_store import get_secret
+        api_key = get_secret("OPENAI_API_KEY")
         return await _openai_completion(
             base_url=base, model_id=model_id, api_key=api_key,
             messages=messages, max_tokens=max_tokens,
@@ -56,7 +57,8 @@ async def completion(
         # DeepSeek is OpenAI-compatible (POST {base}/v1/chat/completions, Bearer key).
         base = os.environ.get("DEEPSEEK_API_BASE", _DEEPSEEK_API_BASE)
         model_id = model.removeprefix("deepseek/").strip()
-        api_key = os.environ.get("DEEPSEEK_API_KEY", "")
+        from anima.secret_store import get_secret
+        api_key = get_secret("DEEPSEEK_API_KEY")
         return await _openai_completion(
             base_url=base, model_id=model_id, api_key=api_key,
             messages=messages, max_tokens=max_tokens,

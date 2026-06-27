@@ -97,7 +97,8 @@ async def completion_stream(
         from anima.llm.providers.openai_compat import _openai_completion
         base = os.environ.get("DEEPSEEK_API_BASE", _DEEPSEEK_API_BASE)
         model_id = model.removeprefix("deepseek/").strip()
-        api_key = os.environ.get("DEEPSEEK_API_KEY", "")
+        from anima.secret_store import get_secret
+        api_key = get_secret("DEEPSEEK_API_KEY")
         try:
             resp = await _openai_completion(
                 base_url=base, model_id=model_id, api_key=api_key,
@@ -134,7 +135,8 @@ async def completion_stream(
     if model.startswith("openai/"):
         base = os.environ.get("OPENAI_API_BASE", _OPENAI_API_BASE)
         model_id = model.removeprefix("openai/").strip()
-        api_key = os.environ.get("OPENAI_API_KEY", "")
+        from anima.secret_store import get_secret
+        api_key = get_secret("OPENAI_API_KEY")
         async for event in _openai_completion_stream(
             base_url=base, model_id=model_id, api_key=api_key,
             messages=messages, max_tokens=max_tokens,

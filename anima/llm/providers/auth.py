@@ -26,11 +26,12 @@ def _load_token_from_credentials() -> str:
 
 def _get_anthropic_token() -> str:
     """Anthropic auth token. Priority: env AUTH_TOKEN > env OAUTH > credentials > env APIKEY."""
+    from anima.secret_store import get_secret
     return (
-        os.environ.get("ANTHROPIC_AUTH_TOKEN", "").strip()
-        or os.environ.get("ANTHROPIC_OAUTH_TOKEN", "").strip()
+        get_secret("ANTHROPIC_AUTH_TOKEN")
+        or get_secret("ANTHROPIC_OAUTH_TOKEN")
         or _load_token_from_credentials()
-        or os.environ.get("ANTHROPIC_API_KEY", "").strip()
+        or get_secret("ANTHROPIC_API_KEY")
     )
 
 

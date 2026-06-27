@@ -151,10 +151,10 @@ class LLMRouter:
         circuit breaker. The route stays wired: set ANTHROPIC_API_KEY (or a
         non-OAuth ANTHROPIC_AUTH_TOKEN) and it lights up automatically.
         """
-        import os as _os
-        if _os.environ.get("ANTHROPIC_API_KEY", "").strip():
+        from anima.secret_store import get_secret
+        if get_secret("ANTHROPIC_API_KEY"):
             return True
-        auth = _os.environ.get("ANTHROPIC_AUTH_TOKEN", "").strip()
+        auth = get_secret("ANTHROPIC_AUTH_TOKEN")
         return bool(auth) and not auth.startswith("sk-ant-oat")
 
     def _build_cascade(self, tier: int) -> list[tuple[str, int, int]]:

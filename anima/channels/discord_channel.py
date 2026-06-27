@@ -31,7 +31,8 @@ class DiscordChannel(BaseChannel):
 
     def __init__(self, token: str = "", allowed_users: list[str] | None = None):
         super().__init__("discord")
-        self._token = token or os.environ.get("DISCORD_BOT_TOKEN", "")
+        from anima.secret_store import get_secret
+        self._token = token or get_secret("DISCORD_BOT_TOKEN")
         self._allowed_users = set(allowed_users or [])
         self._client = None
         self._connected = False

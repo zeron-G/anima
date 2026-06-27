@@ -103,8 +103,10 @@ async def _init_core(config: dict) -> dict:
 
     # Register known remote nodes for cross-node communication
     from anima.tools.builtin.remote import register_node
+    from anima.secret_store import resolve as _resolve_secret
     for node_cfg in get("network.remote_nodes", []):
-        register_node(node_cfg["name"], node_cfg["host"], node_cfg["user"], node_cfg["password"],
+        register_node(node_cfg["name"], node_cfg["host"], node_cfg["user"],
+                      _resolve_secret(node_cfg.get("password", "")),
                       hosts=node_cfg.get("hosts"))
 
     tool_executor = ToolExecutor(
@@ -456,10 +458,11 @@ async def _init_gossip(config: dict, core: dict, heartbeat_deps: dict) -> dict:
         max_concurrent=int(runtime_cfg.get("max_concurrent", 5)),
         capabilities=[t.name for t in core["tool_registry"].list_tools()],
     )
+    from anima.secret_store import resolve as _resolve_secret
     gossip_mesh = GossipMesh(
         identity=node_identity,
         local_state=node_state,
-        network_secret=get("network.secret", ""),
+        network_secret=_resolve_secret(get("network.secret", "")),
         listen_port=get("network.listen_port", 9420),
     )
     # Configure peers

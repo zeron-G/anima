@@ -359,13 +359,13 @@ class DashboardHub:
         masked = (token[:16] + "..." + token[-6:]) if token and len(token) > 24 else "none"
 
         # Determine source
-        import os
+        from anima.secret_store import get_secret
         source = "none"
-        if os.environ.get("ANTHROPIC_OAUTH_TOKEN", "").strip():
+        if get_secret("ANTHROPIC_OAUTH_TOKEN"):
             source = "env:ANTHROPIC_OAUTH_TOKEN"
         elif token and is_oauth:
             source = "~/.claude/.credentials.json"
-        elif os.environ.get("ANTHROPIC_API_KEY", "").strip():
+        elif get_secret("ANTHROPIC_API_KEY"):
             source = "env:ANTHROPIC_API_KEY"
 
         tier1 = self.config.get("llm", {}).get("tier1", {}).get("model", "?")

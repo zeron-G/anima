@@ -58,14 +58,15 @@ def _check_llm_credentials(issues: list, config: dict | None = None) -> None:
     tier1_model = str((llm_cfg.get("tier1", {}) or {}).get("model", ""))
     tier2_model = str((llm_cfg.get("tier2", {}) or {}).get("model", ""))
 
-    has_openai_key = bool(os.environ.get("OPENAI_API_KEY", "").strip())
+    from anima.secret_store import get_secret
+    has_openai_key = bool(get_secret("OPENAI_API_KEY"))
     has_openai_model = bool(str(openai_cfg.get("model", "")).strip())
     has_openai_route = has_openai_key and (
         has_openai_model or tier1_model.startswith("openai/") or tier2_model.startswith("openai/")
     )
 
-    has_key = bool(os.environ.get("ANTHROPIC_API_KEY", "").strip())
-    has_oauth = bool(os.environ.get("ANTHROPIC_OAUTH_TOKEN", "").strip())
+    has_key = bool(get_secret("ANTHROPIC_API_KEY"))
+    has_oauth = bool(get_secret("ANTHROPIC_OAUTH_TOKEN"))
     has_creds = _has_claude_code_credentials()
 
     if has_key or has_oauth or has_creds or has_openai_route:

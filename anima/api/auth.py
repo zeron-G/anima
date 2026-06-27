@@ -11,6 +11,7 @@ import time
 from aiohttp import web
 
 from anima.config import get
+from anima.secret_store import resolve as _resolve_secret
 from anima.utils.logging import get_logger
 
 log = get_logger("api.auth")
@@ -21,7 +22,7 @@ _SECRET = ""
 def _get_secret() -> str:
     global _SECRET
     if not _SECRET:
-        configured = get("dashboard.auth.token", "")
+        configured = _resolve_secret(get("dashboard.auth.token", ""))
         if configured:
             _SECRET = configured
         else:
@@ -75,7 +76,7 @@ def verify_token(token: str) -> bool:
 
 def check_auth(request: web.Request) -> bool:
     """Check if request is authenticated. Returns True if auth passes."""
-    password = get("dashboard.auth.password", "")
+    password = _resolve_secret(get("dashboard.auth.password", ""))
     if not password:
         return True  # Auth disabled when no password set
 
@@ -109,7 +110,7 @@ async def handle_login(request: web.Request) -> web.Response:
             status=429,
         )
 
-    password = get("dashboard.auth.password", "")
+    password = _resolve_secret(get("dashboard.auth.password", ""))
     if not password:
         # Auth disabled, return token anyway
         result = generate_token()
