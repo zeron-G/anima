@@ -60,6 +60,9 @@ class PgSyncManager:
         self._interval = interval_s
         self._task: asyncio.Task | None = None
         self._running = False
+        # Serialises failback: the 300s loop and an on-demand recover_now() must
+        # never replay/switch concurrently.
+        self._failback_lock = asyncio.Lock()
 
     async def start(self) -> None:
         if not (self._primary and self._local):
@@ -89,16 +92,37 @@ class PgSyncManager:
                 break
             try:
                 if self._db.using_local:
-                    # Offline → try to recover: replay local-only writes to the
-                    # primary, then switch the live connection back to it.
-                    recovered = await asyncio.to_thread(self._replay_local_to_primary)
-                    if recovered and await self._db.switch_to_primary():
-                        log.info("PgSync: recovered to primary (local-only writes replayed)")
+                    # Offline → try to recover (replay-then-switch, under the lock).
+                    async with self._failback_lock:
+                        recovered = await asyncio.to_thread(self._replay_local_to_primary)
+                        if recovered and await self._db.switch_to_primary():
+                            log.info("PgSync: recovered to primary (local-only writes replayed)")
                 else:
                     # Online → keep the local failover replica warm.
                     await asyncio.to_thread(self._backup_primary_to_local)
             except Exception as e:  # noqa: BLE001 — never let the loop die
                 log.warning("PgSync tick failed: %s", str(e)[:160])
+
+    async def recover_now(self) -> dict:
+        """On-demand accelerated failback (the Guardian's DbRecoverFixer calls
+        this instead of waiting up to interval_s). Same replay-then-switch under
+        the same lock as the loop — never a second, unsynchronised failback path.
+        Returns {recovered: bool, reason/detail}."""
+        if not self._db.using_local:
+            return {"recovered": False, "reason": "already_on_primary"}
+        if self._failback_lock.locked():
+            return {"recovered": False, "reason": "in_progress"}
+        async with self._failback_lock:
+            if not self._db.using_local:                      # re-check under lock
+                return {"recovered": False, "reason": "already_on_primary"}
+            recovered = await asyncio.to_thread(self._replay_local_to_primary)
+            if not recovered:
+                return {"recovered": False, "reason": "primary_unreachable"}
+            switched = await self._db.switch_to_primary()
+            if switched:
+                log.info("PgSync: accelerated failback to primary (recover_now)")
+                return {"recovered": True, "detail": "replayed + switched to primary"}
+            return {"recovered": False, "reason": "switch_failed"}
 
     # ── sync-on-demand (also callable directly, e.g. tests / shutdown) ──
 

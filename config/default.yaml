@@ -83,12 +83,23 @@ memory:
   sync_interval_s: 300       # Replica sync cadence: warm local while online; replay local→primary on reconnect
 
 # ── Guardian / Sentinel (self-healing supervisor) ──
-# P0 is PASSIVE: detect + surface only, no repair actions. Repair phases (P2+)
-# add per-component mode/budget keys. See docs/SENTINEL_DESIGN.md.
+# Detect + surface + (P2) safe reversible auto-repair. Per-component `mode`:
+# auto = execute; manual = propose + await human. enabled:false = observe-only
+# (used for components with no fixer yet). See docs/SENTINEL_DESIGN.md.
 guardian:
   enabled: true
   interval_s: 5             # health poll cadence
   probe_timeout_s: 3        # per-probe timeout (a hung probe never blocks the loop)
+  repair_timeout_s: 45      # per-repair timeout (runs as a background task)
+  components:
+    # Safe, reversible auto-repair (P2). Flip mode→manual for human authorization.
+    llm: { mode: auto, warn_threshold: 3, cooldown_s: 30, max_attempts: 3 }
+    db:  { mode: auto, warn_threshold: 2, cooldown_s: 60, max_attempts: 5 }
+    # Observe-only until their fixers land (P3+: task restart, channel restart):
+    task:     { enabled: false }
+    mesh:     { enabled: false }
+    channels: { enabled: false }
+    resource: { enabled: false }
 
 # ── Evolution ──
 evolution:

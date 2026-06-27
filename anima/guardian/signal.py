@@ -81,6 +81,22 @@ class HealthReport:
 
 
 @dataclass(frozen=True, slots=True)
+class Fault:
+    """A confirmed unhealthy component — the trigger context handed to a Fixer.
+    (Repair strategies mostly read live subsystem state; the Fault carries the
+    why/since for audit + dedup.)"""
+    component: Component
+    health: Health
+    severity: Severity
+    summary: str = ""
+    signature: str = ""                   # component + code, for budget/dedup
+    occurrences: int = 1
+    first_seen: float = field(default_factory=time.time)
+    last_seen: float = field(default_factory=time.time)
+    id: str = field(default_factory=lambda: uuid.uuid4().hex)
+
+
+@dataclass(frozen=True, slots=True)
 class AuditRecord:
     """One append-only line in guardian_actions.jsonl. Everything is auditable."""
     phase: str                            # "observe" | "transition" | "warn" | (later) "repair"

@@ -1,14 +1,17 @@
 """Sentinel — the self-healing supervisor's brain.
 
-P0 scope: PASSIVE. It runs its own supervised loop, polls each probe for current
-health, tracks per-component state, audits every transition to an append-only
-JSONL, and exposes a snapshot for /v1/status + the dashboard. It takes NO repair
-action (dry-run by construction) — the Fixer layer arrives in a later phase.
+Standalone supervised asyncio task (NOT a heartbeat tick — it watches the
+heartbeat). Each loop it polls every probe, runs a per-component escalation FSM,
+and — when a fault is CONFIRMED (sustained past the warn threshold) — engages
+the lightest applicable Fixer. Repairs run as background tasks so the loop keeps
+ticking. Safety rails baked in: warn-first, per-component cooldown + attempt
+budget, a recovery-confirm window (a fix never self-declares OK), and a
+``mode: auto|manual`` switch (manual → propose + await human, never execute).
 
-It is a standalone asyncio task (NOT a heartbeat tick): the heartbeat is one of
-the things it watches, so it must not be killable by the very failures it
-monitors. The loop is exception-isolated per probe and per iteration; one bad
-probe never stops the others, and nothing here may crash the app.
+P2 wires the safe/reversible rungs (LLM backstop, DB recover); restart/code
+rungs slot in by harshness later. Every observe / transition / repair is audited
+to data/logs/guardian_actions.jsonl. Nothing here may crash the app: every probe,
+decision, and repair is exception-isolated.
 """
 from __future__ import annotations
 
@@ -17,9 +20,12 @@ import json
 import time
 from dataclasses import dataclass, field
 
+from anima.guardian.fixer import (
+    ComponentPolicy, FsmState, Registry, RepairAction, RepairOutcome, RepairResult,
+)
 from anima.guardian.probes import Probe, TaskProbe
 from anima.guardian.signal import (
-    AuditRecord, Component, Health, HealthReport, Severity, worst_health,
+    AuditRecord, Component, Fault, Health, HealthReport, Severity, worst_health,
 )
 from anima.utils.logging import get_logger
 
@@ -27,31 +33,42 @@ log = get_logger("guardian.sentinel")
 
 
 @dataclass
-class _State:
+class _Domain:
+    state: FsmState = FsmState.OK
     health: Health = Health.UNKNOWN
     detail: str = ""
-    pressure: float = 0.0
     self_healed: bool = False
-    ts: float = field(default_factory=time.time)
+    warn_count: int = 0           # consecutive faulted observations
+    attempts: int = 0             # repair attempts at the safe rung
+    ok_streak: int = 0            # consecutive healthy reads while RECOVERING
+    last_action_mono: float = -1e9
     last_ok_ts: float | None = None
+    ts: float = field(default_factory=time.time)
 
 
 class Sentinel:
-    """Passive health supervisor (P0). Observes, audits, surfaces — no actions."""
-
-    def __init__(self, *, probes: list[Probe], config: dict | None = None,
-                 node_id: str = "local") -> None:
+    def __init__(self, *, probes: list[Probe], registry: Registry | None = None,
+                 policies: dict[Component, ComponentPolicy] | None = None,
+                 config: dict | None = None, node_id: str = "local") -> None:
         cfg = config or {}
         self._probes = probes
+        self._registry = registry or Registry([])
+        self._policies = policies or {}
+        self._default_policy = ComponentPolicy()
         self._interval = float(cfg.get("interval_s", 5))
         self._probe_timeout = float(cfg.get("probe_timeout_s", 3))
+        self._repair_timeout = float(cfg.get("repair_timeout_s", 45))
         self._node_id = node_id
-        self._states: dict[Component, _State] = {}
+        self._domains: dict[Component, _Domain] = {}
         self._tick = 0
         self._stopped = False
         self._task_probe: TaskProbe | None = next(
             (p for p in probes if isinstance(p, TaskProbe)), None)
+        self._repair_tasks: set[asyncio.Task] = set()
         self._audit_path = self._resolve_audit_path()
+
+    def _policy(self, c: Component) -> ComponentPolicy:
+        return self._policies.get(c, self._default_policy)
 
     # ── task supervision passthrough ──
     def watch_task(self, task: "asyncio.Task", *, kind: str) -> None:
@@ -60,8 +77,8 @@ class Sentinel:
 
     # ── lifecycle ──
     async def run(self) -> None:
-        log.info("Sentinel started — passive/observe-only (interval=%ss, probes=%d)",
-                 self._interval, len(self._probes))
+        log.info("Sentinel started (interval=%ss, probes=%d, fixers=%d)",
+                 self._interval, len(self._probes), len(self._registry._strategies))
         while not self._stopped:
             try:
                 self._tick += 1
@@ -69,16 +86,14 @@ class Sentinel:
                     hr = await self._safe_check(probe)
                     try:
                         self._observe(hr)
-                    except Exception as e:  # noqa: BLE001 — observe must never kill the loop
-                        log.warning("guardian: observe(%s) failed: %s", probe.component.value, e)
-                # Stamp the cross-process liveness token: the external limb reads
-                # this to tell "process alive but Sentinel frozen" from "healthy".
+                    except Exception as e:  # noqa: BLE001 — never kill the loop
+                        log.warning("guardian: decide(%s) failed: %s", probe.component.value, e)
                 from anima.guardian import handoff
                 handoff.write_sentinel_tick(self._tick)
                 await asyncio.sleep(self._interval)
             except asyncio.CancelledError:
                 break
-            except Exception as e:  # noqa: BLE001 — never hot-spin, never die
+            except Exception as e:  # noqa: BLE001
                 log.error("guardian: loop iteration error: %s", e)
                 try:
                     await asyncio.sleep(self._interval)
@@ -87,10 +102,11 @@ class Sentinel:
         log.info("Sentinel stopped")
 
     def begin_shutdown(self) -> None:
-        """Stop observing as teardown begins (so dying tasks aren't false alarms)."""
         self._stopped = True
         if self._task_probe:
             self._task_probe.begin_shutdown()
+        for t in list(self._repair_tasks):
+            t.cancel()
 
     async def stop(self) -> None:
         self.begin_shutdown()
@@ -100,42 +116,162 @@ class Sentinel:
             except Exception:  # noqa: BLE001
                 pass
 
-    # ── internals ──
+    # ── probe ──
     async def _safe_check(self, probe: Probe) -> HealthReport:
         try:
             return await asyncio.wait_for(probe.check(), self._probe_timeout)
         except asyncio.TimeoutError:
-            return HealthReport(probe.component, Health.UNKNOWN, Severity.WARN,
-                                detail="probe timeout")
+            return HealthReport(probe.component, Health.UNKNOWN, Severity.WARN, detail="probe timeout")
         except asyncio.CancelledError:
             raise
         except Exception as e:  # noqa: BLE001
-            return HealthReport(probe.component, Health.UNKNOWN, Severity.WARN,
-                                detail=f"probe error: {e}")
+            return HealthReport(probe.component, Health.UNKNOWN, Severity.WARN, detail=f"probe error: {e}")
 
+    # ── FSM ──
     def _observe(self, hr: HealthReport) -> None:
-        prev = self._states.get(hr.component)
-        prev_health = prev.health if prev else Health.UNKNOWN
-        st = _State(
-            health=hr.health, detail=hr.detail, pressure=hr.pressure,
-            self_healed=hr.self_healed, ts=hr.ts,
-            last_ok_ts=hr.ts if hr.health == Health.OK else (prev.last_ok_ts if prev else None),
-        )
-        self._states[hr.component] = st
-        if hr.health != prev_health:
-            self._on_transition(hr, prev_health)
+        d = self._domains.setdefault(hr.component, _Domain())
+        prev = d.state
+        self._fsm(d, hr)
+        d.health = hr.health
+        d.detail = hr.detail
+        d.self_healed = hr.self_healed
+        d.ts = hr.ts
+        if hr.health == Health.OK:
+            d.last_ok_ts = hr.ts
+        if d.state != prev:
+            self._audit_transition(hr, prev, d.state)
 
-    def _on_transition(self, hr: HealthReport, prev: Health) -> None:
-        msg = f"{hr.component.value}: {prev.value} → {hr.health.value} ({hr.detail})"
-        if hr.faulted() or hr.health == Health.UNKNOWN:
-            log.warning("guardian: %s", msg)
+    def _fsm(self, d: _Domain, hr: HealthReport) -> None:
+        now = time.monotonic()
+        pol = self._policy(hr.component)
+
+        # A subsystem that auto-switched to its own backup is REPORTING, not a
+        # fault to repair → stable DEGRADED observation.
+        if hr.self_healed:
+            if d.state not in (FsmState.REPAIRING, FsmState.RECOVERING):
+                d.state = FsmState.DEGRADED
+            d.warn_count = 0
+            return
+
+        # Healthy read.
+        if hr.health == Health.OK:
+            if d.state == FsmState.REPAIRING:
+                return  # let the repair result drive the transition
+            if d.state == FsmState.RECOVERING:
+                d.ok_streak += 1
+                if d.ok_streak >= pol.recover_confirm:
+                    d.state = FsmState.OK
+                    d.warn_count = d.attempts = d.ok_streak = 0
+                return
+            d.state = FsmState.OK
+            d.warn_count = d.attempts = 0
+            return
+
+        # UNKNOWN (probe blip / timeout): warn, never repair on it.
+        if hr.health == Health.UNKNOWN:
+            if d.state == FsmState.OK:
+                d.state = FsmState.WARNED
+            return
+
+        # Faulted (DEGRADED/DOWN, not self-healed).
+        if d.state in (FsmState.REPAIRING, FsmState.HELD):
+            return  # in-flight, or exhausted and holding
+        d.warn_count += 1
+        if d.warn_count < pol.warn_threshold:
+            d.state = FsmState.WARNED
+            return
+        # Confirmed fault → engage (cooldown-gated).
+        if now - d.last_action_mono < pol.cooldown_s:
+            return
+        self._engage(d, hr, now, pol)
+
+    def _engage(self, d: _Domain, hr: HealthReport, now: float, pol: ComponentPolicy) -> None:
+        if not pol.enabled:
+            d.state = FsmState.DEGRADED   # observe-only for this component
+            return
+        fault = Fault(component=hr.component, health=hr.health, severity=hr.severity,
+                      summary=hr.detail, signature=f"{hr.component.value}:{hr.health.value}")
+        d.last_action_mono = now
+        if pol.mode == "manual":
+            # Propose, don't execute — await human authorization.
+            d.state = FsmState.DEGRADED
+            log.warning("guardian: %s would repair (manual mode) — awaiting approval: %s",
+                        hr.component.value, hr.detail)
+            self._audit(AuditRecord(phase="proposed", component=hr.component, severity=Severity.WARN,
+                                    message=f"manual mode — WOULD repair: {hr.detail}",
+                                    health=hr.health, node_id=self._node_id))
+            return
+        if not self._registry.claim(hr.component):
+            return  # a repair is already in flight for this component
+        d.state = FsmState.REPAIRING
+        t = asyncio.create_task(self._run_repair(d, fault))
+        self._repair_tasks.add(t)
+        t.add_done_callback(self._repair_tasks.discard)
+
+    async def _run_repair(self, d: _Domain, fault: Fault) -> None:
+        c = fault.component
+        try:
+            strategy = await self._registry.strategy_for(fault)
+            if strategy is None:
+                d.state = FsmState.HELD
+                self._audit(AuditRecord(phase="repair", component=c, severity=Severity.WARN,
+                                        message="no safe strategy applies — holding degraded",
+                                        health=d.health, node_id=self._node_id))
+                return
+            action = RepairAction(fault_id=fault.id, component=c, kind=strategy.kind,
+                                  reason=fault.summary, attempt=d.attempts + 1)
+            self._audit(AuditRecord(phase="repair_start", component=c, severity=Severity.WARN,
+                                    message=f"{strategy.kind.value} attempt {action.attempt}: {fault.summary}",
+                                    health=d.health, node_id=self._node_id, data={"action_id": action.id}))
+            try:
+                result = await asyncio.wait_for(strategy.repair(action), self._repair_timeout)
+            except asyncio.TimeoutError:
+                result = RepairResult(action.id, strategy.kind, RepairOutcome.INEFFECTIVE, "repair timed out")
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:  # noqa: BLE001 — repair must not crash the supervisor
+                result = RepairResult(action.id, strategy.kind, RepairOutcome.FAILED, repr(e))
+            self._on_repair_result(d, c, result)
+        except asyncio.CancelledError:
+            pass
+        except Exception as e:  # noqa: BLE001
+            log.warning("guardian: repair driver for %s errored: %s", c.value, e)
+        finally:
+            self._registry.release(c)
+
+    def _on_repair_result(self, d: _Domain, c: Component, result: RepairResult) -> None:
+        pol = self._policy(c)
+        if result.ok:
+            d.state = FsmState.RECOVERING
+            d.ok_streak = 0
+            sev = Severity.INFO
+            msg = f"{result.kind.value} → {result.outcome.value}: {result.detail}"
         else:
-            log.info("guardian: %s", msg)
-        self._audit(AuditRecord(
-            phase="transition", component=hr.component, severity=hr.severity,
-            message=msg, health=hr.health, node_id=self._node_id,
-            data={"prev": prev.value, "self_healed": hr.self_healed, **dict(hr.raw)},
-        ))
+            d.attempts += 1
+            if d.attempts >= pol.max_attempts or result.outcome in (
+                    RepairOutcome.REFUSED, RepairOutcome.ALERT_ONLY):
+                d.state = FsmState.HELD
+                sev = Severity.ERROR
+                msg = (f"{result.kind.value} → {result.outcome.value} "
+                       f"(attempt {d.attempts}/{pol.max_attempts}) — HOLDING degraded, alert")
+            else:
+                d.state = FsmState.DEGRADED   # re-engage after cooldown on next faulted tick
+                sev = Severity.WARN
+                msg = f"{result.kind.value} → {result.outcome.value}, will retry (attempt {d.attempts})"
+        log.log(40 if sev >= Severity.ERROR else 20, "guardian: %s", msg)
+        self._audit(AuditRecord(phase="repair", component=c, severity=sev, message=msg,
+                                health=result.new_health, node_id=self._node_id,
+                                data={"outcome": result.outcome.value, "kind": result.kind.value}))
+
+    # ── audit ──
+    def _audit_transition(self, hr: HealthReport, prev: FsmState, new: FsmState) -> None:
+        msg = f"{hr.component.value}: {prev.value} → {new.value} ({hr.detail})"
+        faulted = new in (FsmState.WARNED, FsmState.DEGRADED, FsmState.REPAIRING, FsmState.HELD)
+        log.log(30 if faulted else 20, "guardian: %s", msg)
+        self._audit(AuditRecord(phase="transition", component=hr.component, severity=hr.severity,
+                                message=msg, health=hr.health, node_id=self._node_id,
+                                data={"prev_state": prev.value, "state": new.value,
+                                      "self_healed": hr.self_healed}))
 
     def _audit(self, rec: AuditRecord) -> None:
         if not self._audit_path:
@@ -143,7 +279,7 @@ class Sentinel:
         try:
             with open(self._audit_path, "a", encoding="utf-8") as f:
                 f.write(json.dumps(rec.to_json(), ensure_ascii=False) + "\n")
-        except Exception as e:  # noqa: BLE001 — audit is best-effort, never fatal
+        except Exception as e:  # noqa: BLE001
             log.debug("guardian: audit write failed: %s", e)
 
     @staticmethod
@@ -164,22 +300,23 @@ class Sentinel:
     def snapshot(self) -> dict:
         comps = {
             c.value: {
-                "health": s.health.value,
-                "detail": s.detail,
-                "pressure": round(s.pressure, 3),
-                "self_healed": s.self_healed,
-                "last_ok_ts": s.last_ok_ts,
-                "ts": s.ts,
+                "health": d.health.value,
+                "state": d.state.value,
+                "detail": d.detail,
+                "self_healed": d.self_healed,
+                "attempts": d.attempts,
+                "last_ok_ts": d.last_ok_ts,
+                "ts": d.ts,
             }
-            for c, s in self._states.items()
+            for c, d in self._domains.items()
         }
-        overall = (worst_health(s.health for s in self._states.values())
-                   if self._states else Health.UNKNOWN)
+        overall = (worst_health(d.health for d in self._domains.values())
+                   if self._domains else Health.UNKNOWN)
         return {
             "overall": overall.value,
             "ts": time.time(),
             "sentinel_tick": self._tick,
-            "dry_run": True,                 # P0: observe-only, no repair actions
+            "active_repairs": len(self._repair_tasks),
             "node_id": self._node_id,
             "components": comps,
         }

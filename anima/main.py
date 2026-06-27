@@ -1134,16 +1134,34 @@ async def run() -> bool:
     sentinel = None
     if get("guardian.enabled", True):
         from anima.guardian import Sentinel, TaskProbe, LlmProbe, DbProbe, MeshProbe, ResourceProbe
+        from anima.guardian.fixer import ComponentPolicy, Registry
+        from anima.guardian.fixers import DbRecoverFixer, LlmBackstopFixer
+        from anima.guardian.signal import Component
+        from anima.llm.providers import get_local_server_manager
         _node_identity = net.get("node_identity")
+        _db = getattr(core["memory_store"], "_db", None)
+        _gcfg = get("guardian", {})
+        # Safe, reversible repair strategies (P2). Heavier rungs slot in later.
+        registry = Registry([
+            LlmBackstopFixer(hub.llm_router, get_local_server_manager()),
+            DbRecoverFixer(_db, core.get("pg_sync"), net.get("split_brain")),
+        ])
+        _comp_cfg = _gcfg.get("components", {}) or {}
+        policies = {
+            Component(k): ComponentPolicy.from_config(v)
+            for k, v in _comp_cfg.items() if k in Component._value2member_map_
+        }
         sentinel = Sentinel(
             probes=[
                 TaskProbe(),
                 LlmProbe(hub.llm_router),
-                DbProbe(getattr(core["memory_store"], "_db", None)),
+                DbProbe(_db),
                 MeshProbe(net.get("gossip_mesh"), _node_identity, net.get("split_brain")),
                 ResourceProbe(),
             ],
-            config=get("guardian", {}),
+            registry=registry,
+            policies=policies,
+            config=_gcfg,
             node_id=getattr(_node_identity, "node_id", "local"),
         )
         hub.safety_monitor = sentinel

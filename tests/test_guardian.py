@@ -144,7 +144,6 @@ async def test_sentinel_rollup_and_isolation():
         pass
 
     snap = sentinel.snapshot()
-    assert snap["dry_run"] is True                  # P0: observe-only, no actions
     assert snap["sentinel_tick"] > 0
     assert snap["overall"] == "down"                # worst-of (DOWN beats DEGRADED/UNKNOWN)
     assert snap["components"]["llm"]["health"] == "down"
@@ -200,6 +199,105 @@ def test_ledger_defeated(tmp_path):
     assert Ledger(path=tmp_path / "ledger.json").is_defeated("db")  # persisted across instances
     led.clear_defeated("db")
     assert not led.is_defeated("db")
+
+
+# ── P2: escalation FSM + Fixer layer ──
+class _StubFixer:
+    """A controllable fixer for FSM tests."""
+    from anima.guardian.fixer import RepairKind as _RK
+    kind = _RK.LLM_BACKSTOP
+    component = Component.LLM
+    harshness = 10
+
+    def __init__(self, outcome):
+        self._outcome = outcome
+        self.calls = 0
+
+    async def can_handle(self, fault):
+        return True
+
+    async def repair(self, action):
+        from anima.guardian.fixer import RepairResult
+        self.calls += 1
+        return RepairResult(action.id, self.kind, self._outcome,
+                            new_health=Health.RECOVERING)
+
+
+def _faulted_llm():
+    from anima.guardian.signal import HealthReport, Severity
+    return HealthReport(Component.LLM, Health.DOWN, Severity.ERROR, detail="circuit open")
+
+
+def _ok_llm():
+    from anima.guardian.signal import HealthReport
+    return HealthReport(Component.LLM, Health.OK, detail="ok")
+
+
+def _build_sentinel(fixer, policy):
+    from anima.guardian.fixer import Registry
+    return Sentinel(probes=[], registry=Registry([fixer]),
+                    policies={Component.LLM: policy})
+
+
+@pytest.mark.asyncio
+async def test_fsm_warns_before_repairing():
+    from anima.guardian.fixer import ComponentPolicy, FsmState, RepairOutcome
+    fx = _StubFixer(RepairOutcome.REPAIRED)
+    s = _build_sentinel(fx, ComponentPolicy(warn_threshold=3, cooldown_s=0))
+    s._observe(_faulted_llm())                       # 1st fault → WARNED, no repair
+    assert s._domains[Component.LLM].state is FsmState.WARNED
+    assert fx.calls == 0
+    s._observe(_faulted_llm())                       # 2nd → still WARNED
+    assert fx.calls == 0
+
+
+@pytest.mark.asyncio
+async def test_fsm_repairs_after_threshold_then_recovers():
+    from anima.guardian.fixer import ComponentPolicy, FsmState, RepairOutcome
+    fx = _StubFixer(RepairOutcome.REPAIRED)
+    s = _build_sentinel(fx, ComponentPolicy(warn_threshold=2, cooldown_s=0, recover_confirm=1))
+    s._observe(_faulted_llm())
+    s._observe(_faulted_llm())                       # threshold → engage
+    await asyncio.sleep(0.05)                         # let the repair task run
+    assert fx.calls == 1
+    assert s._domains[Component.LLM].state is FsmState.RECOVERING
+    s._observe(_ok_llm())                            # confirm → OK
+    assert s._domains[Component.LLM].state is FsmState.OK
+
+
+@pytest.mark.asyncio
+async def test_fsm_manual_mode_proposes_not_executes():
+    from anima.guardian.fixer import ComponentPolicy, RepairOutcome
+    fx = _StubFixer(RepairOutcome.REPAIRED)
+    s = _build_sentinel(fx, ComponentPolicy(warn_threshold=1, cooldown_s=0, mode="manual"))
+    s._observe(_faulted_llm())                       # confirmed, but manual → propose only
+    await asyncio.sleep(0.05)
+    assert fx.calls == 0                             # NOT executed
+
+
+@pytest.mark.asyncio
+async def test_fsm_holds_after_max_attempts():
+    from anima.guardian.fixer import ComponentPolicy, FsmState, RepairOutcome
+    fx = _StubFixer(RepairOutcome.INEFFECTIVE)
+    s = _build_sentinel(fx, ComponentPolicy(warn_threshold=1, cooldown_s=0, max_attempts=2))
+    for _ in range(6):
+        s._observe(_faulted_llm())
+        await asyncio.sleep(0.02)
+    assert s._domains[Component.LLM].state is FsmState.HELD
+    assert fx.calls == 2                             # capped at max_attempts, no storm
+
+
+@pytest.mark.asyncio
+async def test_fsm_self_healed_is_observed_not_repaired():
+    from anima.guardian.fixer import ComponentPolicy, FsmState, RepairOutcome
+    from anima.guardian.signal import HealthReport, Severity
+    fx = _StubFixer(RepairOutcome.REPAIRED)
+    s = _build_sentinel(fx, ComponentPolicy(warn_threshold=1, cooldown_s=0))
+    s._observe(HealthReport(Component.LLM, Health.DEGRADED, Severity.WARN,
+                            self_healed=True, detail="on fallback"))
+    await asyncio.sleep(0.03)
+    assert s._domains[Component.LLM].state is FsmState.DEGRADED
+    assert fx.calls == 0                             # self-healed = report, not repair
 
 
 def test_handoff_tick_and_marker(tmp_path, monkeypatch):
