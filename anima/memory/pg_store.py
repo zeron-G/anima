@@ -44,9 +44,10 @@ class PgMemoryStore:
         self._db = db
 
     @classmethod
-    async def create(cls, db_path: str = "") -> "PgMemoryStore":
-        """Connect (Neon primary + local fallback) and apply the schema."""
-        db = PgDatabaseManager()
+    async def create(cls, db_path: str = "", dsn: str = "") -> "PgMemoryStore":
+        """Connect and apply the schema. dsn overrides DATABASE_URL (tests / a
+        specific instance); default = Neon primary + local fallback."""
+        db = PgDatabaseManager(dsn=dsn) if dsn else PgDatabaseManager()
         schema = (Path(__file__).parent / "pg_schema.sql").read_text(encoding="utf-8")
         await db.init(schema)
         log.info("PgMemoryStore ready (backend=Postgres%s)",
@@ -413,11 +414,63 @@ class PgMemoryStore:
     async def update_env_entry_async(self, *a, **k): self._na("update_env_entry")
     def get_unsummarized_important_files(self, *a, **k): return []
     async def get_unsummarized_important_files_async(self, *a, **k): return []
-    def get_memories_below_threshold(self, *a, **k): return []
-    async def get_memories_below_threshold_async(self, *a, **k): return []
-    def get_unconsolidated_memories(self, *a, **k): return []
-    async def get_unconsolidated_memories_async(self, *a, **k): return []
-    def batch_update_decay_scores(self, *a, **k): self._na("batch_update_decay_scores")
-    async def batch_update_decay_scores_async(self, *a, **k): self._na("batch_update_decay_scores")
-    def mark_consolidated(self, *a, **k): self._na("mark_consolidated")
-    async def mark_consolidated_async(self, *a, **k): self._na("mark_consolidated")
+    # ── Memory decay / consolidation / archive (real PG; soul maintenance) ──
+
+    def _below_threshold_sync(self, threshold: float) -> list[dict]:
+        rows = self._db.fetch_sync(
+            "SELECT * FROM episodic_memories WHERE decay_score IS NOT NULL "
+            "AND decay_score < %s AND content_hash NOT LIKE 'consolidated:%%' "
+            "ORDER BY decay_score ASC LIMIT 200", (threshold,))
+        return [self._normalize(r) for r in rows]
+
+    def get_memories_below_threshold(self, threshold: float) -> list[dict]:
+        return self._below_threshold_sync(threshold)
+
+    async def get_memories_below_threshold_async(self, threshold: float) -> list[dict]:
+        import asyncio
+        return await asyncio.to_thread(self._below_threshold_sync, threshold)
+
+    def _unconsolidated_sync(self, limit: int) -> list[dict]:
+        return self._db.fetch_sync(
+            "SELECT id,type,importance,created_at,last_accessed,access_count,decay_score "
+            "FROM episodic_memories WHERE content_hash NOT LIKE 'consolidated:%%' "
+            "ORDER BY created_at DESC LIMIT %s", (limit,))
+
+    def get_unconsolidated_memories(self, limit: int = 500) -> list[dict]:
+        return self._unconsolidated_sync(limit)
+
+    async def get_unconsolidated_memories_async(self, limit: int = 500) -> list[dict]:
+        import asyncio
+        return await asyncio.to_thread(self._unconsolidated_sync, limit)
+
+    def batch_update_decay_scores(self, updates: list[tuple[str, float]]) -> None:
+        if not updates:
+            return
+        self._db.write_many_sync(
+            "UPDATE episodic_memories SET decay_score=%s WHERE id=%s",
+            [(score, mid) for mid, score in updates])
+
+    async def batch_update_decay_scores_async(self, updates: list[tuple[str, float]]) -> None:
+        import asyncio
+        await asyncio.to_thread(self.batch_update_decay_scores, updates)
+
+    def mark_consolidated(self, ids: list[str]) -> None:
+        if not ids:
+            return
+        self._db.write_sync(
+            "UPDATE episodic_memories SET content_hash='consolidated:'||content_hash "
+            "WHERE id = ANY(%s)", (list(ids),))
+
+    async def mark_consolidated_async(self, ids: list[str]) -> None:
+        import asyncio
+        await asyncio.to_thread(self.mark_consolidated, ids)
+
+    async def archive_to_knowledge_async(self, summary: str, source_ids: list[str],
+                                         metadata: dict | None = None) -> str:
+        meta = dict(metadata or {}); meta["source_ids"] = source_ids; meta["archived"] = True
+        return await self.save_memory_async(summary, "archive", importance=0.6, metadata=meta)
+
+    def archive_to_knowledge(self, summary: str, source_ids: list[str],
+                             metadata: dict | None = None) -> str:
+        meta = dict(metadata or {}); meta["source_ids"] = source_ids; meta["archived"] = True
+        return self.save_memory(summary, "archive", importance=0.6, metadata=meta)
