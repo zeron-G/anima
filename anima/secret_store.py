@@ -36,6 +36,8 @@ KNOWN_SECRETS: list[str] = [
     "ANIMA_NETWORK_SECRET", "ANIMA_LAPTOP_SSH_PASSWORD",
     # Data store (Neon / Postgres + pgvector). Contains an embedded password.
     "DATABASE_URL",
+    # Local Postgres fallback (offline failover + test DB). Embedded password.
+    "LOCAL_DATABASE_URL",
 ]
 
 
