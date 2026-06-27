@@ -54,17 +54,13 @@ async def stats(request: web.Request) -> web.Response:
     """GET /v1/memory/stats — memory statistics."""
     hub = get_hub(request)
 
-    import asyncio
-    total = await asyncio.to_thread(
-        lambda: hub.memory_store._conn.execute(
-            "SELECT COUNT(*) FROM episodic_memories"
-        ).fetchone()[0]
-    )
-    by_type = await asyncio.to_thread(
-        lambda: dict(hub.memory_store._conn.execute(
-            "SELECT type, COUNT(*) FROM episodic_memories GROUP BY type"
-        ).fetchall())
-    )
+    # Backend-agnostic: go through _db.fetch (SQLite + Postgres both expose it);
+    # the SQL is standard. Aliased columns so dict rows work on both.
+    db = hub.memory_store._db
+    row = await db.fetch_one("SELECT COUNT(*) AS n FROM episodic_memories")
+    total = (row or {}).get("n", 0)
+    rows = await db.fetch("SELECT type, COUNT(*) AS c FROM episodic_memories GROUP BY type")
+    by_type = {r["type"]: r["c"] for r in rows}
 
     return web.json_response({
         "total": total,

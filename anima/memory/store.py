@@ -1451,3 +1451,27 @@ class MemoryStore:
             await asyncio.to_thread(self._conn.close)
             self._conn = None
             log.info("Memory store closed.")
+
+
+async def create_memory_store(db_path: str = ""):
+    """Factory: choose the memory backend.
+
+    Gated on an EXPLICIT selector (``ANIMA_MEMORY_BACKEND=postgres``) — NOT on
+    the mere presence of DATABASE_URL, so migration tooling can set DATABASE_URL
+    without the runtime accidentally switching to an empty cloud DB (which would
+    make Eva "forget"). Flip the flag deliberately at cutover, after the soul has
+    been migrated. Both backends expose the same API, so the rest of ANIMA is
+    agnostic. Postgres = Neon primary + local fallback.
+    """
+    import os
+    from anima.secret_store import get_secret
+    backend = os.environ.get("ANIMA_MEMORY_BACKEND", "sqlite").strip().lower()
+    if backend == "postgres":
+        if not get_secret("DATABASE_URL"):
+            log.warning("ANIMA_MEMORY_BACKEND=postgres but DATABASE_URL unset — using SQLite")
+        else:
+            from anima.memory.pg_store import PgMemoryStore
+            log.info("Memory backend: Postgres (Neon primary + local fallback)")
+            return await PgMemoryStore.create(db_path)
+    log.info("Memory backend: SQLite (%s)", db_path)
+    return await MemoryStore.create(db_path)

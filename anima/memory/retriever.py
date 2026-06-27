@@ -209,8 +209,8 @@ class MemoryRetriever:
         # 4. Tier 3: recent important (time-weighted)
         self._stage_recent(all_candidates)
 
-        # 5. Tier 2: semantic / LIKE search (exclude lorebook IDs)
-        self._stage_semantic(all_candidates, lorebook_hit_ids, query, event_type)
+        # 5. Tier 2: semantic search (exclude lorebook IDs)
+        await self._stage_semantic(all_candidates, lorebook_hit_ids, query, event_type)
 
         # 6. RRF fusion scoring
         self._score_rrf(all_candidates)
@@ -334,18 +334,18 @@ class MemoryRetriever:
                     "rank_recent": rank,
                 })
 
-    def _stage_semantic(
+    async def _stage_semantic(
         self,
         candidates: list[dict[str, Any]],
         lorebook_hit_ids: set[str],
         query: str,
         event_type: str,
     ) -> None:
-        """Stage 5: Tier 2 semantic search (SQLite LIKE fallback).
+        """Stage 5: Tier 2 semantic search.
 
-        ChromaDB vector search is delegated to
-        ``MemoryStore.search_memories`` which tries ChromaDB first,
-        then falls back to SQLite ``LIKE``.
+        Delegated to ``MemoryStore.search_memories_async`` — pgvector cosine on
+        the Postgres backend, ChromaDB on the SQLite backend. Async so the
+        Postgres path can await its OpenAI query embedding.
         """
         if self._store is None or not query:
             return
@@ -357,7 +357,7 @@ class MemoryRetriever:
             return
 
         try:
-            knowledge_hits = self._store.search_memories(query=query, limit=5)
+            knowledge_hits = await self._store.search_memories_async(query=query, limit=5)
         except Exception as exc:
             log.warning("Tier 2 semantic search failed: %s", exc)
             return
