@@ -97,22 +97,28 @@ class PgDatabaseManager:
         return self._using_local
 
     # ── Reads (dict rows; %s placeholders) ──
+    # A psycopg Connection is NOT thread-safe, so ALL access (reads + writes)
+    # funnels through the one lock; async variants wrap the locked sync calls.
 
-    async def fetch(self, sql: str, params: tuple = ()) -> list[dict[str, Any]]:
+    def fetch_sync(self, sql: str, params: tuple = ()) -> list[dict[str, Any]]:
         self._check_open()
-        def _fetch() -> list[dict[str, Any]]:
+        with self._sync_write_lock:
             with self._conn.cursor() as cur:
                 cur.execute(sql, params)
                 return cur.fetchall()
-        return await asyncio.to_thread(_fetch)
 
-    async def fetch_one(self, sql: str, params: tuple = ()) -> dict[str, Any] | None:
+    def fetch_one_sync(self, sql: str, params: tuple = ()) -> dict[str, Any] | None:
         self._check_open()
-        def _fetch_one() -> dict[str, Any] | None:
+        with self._sync_write_lock:
             with self._conn.cursor() as cur:
                 cur.execute(sql, params)
                 return cur.fetchone()
-        return await asyncio.to_thread(_fetch_one)
+
+    async def fetch(self, sql: str, params: tuple = ()) -> list[dict[str, Any]]:
+        return await asyncio.to_thread(self.fetch_sync, sql, params)
+
+    async def fetch_one(self, sql: str, params: tuple = ()) -> dict[str, Any] | None:
+        return await asyncio.to_thread(self.fetch_one_sync, sql, params)
 
     async def fetch_scalar(self, sql: str, params: tuple = ()) -> Any:
         row = await self.fetch_one(sql, params)
