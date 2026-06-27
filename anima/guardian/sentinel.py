@@ -49,7 +49,8 @@ class _Domain:
 class Sentinel:
     def __init__(self, *, probes: list[Probe], registry: Registry | None = None,
                  policies: dict[Component, ComponentPolicy] | None = None,
-                 config: dict | None = None, node_id: str = "local") -> None:
+                 config: dict | None = None, node_id: str = "local",
+                 restart_hook=None, ledger=None) -> None:
         cfg = config or {}
         self._probes = probes
         self._registry = registry or Registry([])
@@ -59,7 +60,26 @@ class Sentinel:
         self._probe_timeout = float(cfg.get("probe_timeout_s", 3))
         self._repair_timeout = float(cfg.get("repair_timeout_s", 45))
         self._node_id = node_id
+        # P4: process-restart escalation. restart_hook(reason) triggers a graceful
+        # in-process restart; the ledger is the SHARED cross-process budget (also
+        # consulted by the external limb) + DEFEATED persistence.
+        self._restart_hook = restart_hook
+        self._ledger = ledger
+        rb = cfg.get("restart_budget", {}) or {}
+        self._max_restarts = int(rb.get("max", 3))
+        self._restart_window_s = float(rb.get("window_s", 3600))
         self._domains: dict[Component, _Domain] = {}
+        # A DEFEATED component (budget exhausted last life) is NOT auto-restarted
+        # again until a human/agent clears it — survives process restarts via the
+        # ledger, so the limb relaunching us can't make the FSM forget + loop.
+        self._defeated: set[Component] = set()
+        if self._ledger is not None:
+            for c in Component:
+                try:
+                    if self._ledger.is_defeated(c.value):
+                        self._defeated.add(c)
+                except Exception:  # noqa: BLE001
+                    pass
         self._tick = 0
         self._stopped = False
         self._task_probe: TaskProbe | None = next(
@@ -189,6 +209,10 @@ class Sentinel:
         if not pol.enabled:
             d.state = FsmState.DEGRADED   # observe-only for this component
             return
+        if hr.component in self._defeated:
+            # Budget exhausted in a prior life — stop trying, keep surfacing.
+            d.state = FsmState.DEFEATED
+            return
         fault = Fault(component=hr.component, health=hr.health, severity=hr.severity,
                       summary=hr.detail, signature=f"{hr.component.value}:{hr.health.value}")
         d.last_action_mono = now
@@ -213,10 +237,9 @@ class Sentinel:
         try:
             strategy = await self._registry.strategy_for(fault)
             if strategy is None:
-                d.state = FsmState.HELD
-                self._audit(AuditRecord(phase="repair", component=c, severity=Severity.WARN,
-                                        message="no safe strategy applies — holding degraded",
-                                        health=d.health, node_id=self._node_id))
+                # No safe in-process fix → escalate to a process restart (if the
+                # component is configured for it) or hold degraded.
+                self._escalate_or_hold(d, c, "no safe strategy applies")
                 return
             action = RepairAction(fault_id=fault.id, component=c, kind=strategy.kind,
                                   reason=fault.summary, attempt=d.attempts + 1)
@@ -250,18 +273,67 @@ class Sentinel:
             d.attempts += 1
             if d.attempts >= pol.max_attempts or result.outcome in (
                     RepairOutcome.REFUSED, RepairOutcome.ALERT_ONLY):
-                d.state = FsmState.HELD
-                sev = Severity.ERROR
-                msg = (f"{result.kind.value} → {result.outcome.value} "
-                       f"(attempt {d.attempts}/{pol.max_attempts}) — HOLDING degraded, alert")
-            else:
-                d.state = FsmState.DEGRADED   # re-engage after cooldown on next faulted tick
-                sev = Severity.WARN
-                msg = f"{result.kind.value} → {result.outcome.value}, will retry (attempt {d.attempts})"
-        log.log(40 if sev >= Severity.ERROR else 20, "guardian: %s", msg)
+                log.warning("guardian: %s → %s (attempt %d/%d) — safe rung exhausted",
+                            result.kind.value, result.outcome.value, d.attempts, pol.max_attempts)
+                self._audit(AuditRecord(phase="repair", component=c, severity=Severity.ERROR,
+                                        message=f"{result.kind.value} exhausted ({d.attempts} attempts)",
+                                        health=result.new_health, node_id=self._node_id,
+                                        data={"outcome": result.outcome.value}))
+                self._escalate_or_hold(d, c, f"{result.kind.value} exhausted")
+                return
+            d.state = FsmState.DEGRADED   # re-engage after cooldown on next faulted tick
+            msg = f"{result.kind.value} → {result.outcome.value}, will retry (attempt {d.attempts})"
+            log.info("guardian: %s", msg)
+            self._audit(AuditRecord(phase="repair", component=c, severity=Severity.WARN, message=msg,
+                                    health=result.new_health, node_id=self._node_id,
+                                    data={"outcome": result.outcome.value, "kind": result.kind.value}))
+            return
+        log.info("guardian: %s", msg)
         self._audit(AuditRecord(phase="repair", component=c, severity=sev, message=msg,
                                 health=result.new_health, node_id=self._node_id,
                                 data={"outcome": result.outcome.value, "kind": result.kind.value}))
+
+    # ── P4: process-restart escalation ──
+    def _escalate_or_hold(self, d: _Domain, c: Component, reason: str) -> None:
+        pol = self._policy(c)
+        if pol.escalate_to_restart and self._restart_hook is not None and c not in self._defeated:
+            self._escalate_restart(d, c, reason)
+        else:
+            d.state = FsmState.HELD
+            self._audit(AuditRecord(phase="held", component=c, severity=Severity.ERROR,
+                                    message=f"holding degraded — no further safe action ({reason})",
+                                    health=d.health, node_id=self._node_id))
+
+    def _escalate_restart(self, d: _Domain, c: Component, reason: str) -> None:
+        now = time.time()
+        if self._ledger is not None and not self._ledger.can_restart(
+                now, self._max_restarts, self._restart_window_s):
+            # Budget spent — STOP. Persist DEFEATED so a relaunch won't re-loop.
+            self._defeated.add(c)
+            try:
+                self._ledger.mark_defeated(c.value)
+            except Exception:  # noqa: BLE001
+                pass
+            d.state = FsmState.DEFEATED
+            log.critical("guardian: %s restart budget exhausted — DEFEATED, manual intervention needed", c.value)
+            self._audit(AuditRecord(phase="defeated", component=c, severity=Severity.CRITICAL,
+                                    message=f"restart budget exhausted — DEFEATED ({reason})",
+                                    health=d.health, node_id=self._node_id))
+            return
+        if self._ledger is not None:
+            try:
+                self._ledger.record_restart(f"{c.value}:{reason}", now, self._restart_window_s)
+            except Exception:  # noqa: BLE001
+                pass
+        d.state = FsmState.ESCALATED
+        log.warning("guardian: %s — escalating to PROCESS RESTART (%s)", c.value, reason)
+        self._audit(AuditRecord(phase="escalate", component=c, severity=Severity.ERROR,
+                                message=f"escalating to process restart: {reason}",
+                                health=d.health, node_id=self._node_id))
+        try:
+            self._restart_hook(f"guardian:{c.value}:{reason}")
+        except Exception as e:  # noqa: BLE001 — a failed restart request must not crash the loop
+            log.error("guardian: restart_hook failed: %s", e)
 
     # ── audit ──
     def _audit_transition(self, hr: HealthReport, prev: FsmState, new: FsmState) -> None:

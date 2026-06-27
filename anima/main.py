@@ -1151,6 +1151,26 @@ async def run() -> bool:
             Component(k): ComponentPolicy.from_config(v)
             for k, v in _comp_cfg.items() if k in Component._value2member_map_
         }
+        # P4: process-restart escalation. The hook triggers the SAME graceful
+        # in-process restart path evolution-reload uses (checkpoint → re-init),
+        # and writes the limb marker so a hung in-process restart is still
+        # caught by the external watchdog. Budget is the shared guardian Ledger.
+        from anima.guardian.handoff import Ledger, write_restart_marker
+        _ledger = Ledger()
+        _cognitive_ref = cog["cognitive"]
+
+        def _guardian_restart_hook(reason: str) -> None:
+            log.warning("Guardian requested process restart: %s", reason)
+            try:
+                write_restart_marker(reason)
+            except Exception:  # noqa: BLE001
+                pass
+            try:
+                _cognitive_ref.reload_manager.request_reload(reason=f"guardian: {reason}")
+            except Exception as e:  # noqa: BLE001
+                log.error("guardian restart: request_reload failed: %s", e)
+            shutdown_event.set()
+
         sentinel = Sentinel(
             probes=[
                 TaskProbe(),
@@ -1163,6 +1183,8 @@ async def run() -> bool:
             policies=policies,
             config=_gcfg,
             node_id=getattr(_node_identity, "node_id", "local"),
+            restart_hook=_guardian_restart_hook,
+            ledger=_ledger,
         )
         hub.safety_monitor = sentinel
         core["sentinel"] = sentinel

@@ -300,6 +300,70 @@ async def test_fsm_self_healed_is_observed_not_repaired():
     assert fx.calls == 0                             # self-healed = report, not repair
 
 
+# ── P4: process-restart escalation + DEFEATED persistence ──
+def _faulted_task():
+    from anima.guardian.signal import HealthReport, Severity
+    return HealthReport(Component.TASK, Health.DOWN, Severity.CRITICAL, detail="crashed tasks: cognitive")
+
+
+@pytest.mark.asyncio
+async def test_escalates_to_process_restart_when_no_safe_fix(tmp_path):
+    from anima.guardian.fixer import ComponentPolicy, FsmState, Registry
+    from anima.guardian.handoff import Ledger
+    calls = []
+    led = Ledger(path=tmp_path / "ledger.json")
+    s = Sentinel(probes=[], registry=Registry([]),
+                 policies={Component.TASK: ComponentPolicy(
+                     warn_threshold=1, cooldown_s=0, escalate_to_restart=True)},
+                 restart_hook=lambda reason: calls.append(reason), ledger=led)
+    s._observe(_faulted_task())                 # no TASK fixer → escalate to restart
+    await asyncio.sleep(0.05)
+    assert len(calls) == 1                       # restart requested
+    assert s._domains[Component.TASK].state is FsmState.ESCALATED
+    assert led.restart_count(__import__("time").time(), 3600) == 1   # budget spent
+
+
+@pytest.mark.asyncio
+async def test_restart_budget_exhausted_marks_defeated(tmp_path):
+    from anima.guardian.fixer import ComponentPolicy, FsmState, Registry
+    from anima.guardian.handoff import Ledger
+    import time as _t
+    led = Ledger(path=tmp_path / "ledger.json")
+    for i in range(3):                           # exhaust the budget (max=3)
+        led.record_restart(f"prior:{i}", _t.time(), 3600)
+    calls = []
+    s = Sentinel(probes=[], registry=Registry([]),
+                 policies={Component.TASK: ComponentPolicy(
+                     warn_threshold=1, cooldown_s=0, escalate_to_restart=True)},
+                 restart_hook=lambda reason: calls.append(reason), ledger=led,
+                 config={"restart_budget": {"max": 3, "window_s": 3600}})
+    s._observe(_faulted_task())
+    await asyncio.sleep(0.05)
+    assert len(calls) == 0                        # budget gone → NO restart (no storm)
+    assert s._domains[Component.TASK].state is FsmState.DEFEATED
+    assert led.is_defeated("task")                # persisted
+
+
+@pytest.mark.asyncio
+async def test_defeated_persists_across_restart_no_reloop(tmp_path):
+    """A new Sentinel (after a process restart) reads the ledger and does NOT
+    re-escalate a component the previous life marked DEFEATED."""
+    from anima.guardian.fixer import ComponentPolicy, FsmState, Registry
+    from anima.guardian.handoff import Ledger
+    led = Ledger(path=tmp_path / "ledger.json")
+    led.mark_defeated("task")
+    calls = []
+    s = Sentinel(probes=[], registry=Registry([]),
+                 policies={Component.TASK: ComponentPolicy(
+                     warn_threshold=1, cooldown_s=0, escalate_to_restart=True)},
+                 restart_hook=lambda reason: calls.append(reason), ledger=led)
+    assert Component.TASK in s._defeated          # read from ledger at boot
+    s._observe(_faulted_task())
+    await asyncio.sleep(0.05)
+    assert len(calls) == 0                         # never re-escalates a defeated component
+    assert s._domains[Component.TASK].state is FsmState.DEFEATED
+
+
 def test_handoff_tick_and_marker(tmp_path, monkeypatch):
     from anima.guardian import handoff
     monkeypatch.setattr(handoff, "guardian_dir", lambda: tmp_path)

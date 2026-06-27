@@ -25,14 +25,15 @@ log = get_logger("guardian.fixer")
 
 
 class FsmState(str, Enum):
-    """Per-component escalation state. P2 tops out at HELD (safe rungs exhausted →
-    hold degraded + alert); restart/code rungs (ESCALATED/DEFEATED) come later."""
+    """Per-component escalation state."""
     OK = "ok"
     WARNED = "warned"          # anomaly seen, below repair threshold — alert only
     DEGRADED = "degraded"      # subsystem self-healed to its backup — observe
     REPAIRING = "repairing"    # a fix is in flight
     RECOVERING = "recovering"  # fix returned; confirming health
     HELD = "held"              # safe repairs exhausted — hold degraded, keep alerting
+    ESCALATED = "escalated"    # P4: safe rungs failed → requested a process restart
+    DEFEATED = "defeated"      # restart budget exhausted — stop trying, page a human (persisted)
 
 
 class RepairKind(str, Enum):
@@ -139,6 +140,7 @@ class ComponentPolicy:
     cooldown_s: float = 30        # min seconds between repair attempts
     max_attempts: int = 3         # attempts at the safe rung before holding degraded
     recover_confirm: int = 2      # consecutive healthy reads to clear RECOVERING → OK
+    escalate_to_restart: bool = False  # P4: when safe rungs are exhausted/absent, escalate to a process restart
 
     @classmethod
     def from_config(cls, cfg: dict | None) -> "ComponentPolicy":
@@ -150,4 +152,5 @@ class ComponentPolicy:
             cooldown_s=float(cfg.get("cooldown_s", 30)),
             max_attempts=int(cfg.get("max_attempts", 3)),
             recover_confirm=int(cfg.get("recover_confirm", 2)),
+            escalate_to_restart=bool(cfg.get("escalate_to_restart", False)),
         )

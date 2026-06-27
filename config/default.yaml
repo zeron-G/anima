@@ -91,12 +91,18 @@ guardian:
   interval_s: 5             # health poll cadence
   probe_timeout_s: 3        # per-probe timeout (a hung probe never blocks the loop)
   repair_timeout_s: 45      # per-repair timeout (runs as a background task)
+  # P4: cross-process restart budget (SHARED with the external limb). After `max`
+  # restarts in `window_s`, the component goes DEFEATED (persisted) → stop trying,
+  # page a human. This is the hard backstop against a restart storm.
+  restart_budget: { max: 3, window_s: 3600 }
   components:
     # Safe, reversible auto-repair (P2). Flip mode→manual for human authorization.
     llm: { mode: auto, warn_threshold: 3, cooldown_s: 30, max_attempts: 3 }
     db:  { mode: auto, warn_threshold: 2, cooldown_s: 60, max_attempts: 5 }
-    # Observe-only until their fixers land (P3+: task restart, channel restart):
-    task:     { enabled: false }
+    # P4: a crashed background loop (e.g. cognitive) has no safe in-process fix →
+    # escalate to a graceful process restart (budget-gated). Set escalate_to_restart
+    # false to only alert. Restart can't fix a down DB, so db does NOT escalate.
+    task:     { enabled: true, warn_threshold: 3, cooldown_s: 30, escalate_to_restart: true }
     mesh:     { enabled: false }
     channels: { enabled: false }
     resource: { enabled: false }
