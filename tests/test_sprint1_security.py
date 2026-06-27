@@ -317,104 +317,74 @@ class TestErrorHierarchy:
 # ── Database manager tests ──
 
 
-class TestDatabaseManager:
-    """Test thread-safe database operations."""
+class TestPgDatabaseManager:
+    """The Postgres data layer: one connection + one lock (psycopg conns aren't
+    thread-safe), autocommit, and Neon→local failover."""
 
-    @pytest.mark.asyncio
-    async def test_init_and_close(self):
-        from anima.memory.db_manager import DatabaseManager
-        db = DatabaseManager(":memory:")
-        await db.init("CREATE TABLE test (id TEXT, value TEXT)")
-        assert db.is_open
-        await db.close()
-        assert not db.is_open
+    def test_ipv4_localhost_normalization(self):
+        """'localhost' is pinned to 127.0.0.1 (Windows IPv6 ::1 stalls connect)."""
+        from anima.memory.pg_db import PgDatabaseManager
+        n = PgDatabaseManager._ipv4_localhost
+        assert n("postgresql://u:p@localhost:5432/db") == "postgresql://u:p@127.0.0.1:5432/db"
+        assert n("postgresql://u:p@localhost/db") == "postgresql://u:p@127.0.0.1/db"
+        assert n("postgresql://u:p@db.neon.tech/db") == "postgresql://u:p@db.neon.tech/db"
+        assert n("") == ""
 
     @pytest.mark.asyncio
     async def test_write_and_read(self):
-        from anima.memory.db_manager import DatabaseManager
-        db = DatabaseManager(":memory:")
-        await db.init("CREATE TABLE test (id TEXT PRIMARY KEY, value TEXT)")
+        from anima.memory.pg_db import PgDatabaseManager
+        from pgutil import ensure_test_db, test_dsn
+        if not test_dsn() or not ensure_test_db():
+            pytest.skip("local Postgres unavailable")
 
-        await db.execute("INSERT INTO test VALUES (?, ?)", ("k1", "v1"))
-        rows = await db.fetch("SELECT * FROM test WHERE id = ?", ("k1",))
-        assert len(rows) == 1
-        assert rows[0]["value"] == "v1"
-        await db.close()
-
-    @pytest.mark.asyncio
-    async def test_transaction_commit(self):
-        from anima.memory.db_manager import DatabaseManager
-        db = DatabaseManager(":memory:")
-        await db.init("CREATE TABLE test (id TEXT, value TEXT)")
-
-        async with db.transaction() as tx:
-            await tx.execute("INSERT INTO test VALUES (?, ?)", ("k1", "v1"))
-            await tx.execute("INSERT INTO test VALUES (?, ?)", ("k2", "v2"))
-
-        rows = await db.fetch("SELECT * FROM test")
-        assert len(rows) == 2
-        await db.close()
+        db = PgDatabaseManager(dsn=test_dsn())
+        await db.init("CREATE TABLE IF NOT EXISTS _dbmgr_test (id TEXT PRIMARY KEY, value TEXT)")
+        try:
+            db.write_sync("TRUNCATE _dbmgr_test")
+            db.write_sync("INSERT INTO _dbmgr_test VALUES (%s, %s)", ("k1", "v1"))
+            rows = db.fetch_sync("SELECT * FROM _dbmgr_test WHERE id = %s", ("k1",))
+            assert len(rows) == 1
+            assert rows[0]["value"] == "v1"
+        finally:
+            db.write_sync("DROP TABLE IF EXISTS _dbmgr_test")
+            await db.close()
+        assert not db.is_open
 
     @pytest.mark.asyncio
-    async def test_transaction_rollback(self):
-        from anima.memory.db_manager import DatabaseManager
-        db = DatabaseManager(":memory:")
-        await db.init("CREATE TABLE test (id TEXT, value TEXT)")
+    async def test_write_many_batch(self):
+        from anima.memory.pg_db import PgDatabaseManager
+        from pgutil import ensure_test_db, test_dsn
+        if not test_dsn() or not ensure_test_db():
+            pytest.skip("local Postgres unavailable")
 
-        with pytest.raises(ValueError):
-            async with db.transaction() as tx:
-                await tx.execute("INSERT INTO test VALUES (?, ?)", ("k1", "v1"))
-                raise ValueError("intentional error")
-
-        rows = await db.fetch("SELECT * FROM test")
-        assert len(rows) == 0  # rolled back
-        await db.close()
+        db = PgDatabaseManager(dsn=test_dsn())
+        await db.init("CREATE TABLE IF NOT EXISTS _dbmgr_batch (id TEXT, value REAL)")
+        try:
+            db.write_sync("TRUNCATE _dbmgr_batch")
+            params = [(f"k{i}", float(i) * 0.1) for i in range(100)]
+            db.write_many_sync("INSERT INTO _dbmgr_batch VALUES (%s, %s)", params)
+            rows = db.fetch_sync("SELECT COUNT(*) AS cnt FROM _dbmgr_batch")
+            assert rows[0]["cnt"] == 100
+        finally:
+            db.write_sync("DROP TABLE IF EXISTS _dbmgr_batch")
+            await db.close()
 
     @pytest.mark.asyncio
-    async def test_execute_many_batch(self):
-        from anima.memory.db_manager import DatabaseManager
-        db = DatabaseManager(":memory:")
-        await db.init("CREATE TABLE test (id TEXT, value REAL)")
+    async def test_failover_to_local_when_primary_down(self):
+        """A dead primary falls back to the local endpoint (offline failover)."""
+        from anima.memory.pg_db import PgDatabaseManager
+        from pgutil import ensure_test_db, test_dsn
+        if not test_dsn() or not ensure_test_db():
+            pytest.skip("local Postgres unavailable")
 
-        params = [(f"k{i}", float(i) * 0.1) for i in range(100)]
-        count = await db.execute_many(
-            "INSERT INTO test VALUES (?, ?)", params
+        # Primary points at a refused port → fails fast → local takes over.
+        db = PgDatabaseManager(
+            dsn="postgresql://postgres:x@127.0.0.1:1/anima_test",
+            local_dsn=test_dsn(),
         )
-        assert count == 100
-
-        rows = await db.fetch("SELECT COUNT(*) as cnt FROM test")
-        assert rows[0]["cnt"] == 100
-        await db.close()
-
-    @pytest.mark.asyncio
-    async def test_concurrent_reads(self):
-        """WAL mode should allow concurrent reads."""
-        import asyncio
-        from anima.memory.db_manager import DatabaseManager
-        db = DatabaseManager(":memory:")
-        await db.init("CREATE TABLE test (id TEXT, value TEXT)")
-        await db.execute("INSERT INTO test VALUES (?, ?)", ("k1", "v1"))
-
-        async def reader():
-            for _ in range(10):
-                rows = await db.fetch("SELECT * FROM test")
-                assert len(rows) == 1
-
-        # Run 5 readers in parallel
-        await asyncio.gather(*[reader() for _ in range(5)])
-        await db.close()
-
-    @pytest.mark.asyncio
-    async def test_add_column_if_missing(self):
-        from anima.memory.db_manager import DatabaseManager
-        db = DatabaseManager(":memory:")
-        await db.init("CREATE TABLE test (id TEXT)")
-
-        added = await db.add_column_if_missing("test", "new_col", "TEXT", "'default'")
-        assert added is True
-
-        # Second call should return False (already exists)
-        added2 = await db.add_column_if_missing("test", "new_col", "TEXT", "'default'")
-        assert added2 is False
-
-        await db.close()
+        await db.init("")
+        try:
+            assert db.using_local is True
+            assert db.fetch_sync("SELECT 1 AS one")[0]["one"] == 1
+        finally:
+            await db.close()

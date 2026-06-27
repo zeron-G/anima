@@ -23,7 +23,7 @@ if sys.platform == "win32":
                 pass  # Logger not initialized yet; reconfigure is best-effort
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
-from anima.config import load_config, get, agent_dir, db_path
+from anima.config import load_config, get, agent_dir
 from anima.utils.logging import setup_logging, get_logger
 
 log = get_logger("main")
@@ -67,7 +67,7 @@ async def _init_core(config: dict) -> dict:
     )
     diff_engine = DiffEngine.from_config(get("diff_rules", {}))
     working_memory = WorkingMemory(capacity=get("memory.working_capacity", 20))
-    memory_store = await create_memory_store(str(db_path()))
+    memory_store = await create_memory_store()
     emotion_state = EmotionState(baseline=get("emotion.baseline", {}))
 
     tool_registry = ToolRegistry()
@@ -425,7 +425,6 @@ async def _init_gossip(config: dict, core: dict, heartbeat_deps: dict) -> dict:
     from anima.network.node import NodeIdentity, NodeState
     from anima.network.gossip import GossipMesh
     from anima.network.discovery import get_local_ip
-    from anima.network.sync import MemorySync
     from anima.network.split_brain import SplitBrainDetector
     from anima.network.session_router import SessionRouter, TaskDelegate
     from anima.tools.builtin.remote import set_gossip_mesh as set_remote_gossip
@@ -670,17 +669,12 @@ async def _init_gossip(config: dict, core: dict, heartbeat_deps: dict) -> dict:
 
     await gossip_mesh.start()
 
-    # Memory sync service — peer-to-peer episodic replication for SQLite-per-node.
-    # Redundant (and _conn-coupled) when nodes share ONE Postgres DB, so SQLite-only.
+    # No peer-to-peer memory sync: all nodes share ONE Postgres DB (Neon primary
+    # + local failover), so episodic replication between nodes is redundant. The
+    # legacy SQLite-per-node MemorySync has been removed.
     memory_store = core["memory_store"]
     memory_sync = None
-    if hasattr(memory_store, "_conn"):
-        sync_port = get("network.listen_port", 9420) + 2  # Convention: sync = gossip + 2
-        memory_sync = MemorySync(memory_store, node_identity.node_id, listen_port=sync_port)
-        memory_sync._ensure_sync_columns()
-        await memory_sync.start()
-    else:
-        log.info("Memory sync disabled — Postgres backend shares one DB across nodes")
+    log.info("Memory sync disabled — Postgres backend shares one DB across nodes")
 
     # Split-brain detector
     split_brain = SplitBrainDetector(node_identity)
@@ -691,14 +685,6 @@ async def _init_gossip(config: dict, core: dict, heartbeat_deps: dict) -> dict:
             await asyncio.sleep(60)
             # Split-brain check
             split_brain.check(gossip_mesh.get_alive_count())
-            # Sync with random alive peer (SQLite-per-node replication only)
-            alive = gossip_mesh.get_alive_peers()
-            if memory_sync and alive:
-                import random
-                peer_id = random.choice(list(alive.keys()))
-                peer_state = alive[peer_id]
-                sync_addr = f"{peer_state.ip}:{peer_state.port + 2}"
-                await memory_sync.sync_with_peer(sync_addr, peer_id)
             # Cleanup stale registered nodes
             node_identity.unregister_stale_nodes()
             # Cleanup expired tasks and sessions

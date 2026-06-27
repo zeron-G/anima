@@ -5,7 +5,7 @@ sys.stdout.reconfigure(encoding='utf-8')
 from anima.config import load_config
 from anima.core.event_queue import EventQueue
 from anima.perception.snapshot_cache import SnapshotCache
-from anima.memory.store import MemoryStore
+from anima.memory.store import create_memory_store
 from anima.emotion.state import EmotionState
 from anima.tools.registry import ToolRegistry
 from anima.tools.executor import ToolExecutor
@@ -29,7 +29,7 @@ async def main():
     am = AgentManager(max_concurrent=5)
     set_agent_manager(am)
     eq = EventQueue(); sc = SnapshotCache()
-    ms = await MemoryStore.create('data/anima.db')
+    ms = await create_memory_store()
     em = EmotionState()
     tr = ToolRegistry(); tr.register_builtins()
     te = ToolExecutor(tr, max_risk=3)

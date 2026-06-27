@@ -35,7 +35,7 @@ from anima.core.response_handler import ResponseHandler
 from anima.core.reload import ReloadManager
 from anima.emotion.state import EmotionState
 from anima.llm.router import LLMRouter
-from anima.memory.store import MemoryStore
+from anima.memory.pg_store import PgMemoryStore
 from anima.models.event import Event, EventType
 from anima.perception.snapshot_cache import SnapshotCache
 from anima.tools.executor import ToolExecutor
@@ -62,7 +62,7 @@ class AgenticLoop:
         self,
         event_queue: EventQueue,
         snapshot_cache: SnapshotCache,
-        memory_store: MemoryStore,
+        memory_store: PgMemoryStore,
         emotion_state: EmotionState,
         llm_router: LLMRouter,
         tool_executor: ToolExecutor,

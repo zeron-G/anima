@@ -1,32 +1,15 @@
-"""Tests for memory sync and split-brain detection."""
+"""Tests for split-brain detection.
+
+(Peer-to-peer MemorySync was removed with the SQLite backend — all nodes now
+share one Postgres DB, so episodic replication between nodes is redundant.)
+"""
 
 import asyncio
 import time
 import pytest
 
-from anima.network.sync import MemorySync
 from anima.network.split_brain import SplitBrainDetector
 from anima.network.node import NodeIdentity
-
-
-# -- Sync tests --
-
-def test_content_hash():
-    h1 = MemorySync.content_hash("hello world", "chat")
-    h2 = MemorySync.content_hash("hello world", "chat")
-    h3 = MemorySync.content_hash("different", "chat")
-    assert h1 == h2  # Same content = same hash
-    assert h1 != h3  # Different content = different hash
-    assert len(h1) == 16  # 16 hex chars
-
-
-def test_next_seq():
-    # Create a minimal MemorySync without actual DB
-    sync = MemorySync.__new__(MemorySync)
-    sync._local_seq = 0
-    assert sync.next_seq() == 1
-    assert sync.next_seq() == 2
-    assert sync.next_seq() == 3
 
 
 # -- Split-brain tests --

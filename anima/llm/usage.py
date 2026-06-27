@@ -1,17 +1,17 @@
-"""LLM usage tracker — records every call to SQLite."""
+"""LLM usage tracker — records every call to the memory store."""
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from anima.memory.store import MemoryStore
+    from anima.memory.pg_store import PgMemoryStore
 
 
 class UsageTracker:
-    """Wraps MemoryStore to provide a simple interface for recording LLM usage."""
+    """Wraps the memory store to provide a simple interface for recording LLM usage."""
 
-    def __init__(self, memory_store: MemoryStore) -> None:
+    def __init__(self, memory_store: "PgMemoryStore") -> None:
         self._store = memory_store
 
     def record(

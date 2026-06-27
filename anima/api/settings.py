@@ -94,7 +94,7 @@ async def system_info(request: web.Request) -> web.Response:
         "agent_name": get("agent.name", "eva"),
         "runtime": snapshot.get("runtime", {}),
         "python_version": __import__("sys").version,
-        "chromadb": True,
+        "memory_backend": "postgres+pgvector",
     })
 
 

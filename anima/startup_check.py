@@ -103,32 +103,17 @@ def _has_claude_code_credentials() -> bool:
 
 
 def _check_semantic_search(issues: list) -> None:
-    """Check for semantic search backend.
+    """Semantic recall uses pgvector with OpenAI embeddings (text-embedding-3-small)."""
+    from anima.secret_store import get_secret
 
-    ChromaDB is required (critical). sentence-transformers is optional
-    and used as a local embedding fallback.
-    """
-    try:
-        import chromadb  # noqa: F401
-    except ImportError:
-        issues.append((
-            "critical",
-            "ChromaDB is required but not installed. "
-            "Install: pip install chromadb"
-        ))
-        return
-
-    has_st = False
-    try:
-        import sentence_transformers  # noqa: F401
-        has_st = True
-    except ImportError:
-        pass
-
-    if has_st:
-        issues.append(("info", "Semantic search: ChromaDB + local sentence-transformers"))
+    if get_secret("OPENAI_API_KEY"):
+        issues.append(("info", "Semantic search: pgvector + OpenAI text-embedding-3-small"))
     else:
-        issues.append(("info", "Semantic search: ChromaDB (sentence-transformers not installed — optional)"))
+        issues.append((
+            "warning",
+            "OPENAI_API_KEY unset — embeddings disabled; semantic recall falls "
+            "back to keyword search (ILIKE)",
+        ))
 
 
 def _check_required_files(issues: list) -> None:
@@ -157,23 +142,41 @@ def _check_required_files(issues: list) -> None:
 
 
 def _check_database(issues: list, config: dict | None) -> None:
-    """Check database accessibility."""
-    from anima.config import db_path as resolve_db_path
+    """Check the Postgres data layer: driver present + an endpoint configured.
 
-    resolved = resolve_db_path()
-    if resolved.exists():
-        # Quick integrity check
-        try:
-            import sqlite3
-            conn = sqlite3.connect(str(resolved))
-            result = conn.execute("PRAGMA integrity_check").fetchone()
-            conn.close()
-            if result[0] != "ok":
-                issues.append(("critical", f"Database integrity check failed: {result[0]}"))
-        except Exception as e:
-            issues.append(("warning", f"Database check failed: {e}"))
+    The actual connection (and Neon→local failover) happens in
+    PgMemoryStore.create, which logs which endpoint it reached — we keep this
+    check lightweight so startup isn't blocked on a network round-trip.
+    """
+    from anima.secret_store import get_secret
+
+    try:
+        import psycopg  # noqa: F401
+        import pgvector  # noqa: F401
+    except ImportError:
+        issues.append((
+            "critical",
+            "psycopg/pgvector not installed. Install: pip install 'psycopg[binary]' pgvector",
+        ))
+        return
+
+    primary = bool(get_secret("DATABASE_URL"))
+    local = bool(get_secret("LOCAL_DATABASE_URL"))
+    if not (primary or local):
+        issues.append((
+            "critical",
+            "No Postgres configured — set DATABASE_URL (Neon) and/or "
+            "LOCAL_DATABASE_URL in .env",
+        ))
+    elif primary and local:
+        issues.append(("info", "Postgres: Neon primary + local failover configured"))
+    elif primary:
+        issues.append((
+            "warning",
+            "Postgres: Neon primary only — no LOCAL_DATABASE_URL failover for offline use",
+        ))
     else:
-        issues.append(("info", f"Database will be created: {resolved}"))
+        issues.append(("info", "Postgres: local only (no Neon primary)"))
 
 
 def run_and_report(config: dict | None = None) -> bool:

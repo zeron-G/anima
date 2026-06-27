@@ -9,10 +9,8 @@ if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
 import pytest
-from anima.memory.store import MemoryStore
 from anima.network.node import NodeIdentity, NodeState
 from anima.network.gossip import GossipMesh
-from anima.network.sync import MemorySync
 from anima.network.session_router import SessionRouter
 from anima.network.split_brain import SplitBrainDetector
 
@@ -46,37 +44,9 @@ async def test_two_node_gossip():
     await mb.stop()
 
 
-@pytest.mark.asyncio
-@pytest.mark.skipif(sys.platform == "win32", reason="ZMQ port timing flaky on Windows; verified in real deployment")
-async def test_memory_sync_between_nodes():
-    """Node B pulls memories from Node A."""
-    td = tempfile.mkdtemp()
-    ms_a = await MemoryStore.create(os.path.join(td, "a.db"))
-    ms_b = await MemoryStore.create(os.path.join(td, "b.db"))
-    from anima.spawn.deployer import get_free_port
-    port_a = get_free_port()
-    port_b = get_free_port()
-    ya = MemorySync(ms_a, "A", listen_port=port_a)
-    yb = MemorySync(ms_b, "B", listen_port=port_b)
-    ya._ensure_sync_columns()
-    yb._ensure_sync_columns()
-    await ya.start()
-    await yb.start()
-
-    ms_a.save_memory("message from A", type="chat", importance=0.9)
-    await asyncio.sleep(3)  # Give sync server thread time to bind
-
-    # Sync B from A — connect directly to A's sync port
-    result = await yb.sync_with_peer(f"127.0.0.1:{port_a}", "A")
-    assert result["pulled"] >= 1
-
-    mems = ms_b.get_recent_memories(5)
-    assert any("message from A" in m["content"] for m in mems)
-
-    await ya.stop()
-    await yb.stop()
-    await ms_a.close()
-    await ms_b.close()
+# NOTE: peer-to-peer memory sync between nodes was removed with the SQLite
+# backend — all nodes now share ONE Postgres DB (Neon primary + local failover),
+# so episodic replication between nodes is redundant.
 
 
 @pytest.mark.asyncio
