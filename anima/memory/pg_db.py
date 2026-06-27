@@ -107,23 +107,95 @@ class PgDatabaseManager:
         """True when serving from the local fallback (cloud was unreachable)."""
         return self._using_local
 
+    @property
+    def primary_dsn(self) -> str:
+        return self._dsn
+
+    @property
+    def local_dsn(self) -> str:
+        return self._local_dsn
+
+    # ── Runtime failover ──
+    # psycopg raises OperationalError/InterfaceError when the connection drops
+    # mid-operation (e.g. Neon goes away after we connected). We catch those,
+    # reconnect (primary→local, same order as startup), and retry ONCE.
+    _CONN_ERRORS = (psycopg.OperationalError, psycopg.InterfaceError)
+
+    def _reconnect_locked(self) -> None:
+        """Reopen the connection (primary→local). Caller MUST hold the lock."""
+        try:
+            if self._conn is not None:
+                self._conn.close()
+        except Exception:
+            pass
+        self._conn = self._connect()  # sets _using_local; tries primary then local
+        try:
+            from pgvector.psycopg import register_vector
+            register_vector(self._conn)
+        except Exception as e:  # noqa: BLE001
+            log.debug("pgvector register skipped on reconnect: %s", e)
+
+    def _run_locked(self, work):
+        """Run work(cur) under the lock; on a dropped connection, reconnect and
+        retry once. This is the runtime offline-failover path."""
+        self._check_open()
+        with self._sync_write_lock:
+            try:
+                with self._conn.cursor() as cur:
+                    return work(cur)
+            except self._CONN_ERRORS as e:
+                log.warning("Postgres connection lost (%s) — reconnecting + retrying",
+                            str(e)[:120])
+                self._reconnect_locked()
+                with self._conn.cursor() as cur:
+                    return work(cur)
+
+    async def switch_to_primary(self) -> bool:
+        """Force the live connection back to the primary (used after the sync
+        manager has replayed local-only writes on reconnect). Returns True if
+        now on the primary; leaves the existing connection untouched on failure."""
+        def _switch() -> bool:
+            with self._sync_write_lock:
+                if not self._dsn or self._closed:
+                    return False
+                try:
+                    conn = psycopg.connect(
+                        self._dsn, connect_timeout=15, autocommit=True, row_factory=dict_row,
+                    )
+                except Exception as e:  # noqa: BLE001 — primary still down
+                    log.debug("switch_to_primary: primary still unreachable: %s", str(e)[:120])
+                    return False
+                try:
+                    if self._conn is not None:
+                        self._conn.close()
+                except Exception:
+                    pass
+                self._conn = conn
+                self._using_local = False
+                try:
+                    from pgvector.psycopg import register_vector
+                    register_vector(self._conn)
+                except Exception:
+                    pass
+                log.info("Postgres switched back to primary")
+                return True
+        return await asyncio.to_thread(_switch)
+
     # ── Reads (dict rows; %s placeholders) ──
     # A psycopg Connection is NOT thread-safe, so ALL access (reads + writes)
     # funnels through the one lock; async variants wrap the locked sync calls.
 
     def fetch_sync(self, sql: str, params: tuple = ()) -> list[dict[str, Any]]:
-        self._check_open()
-        with self._sync_write_lock:
-            with self._conn.cursor() as cur:
-                cur.execute(sql, params)
-                return cur.fetchall()
+        def work(cur):
+            cur.execute(sql, params)
+            return cur.fetchall()
+        return self._run_locked(work)
 
     def fetch_one_sync(self, sql: str, params: tuple = ()) -> dict[str, Any] | None:
-        self._check_open()
-        with self._sync_write_lock:
-            with self._conn.cursor() as cur:
-                cur.execute(sql, params)
-                return cur.fetchone()
+        def work(cur):
+            cur.execute(sql, params)
+            return cur.fetchone()
+        return self._run_locked(work)
 
     async def fetch(self, sql: str, params: tuple = ()) -> list[dict[str, Any]]:
         return await asyncio.to_thread(self.fetch_sync, sql, params)
@@ -141,20 +213,18 @@ class PgDatabaseManager:
 
     def write_sync(self, sql: str, params: tuple = ()) -> int:
         """Single write under a thread lock (for *_sync methods in to_thread)."""
-        self._check_open()
-        with self._sync_write_lock:
-            with self._conn.cursor() as cur:
-                cur.execute(sql, params)
-                return cur.rowcount
+        def work(cur):
+            cur.execute(sql, params)
+            return cur.rowcount
+        return self._run_locked(work)
 
     def write_many_sync(self, sql: str, params_list: list[tuple]) -> int:
-        self._check_open()
         if not params_list:
             return 0
-        with self._sync_write_lock:
-            with self._conn.cursor() as cur:
-                cur.executemany(sql, params_list)
+        def work(cur):
+            cur.executemany(sql, params_list)
             return len(params_list)
+        return self._run_locked(work)
 
     async def execute(self, sql: str, params: tuple = ()) -> int:
         return await asyncio.to_thread(self.write_sync, sql, params)

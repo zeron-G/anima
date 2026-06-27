@@ -370,6 +370,31 @@ class TestPgDatabaseManager:
             await db.close()
 
     @pytest.mark.asyncio
+    async def test_runtime_reconnect_after_dropped_connection(self):
+        """A connection that drops mid-operation reconnects + retries (the app
+        survives a Neon blip instead of crashing)."""
+        from anima.memory.pg_db import PgDatabaseManager
+        from pgutil import ensure_test_db, test_dsn
+        if not test_dsn() or not ensure_test_db():
+            pytest.skip("local Postgres unavailable")
+
+        db = PgDatabaseManager(dsn=test_dsn())
+        await db.init("")
+        try:
+            # Simulate the server dropping us: close the underlying socket.
+            db._conn.close()
+            # The next read must reconnect + succeed, not raise.
+            rows = db.fetch_sync("SELECT 1 AS one")
+            assert rows[0]["one"] == 1
+            # The write path routes through the same retry — drop again, write.
+            db._conn.close()
+            db.write_sync("CREATE TEMP TABLE _rc_test (x int)")
+            db.write_sync("INSERT INTO _rc_test VALUES (1)")
+            assert db.fetch_sync("SELECT COUNT(*) AS n FROM _rc_test")[0]["n"] == 1
+        finally:
+            await db.close()
+
+    @pytest.mark.asyncio
     async def test_failover_to_local_when_primary_down(self):
         """A dead primary falls back to the local endpoint (offline failover)."""
         from anima.memory.pg_db import PgDatabaseManager

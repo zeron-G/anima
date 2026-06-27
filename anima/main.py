@@ -101,6 +101,14 @@ async def _init_core(config: dict) -> dict:
     for tool in get_document_tools():
         tool_registry.register(tool)
 
+    # Replica sync: warm the local failover DB while online, and replay
+    # local-only writes back to the primary after an outage. No-op unless both
+    # DATABASE_URL and LOCAL_DATABASE_URL are set (and distinct).
+    from anima.memory.pg_sync import PgSyncManager
+    pg_sync = PgSyncManager(memory_store._db,
+                            interval_s=get("memory.sync_interval_s", 300))
+    await pg_sync.start()
+
     # Register known remote nodes for cross-node communication
     from anima.tools.builtin.remote import register_node
     from anima.secret_store import resolve as _resolve_secret
@@ -173,6 +181,7 @@ async def _init_core(config: dict) -> dict:
         "set_evo_tools_engine": set_evo_tools_engine,
         "issue_tracker": issue_tracker,
         "self_audit": self_audit,
+        "pg_sync": pg_sync,
     }
 
 
@@ -1243,7 +1252,10 @@ async def run() -> bool:
     if mcp_manager:
         await mcp_manager.stop_all()
 
-    # 7. Flush memory
+    # 7. Stop replica sync, then flush memory
+    pg_sync = core.get("pg_sync")
+    if pg_sync:
+        await pg_sync.stop()
     await core["memory_store"].close()
 
     if restart_requested:
