@@ -40,13 +40,12 @@ CREATE TABLE IF NOT EXISTS emotion_log (
 );
 CREATE INDEX IF NOT EXISTS idx_emotion_ts ON emotion_log(timestamp);
 
--- ── Persona prose + feelings + growth_log (durable soul, travels with the DB) ──
--- name e.g. 'identity/personality.md', 'memory/feelings.md'. Plain text, NO vectors.
-CREATE TABLE IF NOT EXISTS soul_documents (
-    name       TEXT PRIMARY KEY,
-    content    TEXT,
-    updated_at DOUBLE PRECISION
-);
+-- NOTE: persona prose (identity/*.md), feelings.md, growth_log.md, lorebook and
+-- golden_replies stay as FILES, not DB rows — they're human-authored and edited
+-- (vim / Soulscape UI / SSH); a DB would turn "edit a file" into "write SQL".
+-- Durability for them = the backup routine (cloud snapshot + local-on-startup),
+-- not this schema. Only program-written, queried, or semantically-searched data
+-- lives here.
 
 -- ── Tier-1 static knowledge ──
 CREATE TABLE IF NOT EXISTS static_knowledge (
