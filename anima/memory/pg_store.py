@@ -348,7 +348,8 @@ class PgMemoryStore:
             for k in keywords:
                 kw.append("(key ILIKE %s OR value ILIKE %s)"); params += [f"%{k}%", f"%{k}%"]
             conds.append("(" + " OR ".join(kw) + ")")
-        where = " AND ".join(conds) if conds else "TRUE"
+        conds.append("is_deleted = 0")   # tombstones never surface to callers
+        where = " AND ".join(conds)
         return self._db.fetch_sync(
             f"SELECT * FROM static_knowledge WHERE {where} ORDER BY importance DESC LIMIT %s",
             (*params, limit))
@@ -361,11 +362,15 @@ class PgMemoryStore:
         return await asyncio.to_thread(self._query_sk_sync, categories, keywords, scopes, limit)
 
     def _upsert_sk_sync(self, category, key, value, scope, node_id, source, importance, updated_at) -> None:
+        # version bumps on every write (new row → 1, update → old+1) so a merge
+        # can pick the winner deterministically without trusting wall clocks.
+        # is_deleted=0 un-deletes a key that's re-added after a tombstone.
         self._db.write_sync(
-            "INSERT INTO static_knowledge (category,key,value,source,importance,updated_at,scope,node_id) "
-            "VALUES (%s,%s,%s,%s,%s,%s,%s,%s) "
+            "INSERT INTO static_knowledge (category,key,value,source,importance,updated_at,scope,node_id,version,is_deleted) "
+            "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,1,0) "
             "ON CONFLICT (category,key,scope) DO UPDATE SET value=EXCLUDED.value, "
-            "importance=EXCLUDED.importance, updated_at=EXCLUDED.updated_at, source=EXCLUDED.source",
+            "importance=EXCLUDED.importance, updated_at=EXCLUDED.updated_at, source=EXCLUDED.source, "
+            "version=static_knowledge.version+1, is_deleted=0",
             (category, key, value, source, importance, updated_at or time.time(), scope, node_id))
 
     def upsert_static_knowledge(self, category, key, value, scope="global", node_id=None,
@@ -378,9 +383,13 @@ class PgMemoryStore:
         await asyncio.to_thread(self._upsert_sk_sync, category, key, value, scope, node_id, source, importance, updated_at)
 
     def delete_static_knowledge(self, category, key, scope="global") -> bool:
+        # Soft-delete (tombstone): bump version so the deletion beats prior edits
+        # and survives a merge (a hard DELETE would let the row "resurrect" from
+        # a replica that still has it). Queries already filter is_deleted=1.
         n = self._db.write_sync(
-            "DELETE FROM static_knowledge WHERE category=%s AND key=%s AND scope=%s",
-            (category, key, scope))
+            "UPDATE static_knowledge SET is_deleted=1, version=version+1, updated_at=%s "
+            "WHERE category=%s AND key=%s AND scope=%s AND is_deleted=0",
+            (time.time(), category, key, scope))
         return n > 0
 
     async def delete_static_knowledge_async(self, category, key, scope="global") -> bool:

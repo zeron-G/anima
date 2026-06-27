@@ -44,10 +44,39 @@ _SPECS = [
     {"t": "audit_log", "ts": "timestamp", "pk": "id"},
     {"t": "state_snapshots", "ts": "timestamp", "pk": "id"},
     {"t": "documents", "ts": "imported_at", "pk": "chunk_id"},
-    # static_knowledge keys on (category,key,scope); its `id` is a per-DB SERIAL,
-    # so skip it on copy and let the destination assign its own.
-    {"t": "static_knowledge", "ts": "updated_at", "pk": "category,key,scope", "exclude": ("id",)},
+    # static_knowledge is the ONE mutable synced table → version-aware merge
+    # (not append-only DO NOTHING). Its `id` is a per-DB SERIAL, never copied.
+    {"t": "static_knowledge", "pk": "category,key,scope", "merge": "version"},
 ]
+
+
+def _journal_lww(src_row: dict, dst_row: dict, *, winner: str) -> None:
+    """Record a static_knowledge merge conflict where one side's value is
+    dropped — append to guardian_actions.jsonl so the loser is recoverable by
+    hand (never silently overwritten)."""
+    keep, drop = (src_row, dst_row) if winner == "src" else (dst_row, src_row)
+    rec = {
+        "phase": "merge_lww", "component": "db",
+        "ts": _now(), "key": f"{src_row.get('category')}/{src_row.get('key')}@{src_row.get('scope')}",
+        "winner": winner,
+        "kept_value": keep.get("value"), "kept_version": keep.get("version"),
+        "dropped_value": drop.get("value"), "dropped_version": drop.get("version"),
+    }
+    try:
+        from anima.config import data_dir
+        d = data_dir() / "logs"
+        d.mkdir(parents=True, exist_ok=True)
+        with open(d / "guardian_actions.jsonl", "a", encoding="utf-8") as f:
+            f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+    except Exception as e:  # noqa: BLE001 — best effort
+        log.debug("journal_lww: %s", e)
+    log.warning("PgSync: static_knowledge LWW — kept v%s, dropped v%s for %s",
+                keep.get("version"), drop.get("version"), rec["key"])
+
+
+def _now() -> float:
+    import time as _t
+    return _t.time()
 
 
 class PgSyncManager:
@@ -187,10 +216,58 @@ class PgSyncManager:
         total = 0
         for spec in _SPECS:
             try:
-                total += self._reconcile_table(src, dst, spec)
+                if spec.get("merge") == "version":
+                    total += self._reconcile_versioned(src, dst, spec)
+                else:
+                    total += self._reconcile_table(src, dst, spec)
             except Exception as e:  # noqa: BLE001 — one table failing shouldn't stop the rest
                 log.warning("PgSync: reconcile %s failed: %s", spec["t"], str(e)[:120])
         return total
+
+    @staticmethod
+    def _reconcile_versioned(src: psycopg.Connection, dst: psycopg.Connection, spec: dict) -> int:
+        """Version-aware merge for the one mutable table (static_knowledge).
+        Higher `version` wins (wall-clock only as a tiebreak); tombstones
+        (is_deleted) propagate by the same rule; a dropped value is journaled."""
+        t = spec["t"]
+        cols = ("category", "key", "value", "source", "importance",
+                "updated_at", "scope", "node_id", "version", "is_deleted")
+        collist = ", ".join(cols)
+        with src.cursor() as c:
+            c.execute(f"SELECT {collist} FROM {t}")
+            src_rows = c.fetchall()
+        if not src_rows:
+            return 0
+        merged = 0
+        with dst.cursor() as c:
+            for r in src_rows:
+                c.execute(f"SELECT value, version, updated_at, is_deleted FROM {t} "
+                          "WHERE category=%s AND key=%s AND scope=%s",
+                          (r["category"], r["key"], r["scope"]))
+                d = c.fetchone()
+                if d is None:                                  # new key on dst → copy
+                    c.execute(f"INSERT INTO {t} ({collist}) VALUES "
+                              f"({', '.join(['%s'] * len(cols))})",
+                              tuple(r[k] for k in cols))
+                    merged += 1
+                    continue
+                src_wins = (r["version"] > d["version"]) or (
+                    r["version"] == d["version"]
+                    and (r["updated_at"] or 0) > (d["updated_at"] or 0))
+                if src_wins:
+                    if d["value"] != r["value"] or d["is_deleted"] != r["is_deleted"]:
+                        _journal_lww(r, d, winner="src")       # dst's value overwritten
+                    c.execute(
+                        f"UPDATE {t} SET value=%s, source=%s, importance=%s, updated_at=%s, "
+                        "node_id=%s, version=%s, is_deleted=%s "
+                        "WHERE category=%s AND key=%s AND scope=%s",
+                        (r["value"], r["source"], r["importance"], r["updated_at"],
+                         r["node_id"], r["version"], r["is_deleted"],
+                         r["category"], r["key"], r["scope"]))
+                    merged += 1
+                elif d["value"] != r["value"]:
+                    _journal_lww(r, d, winner="dst")           # src's value dropped (its loss is logged)
+        return merged
 
     @staticmethod
     def _reconcile_table(src: psycopg.Connection, dst: psycopg.Connection, spec: dict) -> int:

@@ -58,6 +58,8 @@ CREATE TABLE IF NOT EXISTS static_knowledge (
     updated_at DOUBLE PRECISION NOT NULL,
     scope      TEXT NOT NULL DEFAULT 'global',
     node_id    TEXT,
+    version    BIGINT DEFAULT 0,      -- monotonic per-key; merge tiebreaker (NOT wall-clock)
+    is_deleted INTEGER DEFAULT 0,     -- tombstone: soft-delete so deletions survive merge
     UNIQUE(category, key, scope)
 );
 CREATE INDEX IF NOT EXISTS idx_sk_scope ON static_knowledge(scope);

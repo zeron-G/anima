@@ -34,6 +34,10 @@ def _apply_schema(dsn: str) -> None:
     import psycopg
     with psycopg.connect(dsn, autocommit=True) as c:
         c.execute(schema)
+        # CREATE TABLE IF NOT EXISTS won't evolve a pre-existing test table, so
+        # apply the column migrations idempotently (mirrors production migration).
+        c.execute("ALTER TABLE static_knowledge ADD COLUMN IF NOT EXISTS version BIGINT DEFAULT 0;")
+        c.execute("ALTER TABLE static_knowledge ADD COLUMN IF NOT EXISTS is_deleted INTEGER DEFAULT 0;")
 
 
 @pytest.fixture
@@ -139,6 +143,80 @@ async def test_backup_primary_to_local_full_reconcile(two_dbs):
     finally:
         pc.close()
         lc.close()
+
+
+_SK_SPEC = {"t": "static_knowledge", "pk": "category,key,scope", "merge": "version"}
+
+
+def _insert_sk(dsn, category, key, value, version, scope="global", is_deleted=0, updated_at=100.0):
+    from anima.memory.pg_sync import PgSyncManager
+    conn = PgSyncManager._open(dsn)
+    try:
+        conn.execute(
+            "INSERT INTO static_knowledge (category,key,value,source,importance,updated_at,scope,node_id,version,is_deleted) "
+            "VALUES (%s,%s,%s,'user',0.5,%s,%s,NULL,%s,%s) "
+            "ON CONFLICT (category,key,scope) DO UPDATE SET value=EXCLUDED.value, "
+            "version=EXCLUDED.version, is_deleted=EXCLUDED.is_deleted, updated_at=EXCLUDED.updated_at",
+            (category, key, value, updated_at, scope, version, is_deleted))
+    finally:
+        conn.close()
+
+
+def _get_sk(dsn, category, key, scope="global"):
+    from anima.memory.pg_sync import PgSyncManager
+    conn = PgSyncManager._open(dsn)
+    try:
+        with conn.cursor() as c:
+            c.execute("SELECT value, version, is_deleted FROM static_knowledge "
+                      "WHERE category=%s AND key=%s AND scope=%s", (category, key, scope))
+            return c.fetchone()
+    finally:
+        conn.close()
+
+
+@pytest.mark.asyncio
+async def test_sk_higher_version_wins(two_dbs):
+    from anima.memory.pg_sync import PgSyncManager
+    local, primary = two_dbs
+    _insert_sk(local, "env", "os", "linux", version=3)
+    _insert_sk(primary, "env", "os", "windows", version=1)
+    lc, pc = PgSyncManager._open(local), PgSyncManager._open(primary)
+    try:
+        PgSyncManager._reconcile_versioned(lc, pc, _SK_SPEC)   # local → primary
+    finally:
+        lc.close(); pc.close()
+    row = _get_sk(primary, "env", "os")
+    assert row["value"] == "linux" and row["version"] == 3     # higher version won
+
+
+@pytest.mark.asyncio
+async def test_sk_lower_version_loses(two_dbs):
+    from anima.memory.pg_sync import PgSyncManager
+    local, primary = two_dbs
+    _insert_sk(local, "env", "os", "linux", version=1)         # stale local edit
+    _insert_sk(primary, "env", "os", "windows", version=5)
+    lc, pc = PgSyncManager._open(local), PgSyncManager._open(primary)
+    try:
+        PgSyncManager._reconcile_versioned(lc, pc, _SK_SPEC)
+    finally:
+        lc.close(); pc.close()
+    row = _get_sk(primary, "env", "os")
+    assert row["value"] == "windows" and row["version"] == 5   # primary kept; src lost (journaled)
+
+
+@pytest.mark.asyncio
+async def test_sk_tombstone_propagates(two_dbs):
+    from anima.memory.pg_sync import PgSyncManager
+    local, primary = two_dbs
+    _insert_sk(local, "env", "os", "", version=4, is_deleted=1)        # deleted on local, newer
+    _insert_sk(primary, "env", "os", "windows", version=2, is_deleted=0)
+    lc, pc = PgSyncManager._open(local), PgSyncManager._open(primary)
+    try:
+        PgSyncManager._reconcile_versioned(lc, pc, _SK_SPEC)
+    finally:
+        lc.close(); pc.close()
+    row = _get_sk(primary, "env", "os")
+    assert row["is_deleted"] == 1     # tombstone won → no resurrection on the primary
 
 
 @pytest.mark.asyncio
