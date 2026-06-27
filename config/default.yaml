@@ -177,6 +177,7 @@ channels:
 # ── Dashboard ──
 dashboard:
   port: 8420
+  auto_open: false          # silent startup; true → open a browser tab on `python -m anima`
   auth:
     # password = the login secret typed at /v1/auth/login. BLANK = auth DISABLED
     # (every endpoint open) — set it in local/env.yaml to require login. Gates the

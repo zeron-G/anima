@@ -73,9 +73,11 @@ if sys.platform == "win32":
 
 
 def _launch_web(*, headless: bool = False, experimental: bool = False) -> None:
-    """Run the ANIMA backend (it serves the eva-ui web app) and, unless headless,
-    open the browser. The native desktop window (pywebview) was removed — ANIMA is
-    a web app; just point a browser at the dashboard URL."""
+    """Run the ANIMA backend (it serves the eva-ui web app). Startup is SILENT by
+    default — it does not open a browser tab; set ``dashboard.auto_open: true`` to
+    restore that. ``--headless`` additionally suppresses the URL banner (the
+    server/edge path). The native desktop window (pywebview) was removed — ANIMA
+    is a web app; just point a browser at the dashboard URL."""
     import atexit
     from anima.core.singleton import acquire_lock, release_lock
 
@@ -86,7 +88,8 @@ def _launch_web(*, headless: bool = False, experimental: bool = False) -> None:
 
     from anima.config import get
     url = f"http://127.0.0.1:{get('dashboard.port', 8420)}/"
-    if not headless:
+    # Silent by default: only auto-open a browser when explicitly opted in.
+    if not headless and get("dashboard.auto_open", False):
         import threading
         import time
         import webbrowser
@@ -99,6 +102,7 @@ def _launch_web(*, headless: bool = False, experimental: bool = False) -> None:
                 pass
 
         threading.Thread(target=_open_when_ready, daemon=True).start()
+    if not headless:
         print(f"ANIMA web UI: {url}   (Ctrl+C to stop)")
 
     from anima.main import main_entry
