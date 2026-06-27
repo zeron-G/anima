@@ -2,9 +2,9 @@
 
 Called from main.py before subsystem initialization. Checks:
   1. LLM API credentials available
-  2. Semantic search backend (chromadb or sentence-transformers)
+  2. Semantic search (OpenAI embeddings for pgvector)
   3. Required agent files (identity, rules, config)
-  4. Database file accessibility
+  4. Postgres data layer (driver + endpoint config + failover topology)
   5. Python version compatibility
 
 Returns a list of (severity, message) tuples:

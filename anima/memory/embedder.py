@@ -1,17 +1,17 @@
-"""Local embedding engine — semantic search fallback when ChromaDB is unavailable.
+"""Embedding engine for semantic recall.
 
-H-08 fix: Provides vector embeddings for memory search without requiring
-ChromaDB. Uses sentence-transformers with a multilingual model that
-supports both Chinese and English.
+Primary path: ``embed_openai`` — OpenAI text-embedding-3-small (1536-dim),
+written to the pgvector ``embedding`` column. This is what the live Postgres
+backend uses; see the "OpenAI embeddings" section below.
 
-Three-tier fallback strategy (managed by MemoryStore):
-  1. ChromaDB (if installed) — full vector DB
-  2. Local embedder (this module) — in-memory cosine similarity
-  3. SQLite LIKE — last resort keyword matching
+The sentence-transformers functions below are a legacy local-embedding fallback
+from the SQLite/ChromaDB era. They are no longer on any live path (kept only so
+an offline/keyless box could still compute vectors locally); recall without an
+OpenAI key degrades to keyword search (ILIKE) in the store.
 
-The embedding model is loaded lazily on first use and cached for the
-process lifetime. On a machine with a GPU, encoding is fast (~5ms per
-sentence). On CPU-only, ~50ms per sentence.
+The local model is loaded lazily on first use and cached for the process
+lifetime. On a machine with a GPU, encoding is fast (~5ms per sentence). On
+CPU-only, ~50ms per sentence.
 """
 
 from __future__ import annotations

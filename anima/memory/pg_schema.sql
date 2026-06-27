@@ -99,6 +99,22 @@ CREATE INDEX IF NOT EXISTS idx_env_important ON env_catalog(is_important);
 CREATE INDEX IF NOT EXISTS idx_env_layer     ON env_catalog(scan_layer);
 CREATE INDEX IF NOT EXISTS idx_env_deleted   ON env_catalog(is_deleted);
 
+-- ── Document store (RAG: imported PDF/Markdown/text, chunked + embedded) ──
+CREATE TABLE IF NOT EXISTS documents (
+    chunk_id    TEXT PRIMARY KEY,
+    doc_id      TEXT NOT NULL,
+    chunk_index INTEGER DEFAULT 0,
+    content     TEXT,
+    filename    TEXT,
+    file_type   TEXT DEFAULT '',
+    description TEXT DEFAULT '',
+    imported_at DOUBLE PRECISION DEFAULT 0,
+    embedding   vector(1536)
+);
+CREATE INDEX IF NOT EXISTS idx_documents_doc ON documents(doc_id);
+CREATE INDEX IF NOT EXISTS idx_documents_embedding
+    ON documents USING hnsw (embedding vector_cosine_ops);
+
 CREATE TABLE IF NOT EXISTS env_scan_progress (
     id                TEXT PRIMARY KEY,
     status            TEXT DEFAULT 'pending',

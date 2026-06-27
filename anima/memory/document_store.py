@@ -1,17 +1,20 @@
-"""Document store — import, chunk, embed, and retrieve documents via ChromaDB.
+"""Document store — import, chunk, embed, and retrieve documents via pgvector.
 
-Supports PDF, Markdown, and plain text files. Uses ChromaDB for vector search
-with the same PersistentClient as episodic memories (separate collection).
+Supports PDF, Markdown, and plain text files. Chunks are embedded with OpenAI
+(text-embedding-3-small) and stored in the `documents` table alongside episodic
+memory; semantic search is pgvector cosine. When OPENAI_API_KEY is unset, chunks
+are stored without vectors and search falls back to keyword (ILIKE).
 """
 
 from __future__ import annotations
 
+import asyncio
 import time
 from pathlib import Path
 
-import chromadb
-
-from anima.config import data_dir
+from anima.memory import embedder
+from anima.memory.pg_db import PgDatabaseManager
+from anima.memory.pg_store import _vec_literal
 from anima.utils.ids import gen_id
 from anima.utils.logging import get_logger
 
@@ -19,17 +22,11 @@ log = get_logger("document_store")
 
 
 class DocumentStore:
-    """Import documents, chunk them, store in ChromaDB for RAG retrieval."""
+    """Import documents, chunk them, store in Postgres (pgvector) for RAG retrieval."""
 
-    def __init__(self, chroma_path: str | Path | None = None) -> None:
-        path = Path(chroma_path) if chroma_path else data_dir() / "chroma"
-        path.mkdir(parents=True, exist_ok=True)
-        self._client = chromadb.PersistentClient(path=str(path))
-        self._collection = self._client.get_or_create_collection(
-            "documents", metadata={"hnsw:space": "cosine"}
-        )
-        self._documents: dict[str, dict] = {}  # doc_id -> metadata
-        log.info("DocumentStore initialized (collection: documents, path: %s)", path)
+    def __init__(self, db: PgDatabaseManager) -> None:
+        self._db = db
+        log.info("DocumentStore initialized (Postgres + pgvector)")
 
     async def import_document(
         self,
@@ -38,53 +35,40 @@ class DocumentStore:
         chunk_size: int = 500,
         chunk_overlap: int = 50,
     ) -> dict:
-        """Import a document: read -> chunk -> embed -> store in ChromaDB."""
-        import asyncio
-
+        """Import a document: read -> chunk -> embed -> store in Postgres."""
         path = Path(file_path)
         if not path.exists():
             return {"success": False, "error": f"File not found: {file_path}"}
 
-        # Read file content
         content = await asyncio.to_thread(self._read_file, path)
         if not content:
             return {"success": False, "error": "Could not read file or file is empty"}
 
-        # Chunk
         chunks = self._chunk_text(content, chunk_size, chunk_overlap)
         if not chunks:
             return {"success": False, "error": "No chunks generated"}
 
-        # Generate IDs
         doc_id = gen_id("doc")
-        chunk_ids = [f"{doc_id}_c{i:04d}" for i in range(len(chunks))]
+        file_type = path.suffix.lstrip(".")
+        now = time.time()
+        embeddings = await embedder.embed_openai_batch(chunks)
 
-        # Store in ChromaDB
+        rows = []
+        for i, chunk in enumerate(chunks):
+            emb = embeddings[i] if embeddings else None
+            rows.append((
+                f"{doc_id}_c{i:04d}", doc_id, i, chunk, path.name, file_type,
+                description, now, _vec_literal(emb) if emb else None,
+            ))
         try:
-            self._collection.add(
-                ids=chunk_ids,
-                documents=chunks,
-                metadatas=[{
-                    "doc_id": doc_id,
-                    "chunk_index": i,
-                    "filename": path.name,
-                    "file_type": path.suffix.lstrip("."),
-                    "description": description,
-                } for i in range(len(chunks))],
+            self._db.write_many_sync(
+                "INSERT INTO documents (chunk_id, doc_id, chunk_index, content, "
+                "filename, file_type, description, imported_at, embedding) "
+                "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                rows,
             )
         except Exception as e:
-            return {"success": False, "error": f"ChromaDB add failed: {e}"}
-
-        # Track metadata
-        self._documents[doc_id] = {
-            "id": doc_id,
-            "filename": path.name,
-            "file_path": str(path),
-            "file_type": path.suffix.lstrip("."),
-            "chunks": len(chunks),
-            "description": description,
-            "imported_at": time.time(),
-        }
+            return {"success": False, "error": f"DB insert failed: {e}"}
 
         log.info("Imported document: %s (%d chunks)", path.name, len(chunks))
         return {
@@ -100,56 +84,61 @@ class DocumentStore:
         n_results: int = 5,
         doc_id: str | None = None,
     ) -> list[dict]:
-        """Semantic search across imported documents."""
-        import asyncio
-
-        where_filter = {"doc_id": doc_id} if doc_id else None
+        """Semantic search across imported documents (pgvector cosine; ILIKE fallback)."""
+        qvec = await embedder.embed_openai(query)
         try:
-            results = await asyncio.to_thread(
-                self._collection.query,
-                query_texts=[query],
-                n_results=n_results,
-                where=where_filter,
-            )
+            if qvec:
+                vlit = _vec_literal(qvec)
+                clause = " AND doc_id=%s" if doc_id else ""
+                params = (vlit, *((doc_id,) if doc_id else ()), vlit, n_results)
+                rows = self._db.fetch_sync(
+                    "SELECT chunk_id, doc_id, chunk_index, content, filename, "
+                    "1-(embedding <=> %s::vector) AS relevance FROM documents "
+                    "WHERE embedding IS NOT NULL" + clause +
+                    " ORDER BY embedding <=> %s::vector LIMIT %s", params)
+            else:
+                clause = " AND doc_id=%s" if doc_id else ""
+                params = (f"%{query}%", *((doc_id,) if doc_id else ()), n_results)
+                rows = self._db.fetch_sync(
+                    "SELECT chunk_id, doc_id, chunk_index, content, filename, "
+                    "0.0 AS relevance FROM documents WHERE content ILIKE %s" + clause +
+                    " LIMIT %s", params)
         except Exception as e:
             log.warning("Document search failed: %s", e)
             return []
 
-        hits = []
-        if results and results.get("ids") and results["ids"][0]:
-            for i, chunk_id in enumerate(results["ids"][0]):
-                meta = results["metadatas"][0][i] if results.get("metadatas") else {}
-                distance = results["distances"][0][i] if results.get("distances") else 0
-                hits.append({
-                    "chunk_id": chunk_id,
-                    "content": results["documents"][0][i] if results.get("documents") else "",
-                    "filename": meta.get("filename", ""),
-                    "doc_id": meta.get("doc_id", ""),
-                    "chunk_index": meta.get("chunk_index", 0),
-                    "relevance": round(1 - distance, 3),  # cosine distance -> similarity
-                })
-        return hits
+        return [{
+            "chunk_id": r["chunk_id"],
+            "content": r["content"],
+            "filename": r["filename"],
+            "doc_id": r["doc_id"],
+            "chunk_index": r["chunk_index"],
+            "relevance": round(float(r["relevance"]), 3),
+        } for r in rows]
 
     def list_documents(self) -> list[dict]:
-        """List all imported documents."""
-        return list(self._documents.values())
+        """List all imported documents (aggregated from their chunks)."""
+        rows = self._db.fetch_sync(
+            "SELECT doc_id, filename, file_type, description, "
+            "MIN(imported_at) AS imported_at, COUNT(*) AS chunks FROM documents "
+            "GROUP BY doc_id, filename, file_type, description "
+            "ORDER BY MIN(imported_at) DESC")
+        return [{
+            "id": r["doc_id"],
+            "filename": r["filename"],
+            "file_type": r["file_type"],
+            "description": r["description"],
+            "chunks": r["chunks"],
+            "imported_at": r["imported_at"],
+        } for r in rows]
 
     async def delete_document(self, doc_id: str) -> dict:
         """Delete a document and all its chunks."""
-        import asyncio
-        if doc_id not in self._documents:
+        rows = self._db.fetch_sync(
+            "SELECT COUNT(*) AS c FROM documents WHERE doc_id = %s", (doc_id,))
+        if not rows or rows[0]["c"] == 0:
             return {"success": False, "error": f"Document {doc_id} not found"}
-
-        try:
-            # Get all chunk IDs for this document
-            results = self._collection.get(where={"doc_id": doc_id})
-            if results and results.get("ids"):
-                await asyncio.to_thread(self._collection.delete, ids=results["ids"])
-        except Exception as e:
-            log.warning("Document delete failed: %s", e)
-            return {"success": False, "error": str(e)}
-
-        del self._documents[doc_id]
+        self._db.write_sync("DELETE FROM documents WHERE doc_id = %s", (doc_id,))
         return {"success": True, "deleted": doc_id}
 
     # -- File readers --

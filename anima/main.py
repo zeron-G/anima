@@ -96,7 +96,7 @@ async def _init_core(config: dict) -> dict:
     # Register document RAG tools
     from anima.tools.builtin.document_tools import get_document_tools, set_document_store
     from anima.memory.document_store import DocumentStore
-    doc_store = DocumentStore()
+    doc_store = DocumentStore(memory_store._db)
     set_document_store(doc_store)
     for tool in get_document_tools():
         tool_registry.register(tool)

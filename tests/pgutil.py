@@ -11,7 +11,7 @@ import os
 
 _PG_TABLES = (
     "episodic_memories, emotion_log, static_knowledge, audit_log, "
-    "state_snapshots, llm_usage, env_catalog, env_scan_progress"
+    "state_snapshots, llm_usage, env_catalog, env_scan_progress, documents"
 )
 
 
