@@ -58,6 +58,8 @@ sed "s#__ANIMA_DIR__#$APP_DIR#g" deploy/azure/nginx-eva.conf \
   | sudo tee /etc/nginx/sites-available/eva >/dev/null
 sudo ln -sf /etc/nginx/sites-available/eva /etc/nginx/sites-enabled/eva
 sudo rm -f /etc/nginx/sites-enabled/default
+# nginx (www-data) must be able to traverse $HOME to reach the SPA dist
+sudo chmod o+x "$HOME"; chmod o+x "$APP_DIR" "$APP_DIR/eva-ui"; chmod -R o+rX "$APP_DIR/eva-ui/dist"
 
 echo "== [7/7] preflight =="
 MISSING=0

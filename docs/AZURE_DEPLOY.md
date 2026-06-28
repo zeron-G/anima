@@ -99,7 +99,7 @@ heartbeat against it. Before/at go-live, stop the local instance's heartbeat
 ## Operations
 - Logs: `journalctl -u anima -f` · `sudo tail -f /var/log/nginx/error.log`
 - Restart / stop: `sudo systemctl restart|stop anima`
-- Update code: `git -C ~/anima pull && (cd ~/anima/eva-ui && npm run build) && sudo systemctl restart anima && sudo systemctl reload nginx`
+- Update code: `git -C ~/anima pull && (cd ~/anima/eva-ui && npm run build) && chmod -R o+rX ~/anima/eva-ui/dist && sudo systemctl restart anima && sudo systemctl reload nginx`
 - Refresh Cloudflare IP ranges in the NSG + `nginx-eva.conf` if they change.
 - Teardown (removes ALL cloud resources): `az group delete -n anima-rg`
 
