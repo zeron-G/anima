@@ -1,0 +1,21 @@
+[Unit]
+Description=ANIMA (Eva) cloud runtime
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=__USER__
+WorkingDirectory=__ANIMA_DIR__
+Environment=ANIMA_PROFILE=cloud
+ExecStart=__ANIMA_DIR__/.venv/bin/python -m anima --headless
+# In-process Sentinel repairs components; systemd owns process restarts.
+# Evolution hot-reload and Sentinel restart-markers exit cleanly (code 0) and
+# get relaunched here; the cross-process Ledger still caps the restart budget.
+Restart=always
+RestartSec=5
+KillSignal=SIGINT
+TimeoutStopSec=15
+
+[Install]
+WantedBy=multi-user.target

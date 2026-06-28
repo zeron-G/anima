@@ -1,0 +1,36 @@
+# ─────────────────────────────────────────────────────────────────────────
+# ANIMA cloud production profile.  Load with:  ANIMA_PROFILE=cloud
+# Deep-merged over config/default.yaml (config.py:_deep_merge).
+# SECRETS NEVER GO HERE — only ${ENV} references; real values live in .env.
+# ─────────────────────────────────────────────────────────────────────────
+
+dashboard:
+  auto_open: false
+  auth:
+    # REQUIRED for a public deploy. Blank would leave every endpoint open.
+    # Resolved from .env by the auth middleware (config.resolve / get_secret).
+    password: "${ANIMA_DASHBOARD_PASSWORD}"
+    # Stable HMAC signing secret so issued JWTs survive restarts/redeploys.
+    token: "${ANIMA_DASHBOARD_JWT_SECRET}"
+  # nginx serves eva-ui/dist (same-origin Recipe A); backend stays API/WS only.
+  ui_dist: ""
+  cors:
+    # Same-origin behind nginx → no cross-origin browser clients to allow.
+    allow_origins: []
+    allow_all: false
+
+# Single-node during migration: no gossip mesh, so there is exactly ONE brain
+# writing the shared Neon memory. Flip to true + set ANIMA_NETWORK_SECRET when
+# (re)introducing a cloud<->local mesh as peers (v2).
+network:
+  enabled: false
+
+# Eva keeps evolving autonomously in prod, but evolution stays LOCAL — it only
+# commits + hot-reloads on the VM and NEVER pushes to the public origin.
+# (To run a calmer prod instance instead, set governance.default_mode: cautious.)
+evolution:
+  git_remote_sync: false
+
+# No robot body / voice on the cloud node — keeps the install slim (no torch).
+voice_bridge:
+  enabled: false
