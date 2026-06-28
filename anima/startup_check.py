@@ -67,9 +67,13 @@ def _check_llm_credentials(issues: list, config: dict | None = None) -> None:
 
     has_key = bool(get_secret("ANTHROPIC_API_KEY"))
     has_oauth = bool(get_secret("ANTHROPIC_OAUTH_TOKEN"))
+    # Non-OAuth Anthropic proxy token (ANTHROPIC_AUTH_TOKEN + ANTHROPIC_BASE_URL):
+    # the router lights this provider up directly (llm/router.py), so it is a
+    # valid credential even though it is neither a real API key nor an OAuth token.
+    has_auth_token = bool(get_secret("ANTHROPIC_AUTH_TOKEN"))
     has_creds = _has_claude_code_credentials()
 
-    if has_key or has_oauth or has_creds or has_openai_route:
+    if has_key or has_oauth or has_auth_token or has_creds or has_openai_route:
         return
 
     if require_llm:
