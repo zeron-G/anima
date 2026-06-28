@@ -51,24 +51,61 @@ class GovernanceEngine:
         return True, "OK"
 
     def check_evolution_proposal(self, proposal: dict, recent_failures: int) -> tuple[bool, str]:
-        """Check if evolution proposal should proceed.
+        """Decide whether an evolution proposal may proceed.
 
-        Core modules require human confirmation.
-        Consecutive failures trigger extended cooldown.
+        Three gates, in order:
+          1. FROZEN recovery core → hard reject, no override possible. These are
+             the modules that decide whether/how evolution runs and recovers; if
+             evolution could rewrite them, all guarantees collapse.
+          2. CORE (sensitive but not frozen) → requires a real OUT-OF-BAND human
+             approval file. We no longer trust a model-supplied `human_confirmed`
+             flag (the agent could set its own gate — see CODE_REVIEW P0-1).
+          3. Consecutive failures → extended cooldown.
         """
+        from anima.guardian.frozen import frozen_hits
+
+        # Sensitive (non-frozen) modules that still require explicit human approval.
         _CORE_MODULES = {
             "anima/core/cognitive.py", "anima/core/heartbeat.py",
-            "anima/main.py", "anima/core/event_queue.py",
-            "anima/__main__.py", "anima/core/pipeline.py",
+            "anima/core/event_queue.py", "anima/core/pipeline.py",
             "anima/core/stages.py",
         }
-        files = proposal.get("files", [])
-        core_touched = [f for f in files if f in _CORE_MODULES]
-        if core_touched and not proposal.get("human_confirmed"):
-            return False, f"Core module change requires human confirmation: {core_touched}"
+        files = proposal.get("files", []) or []
+
+        # 1. Frozen core — never auto-modifiable.
+        frozen = frozen_hits(files)
+        if frozen:
+            return False, f"FROZEN recovery core — change refused (human-only): {frozen}"
+
+        # 2. Core modules — require an out-of-band approval token on disk.
+        core_touched = [f for f in files if f.replace("\\", "/") in _CORE_MODULES]
+        if core_touched:
+            pid = str(proposal.get("id", "")).strip()
+            if not pid or not self.is_evolution_approved(pid):
+                return False, (
+                    f"Core module change needs human approval: {core_touched}. "
+                    f"Approve out-of-band, then retry "
+                    f"(create {self.approvals_dir() / (pid or '<id>')}.approved)."
+                )
+
         if recent_failures >= 3:
             return False, f"Too many recent failures ({recent_failures}), extended cooldown"
         return True, "OK"
+
+    @staticmethod
+    def approvals_dir():
+        """Directory where a human drops <proposal_id>.approved tokens to authorize
+        a core-module evolution. Outside the LLM's reach — file creation is the
+        out-of-band signal that replaces the spoofable `human_confirmed` flag."""
+        d = data_dir() / ".guardian" / "approvals"
+        d.mkdir(parents=True, exist_ok=True)
+        return d
+
+    def is_evolution_approved(self, proposal_id: str) -> bool:
+        """True iff a human has dropped an approval token for this proposal id."""
+        if not proposal_id:
+            return False
+        return (self.approvals_dir() / f"{proposal_id}.approved").exists()
 
     def check_self_thinking_loop(self, action: str) -> bool:
         """Detect if self-thinking is in an action loop.

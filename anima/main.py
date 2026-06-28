@@ -934,6 +934,7 @@ async def _init_cognitive(config: dict, core: dict, llm: dict, heartbeat_deps: d
         "cognitive": cognitive,
         "terminal": terminal,
         "session_manager": session_manager,
+        "reloaded_from_checkpoint": checkpoint is not None,
     }
 
 
@@ -1239,6 +1240,34 @@ async def run() -> bool:
     dashboard_port = get("dashboard.port", 8420)
     log.info("ANIMA is alive. Dashboard: http://%s:%d", _lip(), dashboard_port)
 
+    # ── Boot self-test + known-good anchor + post-evolution auto-revert ──
+    # Give the critical tasks a moment to crash (an evolution that breaks a core
+    # module at runtime, not import time, dies here), then judge boot health.
+    from anima.core.boot_health import (
+        boot_selftest, record_known_good, revert_to_known_good,
+    )
+    from anima.guardian.handoff import consume_restart_marker, write_restart_marker
+    await asyncio.sleep(3)
+    boot_ok, boot_detail = boot_selftest(core=core, tasks=tasks, hub=hub)
+    reloaded = bool(cog.get("reloaded_from_checkpoint"))
+    if boot_ok:
+        record_known_good()
+        # Healthy boot → consume any restart marker so it can't blind the
+        # external watchdog (CODE_REVIEW P0-4: an in-process reload never exits,
+        # so the watchdog never consumes it; we do it here instead).
+        consume_restart_marker()
+    else:
+        log.error("Boot self-test FAILED: %s (reloaded_from_checkpoint=%s)", boot_detail, reloaded)
+        if reloaded and get("evolution.auto_revert_on_bad_boot", True):
+            sha = revert_to_known_good(f"boot self-test failed: {boot_detail}")
+            if sha:
+                # Mark the exit as a requested restart so the watchdog/systemd
+                # relaunches a FRESH process that re-imports the reverted code
+                # (an in-process re-run would keep the broken modules in memory).
+                write_restart_marker(f"auto-revert to {sha[:12]}: bad evolution boot")
+                log.warning("Exiting to relaunch on reverted code.")
+                shutdown_event.set()
+
     # Wait for shutdown signal (from user Ctrl+C or evolution reload)
     # Also monitor cognitive loop's reload manager
     async def _watch_reload():
@@ -1353,7 +1382,14 @@ def main_entry() -> None:
         handle_init(sys.argv[2:])
         return
 
-    restart_count = 0
+    import time
+    # Restart brake: cap in-process graceful restarts so a bad evolution that
+    # boots-then-asks-to-restart can't spin forever (CODE_REVIEW core P2-2).
+    # Hard crashes (uncaught exceptions) propagate out to the external watchdog /
+    # systemd, which has its own budget — the two brakes are complementary.
+    _RESTART_BRAKE_WINDOW_S = 600
+    _RESTART_BRAKE_MAX = 5
+    restart_times: list[float] = []
     while True:
         try:
             restart = asyncio.run(run())
@@ -1363,8 +1399,16 @@ def main_entry() -> None:
         if not restart:
             break
 
-        # Evolution restart — brief pause then restart
-        restart_count += 1
-        import time
-        log.info("Evolution restart #%d — reloading in 2 seconds...", restart_count)
+        now = time.time()
+        restart_times = [t for t in restart_times if now - t < _RESTART_BRAKE_WINDOW_S]
+        restart_times.append(now)
+        if len(restart_times) > _RESTART_BRAKE_MAX:
+            log.error(
+                "Restart brake tripped: %d in-process restarts within %ds — stopping "
+                "to avoid a restart storm. Manual intervention required.",
+                len(restart_times), _RESTART_BRAKE_WINDOW_S,
+            )
+            break
+
+        log.info("Evolution restart #%d — reloading in 2 seconds...", len(restart_times))
         time.sleep(2)  # Brief pause for connections to close cleanly

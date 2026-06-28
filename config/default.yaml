@@ -113,6 +113,10 @@ evolution:
   # Off by default: evolution stays LOCAL (commit + hot-reload), never touches a
   # remote. Turn on only for a trusted multi-node mesh that shares one repo.
   git_remote_sync: false
+  # If a boot that FOLLOWED an evolution reload fails its self-test, hard-reset
+  # to the last known-good commit and relaunch on clean code. A failing COLD
+  # boot is never reverted (likely environment, not a bad evolution).
+  auto_revert_on_bad_boot: true
 
 # ── Emotion ──
 emotion:

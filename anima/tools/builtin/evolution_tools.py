@@ -30,7 +30,6 @@ async def _evolution_propose(
     risk: str = "low",
     priority: int = 3,
     complexity: str = "small",
-    human_confirmed: bool = False,
 ) -> dict:
     """Submit an evolution proposal to the six-layer pipeline.
 
@@ -56,7 +55,8 @@ async def _evolution_propose(
         risk=risk,
         priority=priority,
         complexity=complexity,
-        human_confirmed=human_confirmed,
+        # human_confirmed is intentionally NOT model-settable: core-module changes
+        # require an out-of-band human approval token on disk (see governance.py).
     )
 
     log.info("Eva submitted proposal: %s — %s", proposal.id, title)
@@ -141,7 +141,6 @@ def get_evolution_tools() -> list[ToolSpec]:
                     "risk": {"type": "string", "enum": ["low", "medium", "high"], "description": "Risk level"},
                     "priority": {"type": "integer", "description": "Priority 1-5 (5=urgent)", "default": 3},
                     "complexity": {"type": "string", "enum": ["trivial", "small", "medium", "large"], "description": "Complexity"},
-                    "human_confirmed": {"type": "boolean", "description": "Set true if human has explicitly confirmed this core module change", "default": False},
                 },
                 "required": ["title", "problem", "solution"],
             },

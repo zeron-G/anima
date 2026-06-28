@@ -56,8 +56,12 @@ STARTUP_GRACE_S = 30             # don't run liveness consensus during boot
 CHECK_INTERVAL_S = 10            # liveness poll cadence
 HUNG_CONSENSUS_CHECKS = 3        # consecutive hung verdicts before killing (~30s)
 SENTINEL_FREEZE_CHECKS = 6       # tick frozen this many checks while healthz up (~60s) → brain dead
-MAX_RESTARTS = 5                 # within the window, then stay down (manual intervention)
-RESTART_WINDOW_S = 600           # 10 min sliding window for the budget
+MAX_RESTARTS = 5                 # fallback budget (config guardian.restart_budget wins)
+RESTART_WINDOW_S = 600           # fallback window (config guardian.restart_budget wins)
+# A restart marker only suppresses liveness while it is FRESH. A graceful reload
+# that takes longer than this is itself a failure — and an in-process reload that
+# leaks its marker must never blind the limb forever (CODE_REVIEW P0-4).
+RESTART_MARKER_MAX_AGE_S = 120
 
 
 def _log(msg: str) -> None:
@@ -123,6 +127,15 @@ def classify_exit(ret: int, marker: dict | None) -> str:
     return "crash"
 
 
+def marker_draining(marker: dict | None, now: float) -> bool:
+    """True only while a FRESH restart marker exists. A missing marker, or one
+    older than RESTART_MARKER_MAX_AGE_S, is NOT draining — so a leaked marker
+    (in-process reload) or a hung reload can still be caught by liveness."""
+    if marker is None:
+        return False
+    return (now - marker.get("ts", 0)) < RESTART_MARKER_MAX_AGE_S
+
+
 def liveness_verdict(*, hb_age: float | None, healthz_ok: bool,
                      tick_frozen: bool, draining: bool) -> str:
     """'alive' | 'hung' | 'brain_frozen'. Consensus, never a single signal."""
@@ -155,7 +168,7 @@ def _supervise(proc: subprocess.Popen, port: int, dry_run: bool) -> str:
         if time.time() - started < STARTUP_GRACE_S:
             continue  # let it boot before judging liveness
 
-        draining = read_restart_marker() is not None
+        draining = marker_draining(read_restart_marker(), time.time())
         healthz_ok, tick = _healthz(port)
         if healthz_ok and tick is not None:
             frozen = frozen + 1 if tick == last_tick else 0
@@ -201,11 +214,24 @@ def run_watchdog(dry_run: bool = False) -> None:
     port = get("dashboard.port", 8420)
     ledger = Ledger()
 
+    # Single shared budget policy: the in-process Sentinel and this limb read the
+    # SAME max/window from config so "max N restarts" has one meaning (CODE_REVIEW
+    # guardian P1 — previously 5/600 here vs 3/3600 in the Sentinel).
+    _rb = get("guardian.restart_budget", {}) or {}
+    max_restarts = int(_rb.get("max", MAX_RESTARTS))
+    window_s = int(_rb.get("window_s", RESTART_WINDOW_S))
+
     while True:
         now = time.time()
-        if not ledger.can_restart(now, MAX_RESTARTS, RESTART_WINDOW_S):
-            _log(f"restart budget exhausted ({MAX_RESTARTS}/{RESTART_WINDOW_S}s) — "
-                 f"staying DOWN. Manual intervention required.")
+        # A persisted DEFEATED verdict (budget previously exhausted, or the
+        # Sentinel gave up on the process) means relaunching won't help → stay down.
+        if ledger.is_defeated("process"):
+            _log("process marked DEFEATED — staying DOWN. Clear the ledger to resume.")
+            return
+        if not ledger.can_restart(now, max_restarts, window_s):
+            _log(f"restart budget exhausted ({max_restarts}/{window_s}s) — "
+                 f"staying DOWN, marking DEFEATED. Manual intervention required.")
+            ledger.mark_defeated("process")
             return
 
         _log(f"Starting ANIMA... (python: {python_exe})")
@@ -217,8 +243,8 @@ def run_watchdog(dry_run: bool = False) -> None:
             _log("Clean exit — watchdog stopping.")
             return
 
-        ledger.record_restart(reason, time.time(), RESTART_WINDOW_S)
-        count = ledger.restart_count(time.time(), RESTART_WINDOW_S)
-        _log(f"Relaunching after '{reason}' ({count}/{MAX_RESTARTS} in window); "
+        ledger.record_restart(reason, time.time(), window_s)
+        count = ledger.restart_count(time.time(), window_s)
+        _log(f"Relaunching after '{reason}' ({count}/{max_restarts} in window); "
              f"cooldown {CRASH_COOLDOWN_S}s")
         time.sleep(CRASH_COOLDOWN_S)
