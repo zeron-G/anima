@@ -28,10 +28,33 @@ from anima.evolution.agent_pool import AgentPool
 from anima.utils.logging import get_logger
 
 
-def _count_pytest_failures(output: str) -> int:
-    """Extract failure count from pytest output like '5 failed, 392 passed'."""
-    m = re.search(r'(\d+) failed', output)
-    return int(m.group(1)) if m else 0
+def _pytest_failures(output: str) -> int:
+    """Failure count = failed + collection/setup errors, from pytest output like
+    '5 failed, 392 passed' or '3 errors'."""
+    total = 0
+    m = re.search(r'(\d+) failed', output or "")
+    if m:
+        total += int(m.group(1))
+    m = re.search(r'(\d+) errors?\b', output or "")
+    if m:
+        total += int(m.group(1))
+    return total
+
+
+def _pytest_trustworthy(output: str) -> bool:
+    """True only if pytest actually ran to a summary we can trust. A crash,
+    timeout, collection error, or 'no tests ran' is NOT trustworthy and must be
+    treated as a hard failure — never as '0 failures = pass' (CODE_REVIEW
+    evolution P2: previously a change that broke test collection sailed through)."""
+    o = output or ""
+    if o.strip() == "TIMEOUT":
+        return False
+    fatal = ("INTERNALERROR", "errors during collection", "ERROR collecting",
+             "no tests ran", "Traceback (most recent call last)")
+    if any(f in o for f in fatal):
+        return False
+    # A trustworthy run reports a recognizable passed/failed/skipped summary.
+    return re.search(r'\d+ (passed|failed|skipped|deselected|xfailed|xpassed)', o) is not None
 
 
 log = get_logger("evolution.engine")
@@ -40,6 +63,13 @@ log = get_logger("evolution.engine")
 MAX_EVOLUTIONS_PER_HOUR = 3
 MAX_CONSECUTIVE_FAILURES = 3
 FAILURE_COOLDOWN_S = 7200  # 2 hours
+
+
+def _git_branch() -> str:
+    """The single integration branch name, used consistently by deploy, rollback,
+    and remote sync. Previously deploy pushed `master` while rollback force-pushed
+    `private` — a remote data-loss hazard (CODE_REVIEW P0-3)."""
+    return get("evolution.git_branch", "master")
 
 
 class EvolutionEngine:
@@ -111,10 +141,14 @@ class EvolutionEngine:
         )
         if not allowed:
             log.warning("Governance rejected evolution: %s", reason)
+            self._throttle_after_rejection("governance")
             return f"governance_rejected: {reason}"
 
-        # Rate limit check
-        self._check_rate_limits()
+        # Rate limit check — ENFORCED (previously only logged, so the hourly cap
+        # was decorative; CODE_REVIEW evolution P2).
+        if not self._check_rate_limits():
+            self._throttle_after_rejection("rate_limit")
+            return "rejected: hourly evolution rate limit reached"
         # Reset failure counter after cooldown expires
         if self._cooldown_until > 0 and time.time() >= self._cooldown_until:
             log.info("Cooldown expired — resetting consecutive failures (%d → 0)", self._consecutive_failures)
@@ -135,6 +169,7 @@ class EvolutionEngine:
                 proposal.id, proposal.type.value, proposal.title,
                 "Consensus rejected", "Proposal did not pass voting",
             )
+            self._throttle_after_rejection("consensus")
             return "rejected: consensus vote failed"
 
         # For multi-node: wait for votes before proceeding
@@ -145,6 +180,7 @@ class EvolutionEngine:
                     proposal.id, proposal.type.value, proposal.title,
                     f"Consensus: {result}", f"Voting result: {result}",
                 )
+                self._throttle_after_rejection("consensus")
                 log.info("Evolution consensus: %s for '%s'", result, proposal.title)
                 return f"rejected: {result}"
 
@@ -229,12 +265,30 @@ class EvolutionEngine:
                     # Level 2: Pytest — compare against baseline
                     baseline_runner = TestRunner(str(project_root()))
                     baseline_ok, baseline_out = baseline_runner.level2_pytest()
-                    baseline_failures = _count_pytest_failures(baseline_out)
+                    baseline_failures = _pytest_failures(baseline_out)
 
                     ok, out = runner.level2_pytest()
-                    evo_failures = _count_pytest_failures(out)
 
-                    if not ok and evo_failures > baseline_failures:
+                    # A run that did not complete cleanly (crash/timeout/collection
+                    # error) is a HARD failure — we cannot read "0 failures" as pass.
+                    if not _pytest_trustworthy(out):
+                        proposal._last_error_context = (
+                            f"Level 2 pytest did not run cleanly (crash / timeout / "
+                            f"collection error). Your change likely broke an import or "
+                            f"test collection:\n{out[:500]}\nMake a simpler, self-contained change."
+                        )
+                        log.warning("Level 2 UNTRUSTWORTHY — hard failure (attempt %d/%d)",
+                                    attempt, proposal.max_retries)
+                        worktree.cleanup()
+                        continue  # ← RETRY
+                    if not _pytest_trustworthy(baseline_out):
+                        # The live tree's own suite can't establish a baseline →
+                        # only accept a clean pass to be safe.
+                        log.warning("Baseline pytest untrustworthy — requiring a clean evo run")
+                        baseline_failures = 0
+
+                    evo_failures = _pytest_failures(out)
+                    if evo_failures > baseline_failures:
                         proposal._last_error_context = (
                             f"Level 2 pytest: {evo_failures} failures (baseline has {baseline_failures}). "
                             f"Your change introduced {evo_failures - baseline_failures} new failure(s):\n{out[:500]}\n"
@@ -247,14 +301,22 @@ class EvolutionEngine:
                     elif not ok:
                         log.info("Level 2: %d failures (same as baseline %d) — PASS", evo_failures, baseline_failures)
 
-                    # Level 3: Sandbox (skip for trivial/small)
+                    # Level 3: Sandbox (skip for trivial/small). Gated OFF by
+                    # default: as implemented it spawns a full ANIMA that shares
+                    # the live Neon DB + secrets and has evolution enabled (a
+                    # second brain — CODE_REVIEW evolution P3). Enable only once an
+                    # isolated-DB sandbox profile exists.
                     if proposal.complexity not in ("trivial", "small"):
-                        ok, out = await runner.level3_sandbox()
-                        if not ok:
-                            proposal._last_error_context = f"Level 3 sandbox failed:\n{out[:500]}\nMake a simpler change."
-                            log.warning("Level 3 FAILED (attempt %d/%d)", attempt, proposal.max_retries)
-                            worktree.cleanup()
-                            continue  # ← RETRY
+                        if not get("evolution.sandbox_level3_enabled", False):
+                            log.info("Level 3 sandbox skipped (evolution.sandbox_level3_enabled=false — "
+                                     "avoids spawning a second brain on the shared DB)")
+                        else:
+                            ok, out = await runner.level3_sandbox()
+                            if not ok:
+                                proposal._last_error_context = f"Level 3 sandbox failed:\n{out[:500]}\nMake a simpler change."
+                                log.warning("Level 3 FAILED (attempt %d/%d)", attempt, proposal.max_retries)
+                                worktree.cleanup()
+                                continue  # ← RETRY
 
                     # Layer 5: Review
                     proposal.status = ProposalStatus.REVIEWING
@@ -531,7 +593,9 @@ class EvolutionEngine:
         """
         worktree_root = cwd or str(project_root())
         main_root = str(project_root())
+        target = _git_branch()
         commit_msg = f"Evolution {proposal.id}: {proposal.title}"
+        did_stash = False
 
         try:
             # Step 1: Get the commit hash from worktree
@@ -543,13 +607,20 @@ class EvolutionEngine:
             if not evo_commit:
                 return False, "No commit found in worktree"
 
-            # Step 2: Stash any dirty files in main repo (Eva writes feelings/persona at runtime)
-            _sp.run(["git", "stash", "--include-untracked", "-m", "pre-evo-autostash"],
-                    cwd=main_root, capture_output=True, timeout=15)
+            # Step 2: Stash any dirty files in main repo (Eva writes feelings/persona
+            # at runtime). Track whether a stash was actually created so we don't
+            # mis-handle a "no stash entries" pop later.
+            stash = _sp.run(["git", "stash", "--include-untracked", "-m", "pre-evo-autostash"],
+                            cwd=main_root, capture_output=True, text=True, timeout=15)
+            did_stash = "No local changes to save" not in (stash.stdout + stash.stderr)
 
-            # Step 3: Cherry-pick the evolution commit into local master
-            _sp.run(["git", "checkout", "master"],
-                    cwd=main_root, capture_output=True, timeout=15)
+            # Step 3: Cherry-pick the evolution commit into the integration branch
+            co = _sp.run(["git", "checkout", target],
+                         cwd=main_root, capture_output=True, text=True, timeout=15)
+            if co.returncode != 0:
+                if did_stash:
+                    _sp.run(["git", "stash", "pop"], cwd=main_root, capture_output=True, timeout=10)
+                return False, f"Could not checkout {target}: {(co.stderr or '').strip()[:200]}"
             pick = _sp.run(
                 ["git", "cherry-pick", evo_commit, "--no-edit"],
                 cwd=main_root, capture_output=True, text=True, timeout=30,
@@ -566,29 +637,39 @@ class EvolutionEngine:
                 if merge.returncode != 0:
                     _sp.run(["git", "merge", "--abort"],
                             cwd=main_root, capture_output=True, timeout=10)
-                    _sp.run(["git", "stash", "pop"],
-                            cwd=main_root, capture_output=True, timeout=10)
+                    if did_stash:
+                        _sp.run(["git", "stash", "pop"],
+                                cwd=main_root, capture_output=True, timeout=10)
                     return False, f"Cherry-pick and merge both failed: {pick.stderr} / {merge.stderr}"
 
-            log.info("Evolution committed to local master: %s", commit_msg)
+            log.info("Evolution committed to local %s: %s", target, commit_msg)
 
-            # Step 4: Push local master to remote (opt-in; local is authoritative)
+            # Step 4: Push to remote (opt-in; local is authoritative). Never force.
             pushed = False
             if get("evolution.git_remote_sync", False):
                 push = _sp.run(
-                    ["git", "push", "origin", "master"],
+                    ["git", "push", "origin", target],
                     cwd=main_root, capture_output=True, text=True, timeout=30,
                 )
                 if push.returncode != 0:
                     log.warning("Push to remote failed (will retry later): %s", push.stderr)
-                    # Local is still updated — push failure is non-fatal
                 pushed = push.returncode == 0
             else:
-                log.info("Evolution remote sync off — committed to local master only")
+                log.info("Evolution remote sync off — committed to local %s only", target)
 
-            # Step 5: Restore stashed files
-            _sp.run(["git", "stash", "pop"],
-                    cwd=main_root, capture_output=True, timeout=10)
+            # Step 5: Restore stashed runtime files — with a defined conflict path
+            # (no more silent half-merged tree, CODE_REVIEW P1).
+            stash_note = ""
+            if did_stash:
+                pop = _sp.run(["git", "stash", "pop"],
+                              cwd=main_root, capture_output=True, text=True, timeout=10)
+                if pop.returncode != 0:
+                    log.critical("Stash pop conflicted after deploy — taking deployed "
+                                 "code and dropping the stash. Review: %s",
+                                 (pop.stderr or "").strip()[:300])
+                    _sp.run(["git", "checkout", "--", "."], cwd=main_root, capture_output=True, timeout=10)
+                    _sp.run(["git", "stash", "drop"], cwd=main_root, capture_output=True, timeout=10)
+                    stash_note = " (WARNING: runtime-file stash conflicted and was dropped)"
 
             # Step 6: Clean up branches (remote delete only when sync enabled)
             if get("evolution.git_remote_sync", False):
@@ -598,25 +679,30 @@ class EvolutionEngine:
                     cwd=main_root, capture_output=True, timeout=15)
 
             push_status = "pushed" if pushed else "local only"
-            log.info("Deploy complete (%s): %s", push_status, commit_msg)
-            return True, f"Deployed to local master ({push_status})"
+            log.info("Deploy complete (%s): %s%s", push_status, commit_msg, stash_note)
+            return True, f"Deployed to local {target} ({push_status}){stash_note}"
 
         except Exception as e:
             # Restore on any failure
-            _sp.run(["git", "checkout", "master"],
+            _sp.run(["git", "checkout", target],
                     cwd=main_root, capture_output=True, timeout=15)
-            _sp.run(["git", "stash", "pop"],
-                    cwd=main_root, capture_output=True, timeout=10)
+            if did_stash:
+                _sp.run(["git", "stash", "pop"],
+                        cwd=main_root, capture_output=True, timeout=10)
             _sp.run(["git", "branch", "-D", branch],
                     cwd=main_root, capture_output=True, timeout=15)
             return False, str(e)
 
     def _create_safety_tag(self, proposal) -> str:
+        # Tag the CURRENT integration-branch tip — the exact pre-deploy state to
+        # roll back to. (Was HEAD~1, which is one commit too early — rolling back
+        # would have restored the wrong state. CODE_REVIEW P0-3.) This runs before
+        # the cherry-pick lands, so HEAD here == pre-deploy tip.
         tag_name = f"pre-evo-{proposal.id}"
         try:
-            _sp.run(["git", "tag", tag_name, "HEAD~1"],
+            _sp.run(["git", "tag", tag_name, "HEAD"],
                     cwd=str(project_root()), capture_output=True, timeout=10)
-            log.info("Created safety tag: %s", tag_name)
+            log.info("Created safety tag: %s → HEAD", tag_name)
         except Exception as e:
             log.warning("Failed to create safety tag: %s", e)
         return tag_name
@@ -625,10 +711,11 @@ class EvolutionEngine:
         try:
             _sp.run(["git", "reset", "--hard", tag_name],
                     cwd=str(project_root()), capture_output=True, timeout=15)
-            if get("evolution.git_remote_sync", False):
-                _sp.run(["git", "push", "origin", "private", "--force"],
-                        cwd=str(project_root()), capture_output=True, timeout=30)
-            log.warning("Auto-rolled back to tag %s: %s", tag_name, reason)
+            # Local is authoritative. We deliberately do NOT push the rollback:
+            # force-pushing a shared branch from an autonomous process is a
+            # remote data-loss hazard (CODE_REVIEW P0-3). A human / the normal
+            # sync reconciles the remote.
+            log.warning("Auto-rolled back to tag %s (local only): %s", tag_name, reason)
             self.memory.record_failure(
                 proposal.id, proposal.type.value if hasattr(proposal.type, 'value') else str(proposal.type),
                 proposal.title, f"Auto-rollback: {reason}", reason,
@@ -663,14 +750,29 @@ class EvolutionEngine:
             log.warning("Too many failures (%d) — cooling down for %ds",
                         self._consecutive_failures, FAILURE_COOLDOWN_S)
 
-    def _check_rate_limits(self) -> None:
+    def _check_rate_limits(self) -> bool:
+        """True if another evolution is allowed this hour. Enforced by the caller."""
         now = time.time()
         if now - self._last_hour_reset > 3600:
             self._evolution_count_this_hour = 0
             self._last_hour_reset = now
 
         if self._evolution_count_this_hour >= MAX_EVOLUTIONS_PER_HOUR:
-            log.warning("Rate limit: %d evolutions this hour", self._evolution_count_this_hour)
+            log.warning("Rate limit reached: %d evolutions this hour", self._evolution_count_this_hour)
+            return False
+        return True
+
+    def _throttle_after_rejection(self, reason: str) -> None:
+        """Count a rejection toward the consecutive-failure throttle so a tight
+        loop of rejected proposals eventually trips the cooldown (CODE_REVIEW
+        evolution P2: previously only pipeline failures counted, so rejected
+        proposals could loop with no backoff)."""
+        self._consecutive_failures += 1
+        if (self._consecutive_failures >= MAX_CONSECUTIVE_FAILURES
+                and self._cooldown_until <= time.time()):
+            self._cooldown_until = time.time() + FAILURE_COOLDOWN_S
+            log.warning("Throttle: %d consecutive rejections/failures (%s) — cooldown %ds",
+                        self._consecutive_failures, reason, FAILURE_COOLDOWN_S)
 
     # ── Status ──
 

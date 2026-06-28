@@ -90,9 +90,14 @@ baseline pytest 崩溃/超时（失败计数 0）被当通过。目标：
 
 ## 5. 实施顺序（每步真启动验证）
 
-- **本期（地基）**：① 实现 agent 去 Bash + 擦密钥 ② 冻结核注册表 + governance 硬拒绝 + 真核心审批
-  ③ 看门狗去致盲（marker 老化 + 启动消费）④ known-good 锚 + 启动自检 + 进化后自动回退 ⑤ 重启刹车 + 看门狗查 DEFEATED。
-- **第二期**：真沙盒（隔离）+ 真测试门 + 部署/回滚修复（标签/分支/stash）。
+- **第一期（地基）✅ 已完成**（commit 1582469）：① 实现 agent 去 Bash + 擦密钥 ② 冻结核注册表 +
+  governance 硬拒绝 + 真核心审批 ③ 看门狗去致盲（marker 老化 + 启动消费）④ known-good 锚 +
+  启动自检 + 进化后自动回退 ⑤ 重启刹车 + 看门狗查 DEFEATED。
+- **第二期 ✅ 已完成**：真测试门（区分"0 失败"与"没跑起来"——崩溃/超时/collection 错误按硬失败）；
+  部署/回滚修复（安全标签用真实 HEAD、分支名统一 `evolution.git_branch`、stash pop 冲突有 abort 路径、
+  回滚不再 `--force` 推共享分支）；限流真拦截 + 拒绝计入冷却；worktree add 前 prune；
+  **level-3 沙盒默认关闭**（`evolution.sandbox_level3_enabled: false`——现实现会起共享 DB/密钥且可自进化的第二个脑，
+  待隔离 DB profile 后再开）。
 - **第三期**：L0 能力 manifest + 权限模型（加性成长安全化）。
-- **第四期**：L2 硬进化收窄（模块白名单）。
+- **第四期**：L2 硬进化收窄（模块白名单）+ 真隔离 level-3 沙盒（独立进程/DB/不可推送 .git）。
 - **第五期**：自修复 Fixer（最后，约束最重，复用沙盒+测试门，回滚兜底，DEFEATED 终态）。

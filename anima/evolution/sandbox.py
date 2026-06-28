@@ -40,6 +40,16 @@ class Worktree:
         worktree_dir = Path(tempfile.gettempdir()) / f"anima-evo-{self.proposal_id}"
 
         try:
+            # Clean up any residue from a crashed prior run, else `worktree add`
+            # fails on the existing dir/branch and aborts the attempt.
+            subprocess.run(["git", "worktree", "prune"],
+                           cwd=str(root), capture_output=True, check=False, timeout=15)
+            if worktree_dir.exists():
+                subprocess.run(["git", "worktree", "remove", str(worktree_dir), "--force"],
+                               cwd=str(root), capture_output=True, check=False, timeout=15)
+            subprocess.run(["git", "branch", "-D", self.branch],
+                           cwd=str(root), capture_output=True, check=False, timeout=15)
+
             # Create branch from current HEAD
             subprocess.run(
                 ["git", "branch", self.branch],

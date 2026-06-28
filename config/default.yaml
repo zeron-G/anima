@@ -117,6 +117,12 @@ evolution:
   # to the last known-good commit and relaunch on clean code. A failing COLD
   # boot is never reverted (likely environment, not a bad evolution).
   auto_revert_on_bad_boot: true
+  # The single integration branch used consistently by deploy / rollback / sync.
+  git_branch: master
+  # Level-3 sandbox spawns a FULL ANIMA to smoke-test a change. Off by default:
+  # as implemented it shares the live DB + secrets and can self-evolve (a second
+  # brain). Enable only with an isolated-DB sandbox profile.
+  sandbox_level3_enabled: false
 
 # ── Emotion ──
 emotion:

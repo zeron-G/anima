@@ -130,3 +130,28 @@ def test_revert_noop_when_already_known_good(tmp_path, monkeypatch):
     monkeypatch.setattr(bh, "current_commit", lambda: "samesha")
     # Already at known-good → not a regression → no reset attempted.
     assert bh.revert_to_known_good("test") is None
+
+
+# ── Evolution test gate: "0 failures" vs "never ran" ──
+@pytest.mark.parametrize("output,trustworthy,failures", [
+    ("5 failed, 392 passed in 12.3s", True, 5),
+    ("392 passed in 10s", True, 0),
+    ("1 failed, 3 errors, 100 passed in 4s", True, 4),
+    ("10 passed, 2 skipped in 1s", True, 0),
+    ("TIMEOUT", False, 0),
+    ("INTERNALERROR> Traceback ...", False, 0),
+    ("!!! errors during collection !!!", False, 0),
+    ("ERROR collecting tests/test_x.py", False, 0),
+    ("no tests ran in 0.10s", False, 0),
+    ("", False, 0),
+    ("Traceback (most recent call last):\n  File ...", False, 0),
+])
+def test_pytest_gate(output, trustworthy, failures):
+    from anima.evolution.engine import _pytest_trustworthy, _pytest_failures
+    assert _pytest_trustworthy(output) is trustworthy
+    assert _pytest_failures(output) == failures
+
+
+def test_git_branch_default():
+    from anima.evolution.engine import _git_branch
+    assert _git_branch() == "master"
