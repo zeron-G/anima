@@ -19,6 +19,18 @@ dashboard:
     allow_origins: []
     allow_all: false
 
+# LLM routing for the cloud node. The machine-specific routing normally lives in
+# local/env.yaml (not deployed), so replicate the working cascade here:
+#   codex/gpt-5.5 -> codex/gpt-5.4-mini -> claude(skipped, no key) -> deepseek -> local
+# Codex (ChatGPT OAuth, ~/.codex/auth.json) is primary for parity; DeepSeek
+# (DEEPSEEK_API_KEY, OpenAI-compatible, datacenter-reliable) is the safety net if
+# Codex is unreachable from the VM.
+llm:
+  tier1: { model: "codex/gpt-5.5", max_tokens: 4096, max_context: 200000 }
+  tier2: { model: "codex/gpt-5.4-mini", max_tokens: 4096, max_context: 200000 }
+  codex_fallback: { model: "codex/gpt-5.4-mini", max_tokens: 4096 }
+  deepseek_fallback: { model: "deepseek/deepseek-v4-flash", max_tokens: 4096 }
+
 # Single-node during migration: no gossip mesh, so there is exactly ONE brain
 # writing the shared Neon memory. Flip to true + set ANIMA_NETWORK_SECRET when
 # (re)introducing a cloud<->local mesh as peers (v2).
