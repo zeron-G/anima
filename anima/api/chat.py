@@ -72,7 +72,9 @@ async def stream(request: web.Request) -> web.StreamResponse:
     correlation_id = gen_id("msg")
     stream_id = gen_id("stream")
     q: asyncio.Queue = asyncio.Queue()
-    hub.register_stream(stream_id, q)
+    # Bind the stream to this turn's correlation so it only receives this
+    # message's activity/tokens/reply — not the concurrent autonomous loop's.
+    hub.register_stream(stream_id, q, correlation_id)
 
     hub.add_chat_message("user", message)
     await hub.event_queue.put(Event(

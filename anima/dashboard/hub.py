@@ -10,6 +10,7 @@ import time
 from typing import Any
 
 from anima.llm.providers import _get_token, _is_oauth_token, CLAUDE_CODE_VERSION
+from anima.utils.log_context import get_correlation_id
 from anima.utils.logging import get_logger
 
 log = get_logger("dashboard.hub")
@@ -47,6 +48,7 @@ class DashboardHub:
         self._chat_history: list[dict] = []
         self._activity_log: list[dict] = []
         self._streams: dict[str, asyncio.Queue] = {}
+        self._stream_corr: dict[str, str] = {}   # stream_id -> correlation_id it's bound to
         self._node_conversations: dict[str, list[dict]] = {}
         self._git_cache: dict = {"branch": "?", "recent_commits": []}
         self._git_cache_ts: float = 0
@@ -63,8 +65,8 @@ class DashboardHub:
         if len(self._activity_log) > self._MAX_ACTIVITY:
             self._activity_log = self._activity_log[-self._MAX_ACTIVITY:]
 
-        # Push to active SSE streams
-        for sid, q in list(self._streams.items()):
+        # Forward only to the stream(s) for the turn currently being processed.
+        for sid, q in self._stream_targets():
             try:
                 if stage in ("thinking", "executing", "tool_done", "responding", "self_thought", "error"):
                     q.put_nowait({"type": "activity", "data": {"stage": stage, "detail": detail, **kwargs}})
@@ -73,13 +75,29 @@ class DashboardHub:
             except Exception:
                 pass
 
-    def register_stream(self, stream_id: str, queue: asyncio.Queue) -> None:
-        """Register an SSE stream queue for real-time event forwarding."""
+    def _stream_targets(self):
+        """Yield (stream_id, queue) for streams that should receive the current
+        event's output. A stream bound to a correlation_id only receives that
+        turn's events (so a chat SSE isn't flooded or prematurely closed by the
+        autonomous loop); an unbound stream receives everything. When no
+        correlation is active we forward to all, so a reply is never dropped."""
+        cur = get_correlation_id()
+        for sid, q in list(self._streams.items()):
+            scid = self._stream_corr.get(sid, "")
+            if scid and cur and scid != cur:
+                continue
+            yield sid, q
+
+    def register_stream(self, stream_id: str, queue: asyncio.Queue, correlation_id: str = "") -> None:
+        """Register an SSE stream queue, optionally bound to a turn's correlation_id."""
         self._streams[stream_id] = queue
+        if correlation_id:
+            self._stream_corr[stream_id] = correlation_id
 
     def unregister_stream(self, stream_id: str) -> None:
         """Remove a finished SSE stream."""
         self._streams.pop(stream_id, None)
+        self._stream_corr.pop(stream_id, None)
 
     def push_stream_event(self, stream_id: str, event_type: str, data: dict) -> None:
         """Push an event to a specific stream. Called by cognitive loop."""
@@ -204,8 +222,10 @@ class DashboardHub:
         """
         if not chunk:
             return
-        msg = {"type": "stream_chunk", "chunk": chunk, "event_type": event_type}
-        for queue in list(self._streams.values()):
+        # Nest under "data" so the SSE writer (which serialises event["data"])
+        # actually forwards the token text to /v1/chat/stream clients.
+        msg = {"type": "stream_chunk", "data": {"chunk": chunk, "event_type": event_type}}
+        for _sid, queue in self._stream_targets():
             try:
                 queue.put_nowait(msg)
             except Exception:
@@ -230,9 +250,9 @@ class DashboardHub:
         }
         self._chat_history.append(entry)
 
-        # Push agent messages to active SSE streams
+        # Push agent messages to the active turn's stream(s)
         if role == "agent":
-            for sid, q in list(self._streams.items()):
+            for sid, q in self._stream_targets():
                 try:
                     q.put_nowait({"type": "message", "data": {"role": role, "content": content}})
                 except Exception:

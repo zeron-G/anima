@@ -66,6 +66,8 @@ data/evolution.db
 data/evolution_memory.yaml
 data/evolution_state.json
 data/todo_reminder_state.json
+data/conversation_summary.json
+data/.guardian/
 
 # IDE
 .vscode/

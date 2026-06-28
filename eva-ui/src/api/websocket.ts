@@ -17,6 +17,7 @@ class EvaWebSocket {
   public connected = ref(false)
   private _lastChatHistory: any[] = []
   private _lastActivityTs: number = 0
+  private _lastEmotionSig: string = ''
   /** Track correlation IDs already seen via typed protocol to avoid legacy duplication */
   private _seenCorrelationIds: Set<string> = new Set()
 
@@ -65,6 +66,16 @@ class EvaWebSocket {
               }
             }
             this._lastChatHistory = raw.chat_history
+          }
+
+          // Surface emotion as a delta event when it actually shifts
+          if (raw.emotion) {
+            const e = raw.emotion
+            const sig = `${e.mood_label}|${e.engagement}|${e.valence}`
+            if (sig !== this._lastEmotionSig) {
+              this._lastEmotionSig = sig
+              this.dispatch({ type: 'emotion_shift', data: e })
+            }
           }
 
           // Extract activity events
