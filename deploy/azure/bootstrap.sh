@@ -28,10 +28,12 @@ if [ -d "$APP_DIR/.git" ]; then git -C "$APP_DIR" pull --ff-only || true
 else git clone "$REPO" "$APP_DIR"; fi
 cd "$APP_DIR"
 
-echo "== [3/7] python venv + install (slim core) =="
+echo "== [3/7] python venv + install (core + network) =="
 [ -d .venv ] || $PY -m venv .venv
 ./.venv/bin/pip install -U pip wheel
-./.venv/bin/pip install -e .          # slim: LLM + cognitive + memory + API/WS
+# [network] pulls pyzmq/paramiko/zeroconf — required because builtin tools
+# (remote/spawn) import the gossip stack at registration even with mesh disabled.
+./.venv/bin/pip install -e ".[network]"
 
 echo "== [4/7] optional local Postgres failover (LOCAL_PG=$LOCAL_PG) =="
 if [ "$LOCAL_PG" = "1" ]; then

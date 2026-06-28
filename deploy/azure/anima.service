@@ -8,6 +8,9 @@ Type=simple
 User=__USER__
 WorkingDirectory=__ANIMA_DIR__
 Environment=ANIMA_PROFILE=cloud
+# systemd does not reliably export $HOME for User= services; set it so
+# Path.home()-based credential lookups (Codex ~/.codex, Claude ~/.claude) work.
+Environment=HOME=/home/__USER__
 ExecStart=__ANIMA_DIR__/.venv/bin/python -m anima --headless
 # In-process Sentinel repairs components; systemd owns process restarts.
 # Evolution hot-reload and Sentinel restart-markers exit cleanly (code 0) and
