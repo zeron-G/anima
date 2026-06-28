@@ -72,8 +72,9 @@ def _check_llm_credentials(issues: list, config: dict | None = None) -> None:
     # valid credential even though it is neither a real API key nor an OAuth token.
     has_auth_token = bool(get_secret("ANTHROPIC_AUTH_TOKEN"))
     has_creds = _has_claude_code_credentials()
+    has_codex = _has_codex_credentials()
 
-    if has_key or has_oauth or has_auth_token or has_creds or has_openai_route:
+    if has_key or has_oauth or has_auth_token or has_creds or has_codex or has_openai_route:
         return
 
     if require_llm:
@@ -89,6 +90,15 @@ def _check_llm_credentials(issues: list, config: dict | None = None) -> None:
         "No LLM credentials found. Continuing in degraded runtime mode; "
         "LLM-backed conversation and planning will stay unavailable until credentials are configured."
     ))
+
+
+def _has_codex_credentials() -> bool:
+    """Whether Codex (ChatGPT) OAuth is available — the router's OAuth primary."""
+    try:
+        from anima.llm.providers.codex import _load_codex_tokens
+        return bool(_load_codex_tokens())
+    except Exception:
+        return False
 
 
 def _has_claude_code_credentials() -> bool:
