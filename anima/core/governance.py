@@ -140,6 +140,15 @@ class GovernanceEngine:
         """Determine current activity level based on config."""
         return get("governance.default_mode", "active")
 
+    def get_status(self) -> dict:
+        """Return a compact governance snapshot for API/UI consumers."""
+        return {
+            "activity_level": self.get_activity_level(),
+            "recent_self_thinking": self._recent_self_thinking_actions[-5:],
+            "quiet_ratio": round(self.recent_quiet_ratio(), 3),
+            "drift_scores": self._drift_scores[-10:],
+        }
+
 
 # Module-level singleton
 _governance: GovernanceEngine | None = None

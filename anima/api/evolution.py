@@ -35,11 +35,7 @@ async def governance(request: web.Request) -> web.Response:
     """GET /v1/evolution/governance — governance status."""
     from anima.core.governance import get_governance
     gov = get_governance()
-    return web.json_response({
-        "activity_level": gov.get_activity_level(),
-        "drift_scores": gov._drift_scores[-10:],
-        "recent_self_thinking": gov._recent_self_thinking_actions[-5:],
-    })
+    return web.json_response(gov.get_status())
 
 
 async def update_governance_mode(request: web.Request) -> web.Response:
