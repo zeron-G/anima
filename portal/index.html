@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>private · rongzegao</title>
+<meta name="description" content="A private services portal." />
+<style>
+  :root{
+    --abyss:#0A0E14; --mist:#9FB0BF; --filament:#E8F0EE; --phosphor:#5BE0B8;
+    --phosphor-rgb:91,224,184; --tidemark:#2A3340; --tide-2:#1A2029;
+    --grotesk:system-ui,"Segoe UI Variable","Segoe UI",Roboto,-apple-system,sans-serif;
+    --mono:ui-monospace,"Cascadia Code","JetBrains Mono","SF Mono",Consolas,monospace;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%}
+  body{background:var(--abyss);color:var(--mist);font-family:var(--grotesk);
+    -webkit-font-smoothing:antialiased;overflow-x:hidden;min-height:100%;
+    display:flex;flex-direction:column}
+  ::selection{background:rgba(var(--phosphor-rgb),.18);color:#fff}
+  a{color:inherit;text-decoration:none}
+  .wrap{flex:1;width:100%;max-width:760px;margin:0 auto;padding:clamp(40px,9vh,110px) 28px 60px;
+    display:flex;flex-direction:column}
+  .eyebrow{font-family:var(--mono);font-size:11px;letter-spacing:.2em;text-transform:uppercase;
+    color:var(--tidemark);display:flex;gap:14px;align-items:center}
+  .eyebrow b{color:var(--mist);font-weight:500}
+  .dot{width:6px;height:6px;border-radius:50%;background:var(--phosphor);
+    box-shadow:0 0 7px var(--phosphor);animation:pulse 3.4s ease-in-out infinite}
+  @keyframes pulse{50%{opacity:.35}}
+  h1{font-family:var(--grotesk);font-weight:420;color:var(--filament);
+    font-size:clamp(42px,9vw,76px);letter-spacing:-.01em;line-height:1.02;
+    margin:30px 0 12px;animation:breathe 11s ease-in-out infinite}
+  @keyframes breathe{0%,100%{font-weight:380;opacity:.92}50%{font-weight:560;opacity:1}}
+  .sub{font-family:var(--grotesk);font-weight:340;color:var(--mist);font-size:clamp(16px,2.3vw,20px);
+    max-width:46ch;line-height:1.55;text-wrap:pretty}
+  .grid{margin-top:clamp(36px,7vh,64px);display:grid;gap:14px;
+    grid-template-columns:repeat(auto-fill,minmax(260px,1fr))}
+  .card{display:block;border:1px solid var(--tide-2);border-radius:10px;padding:22px 22px 20px;
+    background:linear-gradient(180deg,rgba(255,255,255,.012),transparent);
+    transition:border-color .25s,transform .25s;position:relative;overflow:hidden}
+  .card .k{font-family:var(--mono);font-size:10.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--tidemark)}
+  .card .t{font-family:var(--grotesk);font-size:21px;font-weight:520;color:var(--filament);margin:9px 0 5px}
+  .card .d{font-size:13.5px;color:var(--mist);font-weight:340;line-height:1.5}
+  .card .go{font-family:var(--mono);font-size:12px;color:var(--tidemark);margin-top:16px;display:flex;
+    align-items:center;gap:7px;letter-spacing:.04em}
+  .card.live:hover{border-color:rgba(var(--phosphor-rgb),.55);transform:translateY(-2px)}
+  .card.live:hover .go{color:var(--phosphor)}
+  .card.live .go .arrow{transition:transform .25s} .card.live:hover .go .arrow{transform:translateX(4px)}
+  .card.soon{opacity:.5;cursor:default} .card.soon .go{color:var(--tide-2)}
+  footer{font-family:var(--mono);font-size:11px;color:var(--tidemark);letter-spacing:.08em;
+    padding:20px 28px;border-top:1px solid var(--tide-2);text-align:center}
+  footer .e{color:var(--phosphor)}
+  @media (prefers-reduced-motion:reduce){h1,.dot{animation:none}}
+</style>
+</head>
+<body>
+  <main class="wrap">
+    <div class="eyebrow"><span class="dot"></span><b>rongzegao</b><span>· private</span><span style="margin-left:auto">email-gated</span></div>
+    <h1 id="title">私域</h1>
+    <p class="sub">一处只对你开放的空间 —— 你的私人服务都收在这里。已通过邮箱验证进入。</p>
+
+    <section class="grid">
+      <a class="card live" href="https://eva.rongzegao.com">
+        <div class="k">living system</div>
+        <div class="t">Eva</div>
+        <div class="d">心跳驱动的自进化 AI 生命体。对话、记忆、自主活动,全部可见。</div>
+        <div class="go"><span class="arrow">↘</span> 进入 Eva</div>
+      </a>
+      <div class="card soon">
+        <div class="k">reserved</div>
+        <div class="t">— —</div>
+        <div class="d">下一个私人服务的位置。</div>
+        <div class="go">待接入</div>
+      </div>
+      <div class="card soon">
+        <div class="k">reserved</div>
+        <div class="t">— —</div>
+        <div class="d">下一个私人服务的位置。</div>
+        <div class="go">待接入</div>
+      </div>
+    </section>
+  </main>
+  <footer>private.rongzegao.com · 由 <span class="e">Cloudflare Access</span> 守门</footer>
+
+  <script>
+    // gentle decode reveal of the title (LEXICON: language condensing into place)
+    (function(){
+      var el=document.getElementById('title'), final=el.textContent;
+      if(matchMedia('(prefers-reduced-motion:reduce)').matches) return;
+      var pool='私域空间言心�───/<>{}01', start=performance.now(), dur=620;
+      function tick(now){
+        var p=Math.min(1,(now-start)/dur), reveal=Math.floor(p*final.length), out='';
+        for(var i=0;i<final.length;i++) out+= i<reveal? final[i] : pool[(Math.random()*pool.length)|0];
+        el.textContent=out;
+        if(p<1) requestAnimationFrame(tick); else el.textContent=final;
+      }
+      requestAnimationFrame(tick);
+    })();
+  </script>
+</body>
+</html>
