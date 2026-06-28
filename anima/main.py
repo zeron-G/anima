@@ -901,8 +901,9 @@ async def _init_cognitive(config: dict, core: dict, llm: dict, heartbeat_deps: d
         event_queue=core["event_queue"],
     )
 
-    # Allow network callbacks to reference cognitive (for evolution_deployed handler)
-    if "_cognitive_ref" in network:
+    # Allow network callbacks to reference cognitive (for evolution_deployed handler).
+    # When the mesh is disabled, _cognitive_ref is None (not a dict) — skip cleanly.
+    if network.get("_cognitive_ref") is not None:
         _cog_lock = network.get("_cognitive_lock")
         if _cog_lock:
             with _cog_lock:
