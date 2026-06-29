@@ -42,9 +42,17 @@ def ensure_test_db() -> bool:
 
 async def make_test_store(*, truncate: bool = True):
     """A PgMemoryStore on the local test DB. truncate=False to keep prior data
-    (e.g. simulating a restart against the same database)."""
-    from anima.memory.pg_store import PgMemoryStore
+    (e.g. simulating a restart against the same database).
+
+    Skips the calling test when no local Postgres is configured/reachable —
+    same guard as the conftest ``pg_store`` fixture, so direct callers (e.g.
+    test_s1) degrade to "skipped" in CI instead of erroring on connect."""
+    import pytest
+
     dsn = test_dsn()
+    if not dsn or not ensure_test_db():
+        pytest.skip("local Postgres (LOCAL_DATABASE_URL) unavailable")
+    from anima.memory.pg_store import PgMemoryStore
     store = await PgMemoryStore.create(dsn=dsn)
     if truncate:
         store._db.write_sync(f"TRUNCATE {_PG_TABLES}")

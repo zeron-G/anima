@@ -117,13 +117,26 @@ class TestStartupChecks:
         # Should not be critical (semantic search is optional)
         assert not any(s == "critical" for s, _ in issues)
 
-    def test_required_files_check(self):
+    def test_required_files_check(self, tmp_path):
+        # A fresh checkout has only the persona *seed* (agents/_seed); the live
+        # instance (agents/<name>) is created by `anima init` and is gitignored,
+        # so it's absent in CI. Bootstrap a temp home from the seed, then assert
+        # the check is clean against a valid instance.
+        import anima.config as cfg
+        from anima.bootstrap import init_home
         from anima.startup_check import _check_required_files
-        issues = []
-        _check_required_files(issues)
-        # identity/core.md and config/default.yaml should exist in this project
-        critical_issues = [m for s, m in issues if s == "critical"]
-        assert len(critical_issues) == 0, f"Missing files: {critical_issues}"
+
+        name = cfg.agent_name()
+        init_home(tmp_path, name=name)
+        cfg.set_home(tmp_path)
+        try:
+            issues = []
+            _check_required_files(issues)
+            # identity/core.md and config/default.yaml should now resolve
+            critical_issues = [m for s, m in issues if s == "critical"]
+            assert len(critical_issues) == 0, f"Missing files: {critical_issues}"
+        finally:
+            cfg.set_home(None)
 
     def test_run_and_report(self):
         from anima.startup_check import run_and_report

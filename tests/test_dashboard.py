@@ -53,8 +53,8 @@ async def test_dashboard_serves_html(dashboard):
         async with session.get("http://localhost:18420/") as resp:
             assert resp.status == 200
             text = await resp.text()
-            # Vue SPA dist or fallback message
-            assert "Eva UI not built" in text or "<div id=\"app\">" in text
+            # Vue SPA dist (built) or the API-only fallback message (not built)
+            assert "Eva UI not present" in text or "<div id=\"app\">" in text
 
 
 @pytest.mark.asyncio

@@ -34,8 +34,10 @@ def test_edge_profile_allows_degraded_start_without_llm(monkeypatch):
 
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     monkeypatch.delenv("ANTHROPIC_OAUTH_TOKEN", raising=False)
+    monkeypatch.delenv("ANTHROPIC_AUTH_TOKEN", raising=False)
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     monkeypatch.setattr("anima.startup_check._has_claude_code_credentials", lambda: False)
+    monkeypatch.setattr("anima.startup_check._has_codex_credentials", lambda: False)
 
     issues = verify_dependencies(cfg)
 
@@ -53,8 +55,10 @@ def test_default_runtime_still_requires_llm_credentials(monkeypatch):
     monkeypatch.delenv("ANIMA_PROFILE", raising=False)
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     monkeypatch.delenv("ANTHROPIC_OAUTH_TOKEN", raising=False)
+    monkeypatch.delenv("ANTHROPIC_AUTH_TOKEN", raising=False)
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     monkeypatch.setattr("anima.startup_check._has_claude_code_credentials", lambda: False)
+    monkeypatch.setattr("anima.startup_check._has_codex_credentials", lambda: False)
 
     cfg = load_config(include_local=False)
     issues = verify_dependencies(cfg)
