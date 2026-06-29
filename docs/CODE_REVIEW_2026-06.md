@@ -1,5 +1,10 @@
 # ANIMA 深度代码审查（2026-06）
 
+> **状态（2026-06-29）：9 个 P0 全部已处置。** P0-1/2/3/4 经进化安全 phase 1–2
+> （`1582469`、`0c2d1f4`、`2aaaca0`），P0-5/6/7/8/9 经 `8fafaf5`。后续加固（L0 技能权限、
+> L2 模块白名单、diff-scope 门、自修复 Fixer）见 `EVOLUTION_SAFETY_DESIGN.md`。
+> 本文保留为原始审查记录（findings 快照），不再更新。
+
 并行审查 6 个最高风险子系统：core / memory / guardian+watchdog / llm / evolution / api。
 全部只读、未改动任何文件。下面按严重度分层，含 `file:line`、根因、修复建议。
 

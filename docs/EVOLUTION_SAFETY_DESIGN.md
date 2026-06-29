@@ -2,6 +2,9 @@
 
 > 目标：让 Eva 能成长（学技能、装插件，必要时改自己的核心），但**任何一次进化或自修复都不能把自己改死**。
 > 本文是蓝图；实现分阶段，每阶段真启动验证。基于 2026-06 深度审查（见 `CODE_REVIEW_2026-06.md`）。
+>
+> **阅读指引**：§0–§4、§7 是**设计依据**（含原始"本期修/后续"措辞，仅作背景）；**当前实现状态以 §5 为准，
+> 待办以 §6 为准**。
 
 ## 0. 三条不可违背的原则
 
@@ -78,10 +81,10 @@ anima/__main__.py
   从 LLM 可见的工具 schema 中删除 `human_confirmed`，服务端默认 False。
 - 普通模块：正常走沙盒+测试门。
 
-## 4. 真沙盒 + 真测试门（后续阶段，L2/自修复前置）
+## 4. 真沙盒 + 真测试门 + 部署/回滚（测试门/部署/Bash 已完成；硬隔离待 §6）
 
-当前是假的（审查）：沙盒只是共享 `.git` 的同机 worktree；level-3 起的第二个 ANIMA 共享 Neon DB + 密钥；
-baseline pytest 崩溃/超时（失败计数 0）被当通过。目标：
+审查时是假的：沙盒只是共享 `.git` 的同机 worktree；level-3 起的第二个 ANIMA 共享 Neon DB + 密钥；
+baseline pytest 崩溃/超时（失败计数 0）被当通过。处置：
 - **Bash 保留（设计决定）**：ANIMA 本就要做系统级操作，Eva 的通用 `shell` 工具（`tools/builtin/shell.py`，
   带 `safe_subprocess` 风险分级）和进化实现 agent 都**保留 Bash**。对**自改代码**的约束不放在"砍工具"，
   而放在**审查层**——diff 必须过 governance（冻结核硬拒绝 + 核心模块人工审批）+ 测试门 + review + 部署/自动回退门
@@ -91,31 +94,38 @@ baseline pytest 崩溃/超时（失败计数 0）被当通过。目标：
 - **部署修复**（审查 P0-3）：安全标签用真实 pre-deploy SHA（非 `HEAD~1`）；分支名集中一处（停止 push master / rollback push private 不一致）；
   `stash pop` 冲突有 abort 路径；自主进程绝不 `--force` 推共享分支。
 
-## 5. 实施顺序（每步真启动验证）
+## 5. 进度（已完成，本地 master → 已 push origin）
 
-- **第一期（地基）✅ 已完成**（commit 1582469）：① 实现 agent 去 Bash + 擦密钥 ② 冻结核注册表 +
-  governance 硬拒绝 + 真核心审批 ③ 看门狗去致盲（marker 老化 + 启动消费）④ known-good 锚 +
-  启动自检 + 进化后自动回退 ⑤ 重启刹车 + 看门狗查 DEFEATED。
-- **第二期 ✅ 已完成**：真测试门（区分"0 失败"与"没跑起来"——崩溃/超时/collection 错误按硬失败）；
-  部署/回滚修复（安全标签用真实 HEAD、分支名统一 `evolution.git_branch`、stash pop 冲突有 abort 路径、
-  回滚不再 `--force` 推共享分支）；限流真拦截 + 拒绝计入冷却；worktree add 前 prune；
-  **level-3 沙盒默认关闭**（`evolution.sandbox_level3_enabled: false`——现实现会起共享 DB/密钥且可自进化的第二个脑，
-  待隔离 DB profile 后再开）。
-- **第三期（部分完成 ✅）**：L0 能力 manifest + 权限模型。已做：`anima/skills/permissions.py`
-  —技能 `_meta.json` 声明 `permissions`(shell/network/filesystem/risk)；运行时**默认拒绝密钥环境**
-  （`build_skill_env` 剥离全部 ANIMA 密钥，闭合"装技能=读全部密钥"）；**安装审批门**（远程源/高权限/未声明
-  权限的技能需带外审批 `data/.guardian/skill_approvals/<name>.approved`，本地低权限可装）；工具风险按 manifest。
-  待做：network/filesystem 的**硬隔离**（容器/命名空间），现仅为声明+审批依据。
-- **第四期（部分完成 ✅）**：L2 硬进化**模块白名单**已做 —governance 默认翻转为"只有
-  `evolution.evolvable_paths`(tools/builtin、perception)内免审批，其余源码改动一律需带外审批"；
-  `anima/skills/` 加入冻结核（技能权限模型不可被进化改写）。level-3 沙盒：已加 `config/profiles/sandbox.yaml`
-  + 用 `ANIMA_PROFILE=sandbox` 起（关 evolution/network/guardian/idle），但**DB 真隔离未做**（Postgres-only，
-  需独立 PG；故 level3 仍默认关）。待做：DB 隔离 + 不可推送 .git + 技能 network/fs 硬隔离（容器/命名空间）。
-- **第五期（part 1 完成 ✅，默认关闭）**：自修复 Fixer。见下 §6。已实现：引擎 diff-scope 门（实际改动查冻结/白名单）、
-  `SelfRepairCoordinator`、Ledger 修复预算、Sentinel `repair_hook`(DEFEATED 前最后一搏)、main 接线、`guardian.self_repair_enabled:false`。
-  待做：启用前的隔离-DB live 验证 + 修复诊断质量打磨。
+| 期 | 内容 | commit |
+|---|---|---|
+| 一期 地基 | 冻结核注册表 + governance 硬拒绝/真审批；看门狗去致盲(marker 老化+启动消费)；known-good 锚 + 启动自检 + 进化后自动回退；重启刹车 | `1582469` |
+| 二期 | 真测试门(区分"0 失败"vs"没跑起来")；部署/回滚修复(真实 SHA 标签、分支统一 `git_branch`、stash pop abort、不 `--force` 推共享分支)；限流真拦截；worktree prune；level-3 默认关 | `0c2d1f4` |
+| 修正 | 保留 Bash —— 自改代码的约束在**评审层**不在砍工具 | `2aaaca0` |
+| 审查 P0 | 5 个独立 P0：规则引擎吞响应、pg_sync 丢写、断路器一次级联多记、import LFI、鉴权 bind | `8fafaf5` |
+| 三期 part1 | L0 技能能力 manifest + 默认拒绝密钥环境 + 安装审批门 | `29b9286` |
+| 四期 part1 | L2 模块白名单(只有 `evolvable_paths` 免审批)；`anima/skills/` 入冻结核；level-3 sandbox profile | `e63807e` |
+| 五期 part1 | 自修复 Fixer(默认关)；引擎 diff-scope 门；Ledger 修复预算；Sentinel `repair_hook` | `5261cc3` |
 
-## 6. 自修复 Fixer（第五期）设计
+至此审查 9 个 P0 全部处置；进化安全五期均有 part1（详见各期设计 §1–§4、§7）。
+
+## 6. 下一步（待办，按优先级）
+
+1. **隔离-DB live 验证（最优先，是启用自修复/level-3 的前提）**：用本地 docker Postgres+pgvector 起一个**丢弃库** +
+   应用 `anima/memory/pg_schema.sql`，以其 `DATABASE_URL` 跑一次完整 ANIMA 启动，验证以上全部改动在真运行期不破
+   （不碰 Neon → 无双脑）。这也是这批改动第一次完整 live boot。通过后才考虑开 `self_repair_enabled`。
+
+2. **第四期 part2 —— 真隔离（基础设施层）**：
+   - **level-3 沙盒 DB 真隔离**：sandbox 实例用独立丢弃 PG 的 `DATABASE_URL`（不连 Neon）；去掉双脑风险后才能把
+     `evolution.sandbox_level3_enabled` 打开。
+   - **不可推送的 .git**：sandbox/worktree 内禁用 push（`remote.pushurl` 置空 / 无凭据），让 `git_remote_sync`
+     门真正不可被实现 agent 的 Bash 绕过。
+   - **技能 network/fs 硬隔离**：把技能命令放进容器/命名空间（或 OS 沙箱），让 manifest 的 `network`/`filesystem`
+     声明从"审批依据"升级为"强制边界"。
+
+3. **第五期 part2 —— 启用与打磨**：隔离-DB 验证通过后开 `self_repair_enabled`，观察自修复诊断质量；
+   必要时给 repair proposal 注入更多故障上下文（日志 / traceback / 疑似模块）。
+
+## 7. 自修复 Fixer（第五期）设计
 
 **定位**：恢复链的最后一环 `安全修复 → 进程重启 → 回滚 known-good → 自修复 → DEFEATED`。
 当一个组件在安全 Fixer + 重启预算耗尽后仍坏（疑似代码级 bug），在标记 DEFEATED **之前**，
