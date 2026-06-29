@@ -121,6 +121,23 @@ class Ledger:
         d["restarts"] = restarts[-100:]
         self._save(d)
 
+    # self-repair budget (persists across restarts so a repair that triggers a
+    # reload can't loop: at most N repairs per component per window before DEFEATED)
+    def repair_count(self, component: str, now: float, window_s: float) -> int:
+        d = self._load()
+        return sum(1 for r in d.get("repairs", [])
+                   if r.get("component") == component and now - r.get("ts", 0) <= window_s)
+
+    def can_repair(self, component: str, now: float, max_n: int, window_s: float) -> bool:
+        return self.repair_count(component, now, window_s) < max_n
+
+    def record_repair(self, component: str, now: float, window_s: float = 86400) -> None:
+        d = self._load()
+        repairs = [r for r in d.get("repairs", []) if now - r.get("ts", 0) <= window_s]
+        repairs.append({"ts": now, "component": component})
+        d["repairs"] = repairs[-100:]
+        self._save(d)
+
     # DEFEATED set (persists across process restarts; a defeated component is NOT
     # auto-repaired again until an explicit human/agent reset)
     def mark_defeated(self, component: str) -> None:

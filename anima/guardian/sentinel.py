@@ -50,7 +50,7 @@ class Sentinel:
     def __init__(self, *, probes: list[Probe], registry: Registry | None = None,
                  policies: dict[Component, ComponentPolicy] | None = None,
                  config: dict | None = None, node_id: str = "local",
-                 restart_hook=None, ledger=None) -> None:
+                 restart_hook=None, repair_hook=None, ledger=None) -> None:
         cfg = config or {}
         self._probes = probes
         self._registry = registry or Registry([])
@@ -64,6 +64,10 @@ class Sentinel:
         # in-process restart; the ledger is the SHARED cross-process budget (also
         # consulted by the external limb) + DEFEATED persistence.
         self._restart_hook = restart_hook
+        # P5: self-repair. repair_hook(component, reason) is the LAST resort before
+        # DEFEATED — it submits a gated repair through the evolution pipeline and
+        # returns True if dispatched. Default None → straight to DEFEATED.
+        self._repair_hook = repair_hook
         self._ledger = ledger
         rb = cfg.get("restart_budget", {}) or {}
         self._max_restarts = int(rb.get("max", 3))
@@ -308,7 +312,24 @@ class Sentinel:
         now = time.time()
         if self._ledger is not None and not self._ledger.can_restart(
                 now, self._max_restarts, self._restart_window_s):
-            # Budget spent — STOP. Persist DEFEATED so a relaunch won't re-loop.
+            # Restart budget spent. LAST resort before DEFEATED: try self-repair
+            # once (gated evolution pipeline). If dispatched, hold in REPAIRING
+            # rather than giving up.
+            if self._repair_hook is not None and c not in self._defeated:
+                try:
+                    dispatched = bool(self._repair_hook(c.value, reason))
+                except Exception as e:  # noqa: BLE001 — must not crash the loop
+                    dispatched = False
+                    log.error("guardian: repair_hook failed: %s", e)
+                if dispatched:
+                    d.state = FsmState.REPAIRING
+                    log.warning("guardian: %s — restart budget spent, SELF-REPAIR dispatched", c.value)
+                    self._audit(AuditRecord(phase="repair", component=c, severity=Severity.ERROR,
+                                            message=f"self-repair dispatched (last resort): {reason}",
+                                            health=d.health, node_id=self._node_id))
+                    return
+            # No repair (disabled / budget spent / not dispatched) → STOP.
+            # Persist DEFEATED so a relaunch won't re-loop.
             self._defeated.add(c)
             try:
                 self._ledger.mark_defeated(c.value)

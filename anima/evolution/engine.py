@@ -331,6 +331,21 @@ class EvolutionEngine:
                     except Exception:
                         diff = worktree.get_diff() or ""
 
+                    # Diff-scope gate: enforce frozen/allowlist on the ACTUAL changed
+                    # files, not just the declared ones — an agent (esp. a self-repair
+                    # one that declared no files) could otherwise edit frozen/out-of-
+                    # scope code. Same gate as submit-time governance.
+                    scope_ok, scope_msg = self._enforce_change_scope(worktree_path, proposal)
+                    if not scope_ok:
+                        proposal._last_error_context = (
+                            f"Change scope rejected: {scope_msg}\n"
+                            f"Edit ONLY files in the evolvable allowlist; never the frozen recovery core."
+                        )
+                        log.warning("Change scope REJECTED (attempt %d/%d): %s",
+                                    attempt, proposal.max_retries, scope_msg)
+                        worktree.cleanup()
+                        continue  # ← RETRY
+
                     review_ok, review_msg = self._review_diff(diff, proposal, cwd=str(worktree_path))
                     if not review_ok:
                         proposal._last_error_context = (
@@ -692,6 +707,37 @@ class EvolutionEngine:
             _sp.run(["git", "branch", "-D", branch],
                     cwd=main_root, capture_output=True, timeout=15)
             return False, str(e)
+
+    def _changed_files(self, worktree_path) -> list[str]:
+        """Repo-relative paths actually modified in the worktree (staged+unstaged
+        +untracked), POSIX-normalized."""
+        files: set[str] = set()
+        for args in (["git", "diff", "--name-only"],
+                     ["git", "diff", "--name-only", "--cached"],
+                     ["git", "ls-files", "--others", "--exclude-standard"]):
+            try:
+                r = _sp.run(args, cwd=str(worktree_path), capture_output=True,
+                            text=True, timeout=10)
+                for line in (r.stdout or "").splitlines():
+                    line = line.strip().replace("\\", "/")
+                    if line:
+                        files.add(line)
+            except Exception:  # noqa: BLE001
+                pass
+        return sorted(files)
+
+    def _enforce_change_scope(self, worktree_path, proposal) -> tuple[bool, str]:
+        """Re-run the governance frozen/allowlist/approval gate on the worktree's
+        ACTUAL changed files (not just proposal.files)."""
+        changed = self._changed_files(worktree_path)
+        if not changed:
+            return True, "no changes"
+        if self._governance is not None:
+            gov = self._governance
+        else:
+            from anima.core.governance import get_governance
+            gov = get_governance()
+        return gov.gate_files(changed, getattr(proposal, "id", ""))
 
     def _create_safety_tag(self, proposal) -> str:
         # Tag the CURRENT integration-branch tip — the exact pre-deploy state to

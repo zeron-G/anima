@@ -111,4 +111,28 @@ baseline pytest 崩溃/超时（失败计数 0）被当通过。目标：
   `anima/skills/` 加入冻结核（技能权限模型不可被进化改写）。level-3 沙盒：已加 `config/profiles/sandbox.yaml`
   + 用 `ANIMA_PROFILE=sandbox` 起（关 evolution/network/guardian/idle），但**DB 真隔离未做**（Postgres-only，
   需独立 PG；故 level3 仍默认关）。待做：DB 隔离 + 不可推送 .git + 技能 network/fs 硬隔离（容器/命名空间）。
-- **第五期**：自修复 Fixer（最后，约束最重，复用沙盒+测试门，回滚兜底，DEFEATED 终态）。
+- **第五期（part 1 完成 ✅，默认关闭）**：自修复 Fixer。见下 §6。已实现：引擎 diff-scope 门（实际改动查冻结/白名单）、
+  `SelfRepairCoordinator`、Ledger 修复预算、Sentinel `repair_hook`(DEFEATED 前最后一搏)、main 接线、`guardian.self_repair_enabled:false`。
+  待做：启用前的隔离-DB live 验证 + 修复诊断质量打磨。
+
+## 6. 自修复 Fixer（第五期）设计
+
+**定位**：恢复链的最后一环 `安全修复 → 进程重启 → 回滚 known-good → 自修复 → DEFEATED`。
+当一个组件在安全 Fixer + 重启预算耗尽后仍坏（疑似代码级 bug），在标记 DEFEATED **之前**，
+尝试**一次**自修复；失败 → DEFEATED 停机喊人。
+
+**铁律（结构性保证，非自律）**：
+1. **不走绿色通道**：自修复补丁经**与普通进化完全相同**的管线 `EvolutionEngine.submit_proposal`
+   —governance（冻结拒绝 + 白名单/审批）+ 真测试门 + sandbox + 部署 + known-good 自动回退。
+   救火时反而更严，不更松。
+2. **诊断式 diff 门**：自修复 proposal 的 `files` 可能为空（让实现 agent 自己定位），这会绕过
+   按声明文件的 governance 门。故引擎在实现后、部署前，对 **worktree 实际改动的文件**
+   再查一次冻结/白名单：改到冻结核 → 硬拒绝；改到白名单外 → 需审批。**此 diff 门对所有进化生效**
+   （堵住"声明无害文件、实际改冻结/越界"的洞）。
+3. **预算 + 终态**：每组件每窗口最多 1 次自修复（Ledger 持久化，跨重启）；耗尽 → DEFEATED。
+4. **默认关闭**：`guardian.self_repair_enabled: false`。建好 ≠ 启用；启用前需隔离 DB 的 live 验证。
+5. **回滚优先**：自修复只在重启预算耗尽后才尝试；任何时候坏代码 boot 失败由 known-good 自动回退兜底。
+
+**实现**：`guardian/self_repair.py` 的 `SelfRepairCoordinator`（门控+预算+构造 repair proposal+提交引擎，
+不拥有任何部署路径）；Sentinel `_escalate_restart` 预算耗尽点加 `repair_hook`；`anima/guardian/` 已冻结，
+故自修复改不了守护/恢复核自身。

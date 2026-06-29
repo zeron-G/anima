@@ -95,6 +95,12 @@ guardian:
   # restarts in `window_s`, the component goes DEFEATED (persisted) → stop trying,
   # page a human. This is the hard backstop against a restart storm.
   restart_budget: { max: 3, window_s: 3600 }
+  # P5 self-repair: LAST resort before DEFEATED. When a component's restart budget
+  # is spent, submit ONE repair through the SAME gated evolution pipeline (frozen/
+  # allowlist + tests + sandbox + known-good auto-revert). OFF by default — enable
+  # only after DB-isolated live verification. Budget persists across restarts.
+  self_repair_enabled: false
+  self_repair_budget: { max: 1, window_s: 86400 }
   components:
     # Safe, reversible auto-repair (P2). Flip mode→manual for human authorization.
     llm: { mode: auto, warn_threshold: 3, cooldown_s: 30, max_attempts: 3 }

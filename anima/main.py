@@ -1173,6 +1173,22 @@ async def run() -> bool:
                 log.error("guardian restart: request_reload failed: %s", e)
             shutdown_event.set()
 
+        # P5: self-repair (LAST resort before DEFEATED). Default OFF — building it
+        # does not enable it. Routes a repair through the SAME gated evolution
+        # pipeline (no green channel). DB-isolated live verification before enabling.
+        from anima.guardian.self_repair import SelfRepairCoordinator
+        _rrb = (_gcfg.get("self_repair_budget", {}) or {})
+        _repair_coord = SelfRepairCoordinator(
+            engine=hb.get("evolution_engine"),
+            ledger=_ledger,
+            enabled=bool(_gcfg.get("self_repair_enabled", False)),
+            max_repairs=int(_rrb.get("max", 1)),
+            window_s=int(_rrb.get("window_s", 86400)),
+        )
+
+        def _guardian_repair_hook(component: str, reason: str) -> bool:
+            return _repair_coord.attempt(component, reason)
+
         sentinel = Sentinel(
             probes=[
                 TaskProbe(),
@@ -1186,6 +1202,7 @@ async def run() -> bool:
             config=_gcfg,
             node_id=getattr(_node_identity, "node_id", "local"),
             restart_hook=_guardian_restart_hook,
+            repair_hook=_guardian_repair_hook,
             ledger=_ledger,
         )
         hub.safety_monitor = sentinel

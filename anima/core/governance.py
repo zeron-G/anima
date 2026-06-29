@@ -28,6 +28,14 @@ _DEFAULT_EVOLVABLE_PATHS = (
     "anima/perception/",      # scanners / environment perception
 )
 
+# Sensitive (non-frozen) modules that ALWAYS require approval, even if a broad
+# allowlist were configured.
+_CORE_MODULES = frozenset({
+    "anima/core/cognitive.py", "anima/core/heartbeat.py",
+    "anima/core/event_queue.py", "anima/core/pipeline.py",
+    "anima/core/stages.py",
+})
+
 
 def _under_any(path: str, prefixes) -> bool:
     """True if POSIX-normalized `path` lives under one of `prefixes`."""
@@ -86,40 +94,39 @@ class GovernanceEngine:
         The default flips from "allow unless core" to "allow only in the safe zone"
         — the user's intent that hard self-modification be tightly constrained.
         """
+        files = proposal.get("files", []) or []
+        ok, reason = self.gate_files(files, proposal.get("id", ""))
+        if not ok:
+            return False, reason
+        if recent_failures >= 3:
+            return False, f"Too many recent failures ({recent_failures}), extended cooldown"
+        return True, "OK"
+
+    def gate_files(self, files, proposal_id: str) -> tuple[bool, str]:
+        """Frozen + allowlist + approval gate over a file list. Used BOTH at submit
+        time (declared files) and post-implementation (the worktree's ACTUAL changed
+        files) — the latter closes "declare innocuous files, edit frozen ones"."""
         from anima.guardian.frozen import frozen_hits
 
-        # Sensitive (non-frozen) modules that ALWAYS require approval even if a
-        # broad allowlist were configured.
-        _CORE_MODULES = {
-            "anima/core/cognitive.py", "anima/core/heartbeat.py",
-            "anima/core/event_queue.py", "anima/core/pipeline.py",
-            "anima/core/stages.py",
-        }
-        files = proposal.get("files", []) or []
-
-        # 1. Frozen core — never auto-modifiable.
+        files = files or []
         frozen = frozen_hits(files)
         if frozen:
             return False, f"FROZEN recovery core — change refused (human-only): {frozen}"
 
-        # 2. Approval gate: core modules + anything outside the evolvable allowlist.
         evolvable = get("evolution.evolvable_paths", _DEFAULT_EVOLVABLE_PATHS)
         gated = []
         for f in files:
-            nf = f.replace("\\", "/").lstrip("./")
+            nf = str(f).replace("\\", "/").lstrip("./")
             if nf in _CORE_MODULES or not _under_any(nf, evolvable):
                 gated.append(nf)
         if gated:
-            pid = str(proposal.get("id", "")).strip()
+            pid = str(proposal_id or "").strip()
             if not pid or not self.is_evolution_approved(pid):
                 return False, (
                     f"Change needs human approval (core or outside evolvable allowlist): "
                     f"{gated}. Approve out-of-band, then retry "
                     f"(create {self.approvals_dir() / (pid or '<id>')}.approved)."
                 )
-
-        if recent_failures >= 3:
-            return False, f"Too many recent failures ({recent_failures}), extended cooldown"
         return True, "OK"
 
     @staticmethod
