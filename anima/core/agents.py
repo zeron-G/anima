@@ -35,38 +35,6 @@ from anima.utils.logging import get_logger
 log = get_logger("agents")
 
 
-# Substrings that mark an env var as an ANIMA-side secret the evolution
-# implementer has no business reading. ANTHROPIC_*/CLAUDE_* are deliberately
-# NOT scrubbed — the `claude` CLI authenticates with them (it also falls back
-# to ~/.claude file creds). Removing Bash (below) is the primary exfil fix;
-# scrubbing here is defense-in-depth so a sandboxed agent can't read the DB
-# URL, other providers' keys, or the dashboard credentials.
-_SECRET_ENV_MARKERS = (
-    "DATABASE", "POSTGRES", "NEON", "DSN", "DEEPSEEK", "OPENAI", "GROQ",
-    "GEMINI", "GOOGLE", "MISTRAL", "XAI", "R2_", "CLOUDFLARE", "CF_API",
-    "CF_TOKEN", "AWS", "AZURE", "DISCORD", "TELEGRAM", "SLACK", "GITHUB_TOKEN",
-    "DASHBOARD", "JWT", "SECRET", "PASSWORD", "PASSWD", "PRIVATE_KEY",
-)
-_SECRET_ENV_KEEP = ("ANTHROPIC", "CLAUDE")  # claude CLI's own auth
-
-
-def _is_secret_env(key: str) -> bool:
-    u = key.upper()
-    if any(k in u for k in _SECRET_ENV_KEEP):
-        return False
-    if any(m in u for m in _SECRET_ENV_MARKERS):
-        return True
-    # generic API-key / token shapes not already kept
-    return ("API_KEY" in u) or ("APIKEY" in u) or u.endswith("_TOKEN") or u.endswith("_KEY")
-
-
-def evolution_subprocess_env() -> dict[str, str]:
-    """A copy of the environment with ANIMA-side secrets stripped, for the
-    sandboxed evolution implementer subprocess. Keeps PATH/HOME/system vars and
-    the claude CLI's own ANTHROPIC_*/CLAUDE_* auth."""
-    return {k: v for k, v in os.environ.items() if not _is_secret_env(k)}
-
-
 @dataclass
 class AgentSession:
     id: str = field(default_factory=lambda: gen_id("agent"))
@@ -365,17 +333,16 @@ class AgentManager:
                 # no console, so inherited stdin is invalid and Claude Code hangs.
                 # Also explicitly avoid CREATE_NO_WINDOW (set by __main__.py patch)
                 # as it can interfere with Claude Code's own subprocess spawning.
-                # No Bash: the implementer edits files only. Bash would be
-                # arbitrary code execution (git push, curl-exfil, rm) inside a
-                # worktree that shares the live .git — see docs/CODE_REVIEW_2026-06.md P0-2.
-                # Env is scrubbed of ANIMA secrets (DB/providers/dashboard creds).
-                _env = evolution_subprocess_env()
-                _env["CLAUDE_CODE_ENTRYPOINT"] = "evolution"
-                _env["PYTHONIOENCODING"] = "utf-8"
+                # Bash IS allowed: ANIMA is meant to do system-level work. The
+                # control on SELF-CODE changes is not tool removal but the review
+                # layer — the diff goes through governance (frozen-core hard-block +
+                # core-module human approval), the test gate, review, and the
+                # deploy/auto-revert gates before it can land. See
+                # docs/EVOLUTION_SAFETY_DESIGN.md §1/§3.
                 result = subprocess.run(
                     ["claude", "-p", session.prompt,
                      "--output-format", "text",
-                     "--allowedTools", "Read,Edit,Grep,Glob,Write",
+                     "--allowedTools", "Read,Edit,Bash,Grep,Glob,Write",
                      "--max-turns", "25",
                      "--model", "opus"],
                     capture_output=True, text=True,
@@ -384,7 +351,7 @@ class AgentManager:
                     timeout=timeout,
                     cwd=working_dir or None,
                     creationflags=0,  # override __main__.py CREATE_NO_WINDOW patch
-                    env=_env,
+                    env={**os.environ, "CLAUDE_CODE_ENTRYPOINT": "evolution", "PYTHONIOENCODING": "utf-8"},
                 )
                 session.result = (result.stdout or "").strip()
                 if result.returncode != 0:

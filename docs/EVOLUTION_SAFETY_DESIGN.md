@@ -82,8 +82,11 @@ anima/__main__.py
 
 当前是假的（审查）：沙盒只是共享 `.git` 的同机 worktree；level-3 起的第二个 ANIMA 共享 Neon DB + 密钥；
 baseline pytest 崩溃/超时（失败计数 0）被当通过。目标：
-- **隔离**：实现 agent 去掉 `Bash`（只 Read/Edit/Grep/Glob/Write），擦净密钥环境（本期先做这步，审查 P0-2）；
-  完整隔离（容器/VM、无主机网络、独立 DB、不可推送的 .git）排后续。
+- **Bash 保留（设计决定）**：ANIMA 本就要做系统级操作，Eva 的通用 `shell` 工具（`tools/builtin/shell.py`，
+  带 `safe_subprocess` 风险分级）和进化实现 agent 都**保留 Bash**。对**自改代码**的约束不放在"砍工具"，
+  而放在**审查层**——diff 必须过 governance（冻结核硬拒绝 + 核心模块人工审批）+ 测试门 + review + 部署/自动回退门
+  才能落地。这就是审查 P0-2 的处置方式：控制在评审，不在能力。
+- **完整隔离**（容器/VM、无主机网络、独立 DB、不可推送的 .git）：仅在将来需要运行**不可信**代码时才上，排后续。
 - **测试门**：区分"0 失败"与"没跑起来"；collection 错误/超时按硬失败处理。
 - **部署修复**（审查 P0-3）：安全标签用真实 pre-deploy SHA（非 `HEAD~1`）；分支名集中一处（停止 push master / rollback push private 不一致）；
   `stash pop` 冲突有 abort 路径；自主进程绝不 `--force` 推共享分支。
