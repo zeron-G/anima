@@ -106,5 +106,9 @@ baseline pytest 崩溃/超时（失败计数 0）被当通过。目标：
   （`build_skill_env` 剥离全部 ANIMA 密钥，闭合"装技能=读全部密钥"）；**安装审批门**（远程源/高权限/未声明
   权限的技能需带外审批 `data/.guardian/skill_approvals/<name>.approved`，本地低权限可装）；工具风险按 manifest。
   待做：network/filesystem 的**硬隔离**（容器/命名空间），现仅为声明+审批依据。
-- **第四期**：L2 硬进化收窄（模块白名单）+ 真隔离 level-3 沙盒（独立进程/DB/不可推送 .git）+ 技能 network/fs 硬隔离。
+- **第四期（部分完成 ✅）**：L2 硬进化**模块白名单**已做 —governance 默认翻转为"只有
+  `evolution.evolvable_paths`(tools/builtin、perception)内免审批，其余源码改动一律需带外审批"；
+  `anima/skills/` 加入冻结核（技能权限模型不可被进化改写）。level-3 沙盒：已加 `config/profiles/sandbox.yaml`
+  + 用 `ANIMA_PROFILE=sandbox` 起（关 evolution/network/guardian/idle），但**DB 真隔离未做**（Postgres-only，
+  需独立 PG；故 level3 仍默认关）。待做：DB 隔离 + 不可推送 .git + 技能 network/fs 硬隔离（容器/命名空间）。
 - **第五期**：自修复 Fixer（最后，约束最重，复用沙盒+测试门，回滚兜底，DEFEATED 终态）。

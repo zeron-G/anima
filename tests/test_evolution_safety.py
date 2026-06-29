@@ -21,6 +21,8 @@ from anima import watchdog as wd
     "anima/core/governance.py",
     "anima/core/boot_health.py",
     "anima/evolution/engine.py",
+    "anima/skills/loader.py",
+    "anima/skills/permissions.py",
     "anima/main.py",
     "anima/__main__.py",
     r"anima\core\reload.py",                     # Windows separators
@@ -73,17 +75,31 @@ def test_governance_core_requires_approval(tmp_path, monkeypatch):
     assert ok2 is True
 
 
-def test_governance_allows_normal_file():
+def test_governance_allows_evolvable_allowlist():
+    # Files inside the evolvable allowlist (tools/builtin, perception) proceed.
     gov = _gov()
     ok, _ = gov.check_evolution_proposal(
-        {"id": "p3", "files": ["anima/api/chat.py"]}, recent_failures=0)
+        {"id": "p3", "files": ["anima/tools/builtin/my_new_tool.py"]}, recent_failures=0)
     assert ok is True
 
 
+def test_governance_outside_allowlist_needs_approval(tmp_path, monkeypatch):
+    # A normal source file OUTSIDE the allowlist (e.g. api/) now needs approval.
+    from anima.core.governance import GovernanceEngine
+    monkeypatch.setattr(GovernanceEngine, "approvals_dir", staticmethod(lambda: tmp_path))
+    gov = _gov()
+    prop = {"id": "p3b", "files": ["anima/api/chat.py"]}
+    ok, reason = gov.check_evolution_proposal(prop, recent_failures=0)
+    assert ok is False and "approval" in reason
+    (tmp_path / "p3b.approved").write_text("ok", encoding="utf-8")
+    assert gov.check_evolution_proposal(prop, recent_failures=0)[0] is True
+
+
 def test_governance_failure_cooldown():
+    # Use an allowlisted file so the failure-cooldown gate is what triggers.
     gov = _gov()
     ok, reason = gov.check_evolution_proposal(
-        {"id": "p4", "files": ["anima/api/chat.py"]}, recent_failures=3)
+        {"id": "p4", "files": ["anima/tools/builtin/x.py"]}, recent_failures=3)
     assert ok is False and "failures" in reason
 
 

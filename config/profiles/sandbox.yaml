@@ -1,0 +1,38 @@
+# ─────────────────────────────────────────────────────────────────────────
+# ANIMA evolution Level-3 sandbox profile.  Load with:  ANIMA_PROFILE=sandbox
+# Deep-merged over config/default.yaml.
+#
+# Purpose: the Level-3 sandbox boots a FULL ANIMA from an evolution worktree to
+# smoke-test a change. This profile neutralizes that instance's autonomy so it
+# can't itself evolve, gossip, or run background cognition while under test.
+#
+# ⚠ DB ISOLATION IS NOT PROVIDED HERE. ANIMA is Postgres-only, so the sandbox
+# instance still uses whatever DATABASE_URL is in the environment — if that is
+# the live Neon brain, running the sandbox is a SECOND writer (double-brain).
+# That is exactly why evolution.sandbox_level3_enabled defaults to false. Only
+# enable Level-3 after pointing DATABASE_URL at a THROWAWAY/isolated Postgres.
+# ─────────────────────────────────────────────────────────────────────────
+
+# minimal: self-thinking disabled, evolution disabled, heartbeat throttled —
+# the sandbox instance must not start its own evolution or autonomous loops.
+governance:
+  default_mode: minimal
+
+# No mesh: the sandbox must not join the gossip network or delegate to peers.
+network:
+  enabled: false
+
+# No nested self-heal supervisor inside a throwaway instance.
+guardian:
+  enabled: false
+
+# The sandbox must never push code anywhere.
+evolution:
+  git_remote_sync: false
+  sandbox_level3_enabled: false   # no recursive sandboxing
+
+# Keep it slim/quiet.
+voice_bridge:
+  enabled: false
+dashboard:
+  auto_open: false

@@ -19,6 +19,25 @@ from anima.utils.logging import get_logger
 
 log = get_logger("governance")
 
+# Areas evolution may modify WITHOUT per-change human approval — the designated
+# "safe zone" for autonomous growth (add tools, skills, perception). Everything
+# else (api, llm, memory, network, dashboard, non-frozen core, …) needs approval.
+# Override/extend via config `evolution.evolvable_paths`.
+_DEFAULT_EVOLVABLE_PATHS = (
+    "anima/tools/builtin/",   # new tools (additive; Eva already has these capabilities)
+    "anima/perception/",      # scanners / environment perception
+)
+
+
+def _under_any(path: str, prefixes) -> bool:
+    """True if POSIX-normalized `path` lives under one of `prefixes`."""
+    p = (path or "").replace("\\", "/").lstrip("./")
+    for pre in (prefixes or ()):
+        pre = str(pre).replace("\\", "/").lstrip("./")
+        if pre and (p == pre.rstrip("/") or p.startswith(pre if pre.endswith("/") else pre + "/")):
+            return True
+    return False
+
 
 class GovernanceEngine:
     """Unified governance — controls Eva's autonomous behavior boundaries."""
@@ -53,18 +72,24 @@ class GovernanceEngine:
     def check_evolution_proposal(self, proposal: dict, recent_failures: int) -> tuple[bool, str]:
         """Decide whether an evolution proposal may proceed.
 
-        Three gates, in order:
-          1. FROZEN recovery core → hard reject, no override possible. These are
-             the modules that decide whether/how evolution runs and recovers; if
-             evolution could rewrite them, all guarantees collapse.
-          2. CORE (sensitive but not frozen) → requires a real OUT-OF-BAND human
-             approval file. We no longer trust a model-supplied `human_confirmed`
-             flag (the agent could set its own gate — see CODE_REVIEW P0-1).
+        Tiered, narrowest-first:
+          1. FROZEN recovery core → hard reject, no override. These decide
+             whether/how evolution runs and recovers; if evolution could rewrite
+             them, all guarantees collapse.
+          2. NEEDS APPROVAL → any file that is a sensitive core module OR sits
+             OUTSIDE the explicitly-evolvable allowlist. Autonomous self-modification
+             is narrowed to designated safe areas (tools/skills/perception); touching
+             any other source needs a real OUT-OF-BAND human approval token. We never
+             trust a model-supplied flag (CODE_REVIEW P0-1).
           3. Consecutive failures → extended cooldown.
+
+        The default flips from "allow unless core" to "allow only in the safe zone"
+        — the user's intent that hard self-modification be tightly constrained.
         """
         from anima.guardian.frozen import frozen_hits
 
-        # Sensitive (non-frozen) modules that still require explicit human approval.
+        # Sensitive (non-frozen) modules that ALWAYS require approval even if a
+        # broad allowlist were configured.
         _CORE_MODULES = {
             "anima/core/cognitive.py", "anima/core/heartbeat.py",
             "anima/core/event_queue.py", "anima/core/pipeline.py",
@@ -77,14 +102,19 @@ class GovernanceEngine:
         if frozen:
             return False, f"FROZEN recovery core — change refused (human-only): {frozen}"
 
-        # 2. Core modules — require an out-of-band approval token on disk.
-        core_touched = [f for f in files if f.replace("\\", "/") in _CORE_MODULES]
-        if core_touched:
+        # 2. Approval gate: core modules + anything outside the evolvable allowlist.
+        evolvable = get("evolution.evolvable_paths", _DEFAULT_EVOLVABLE_PATHS)
+        gated = []
+        for f in files:
+            nf = f.replace("\\", "/").lstrip("./")
+            if nf in _CORE_MODULES or not _under_any(nf, evolvable):
+                gated.append(nf)
+        if gated:
             pid = str(proposal.get("id", "")).strip()
             if not pid or not self.is_evolution_approved(pid):
                 return False, (
-                    f"Core module change needs human approval: {core_touched}. "
-                    f"Approve out-of-band, then retry "
+                    f"Change needs human approval (core or outside evolvable allowlist): "
+                    f"{gated}. Approve out-of-band, then retry "
                     f"(create {self.approvals_dir() / (pid or '<id>')}.approved)."
                 )
 

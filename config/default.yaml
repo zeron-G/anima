@@ -119,6 +119,12 @@ evolution:
   auto_revert_on_bad_boot: true
   # The single integration branch used consistently by deploy / rollback / sync.
   git_branch: master
+  # Areas evolution may modify WITHOUT per-change human approval (the autonomous
+  # "safe zone"). Anything outside these — api, llm, memory, network, non-frozen
+  # core, etc. — needs an out-of-band approval token. Narrows self-modification.
+  evolvable_paths:
+    - anima/tools/builtin/
+    - anima/perception/
   # Level-3 sandbox spawns a FULL ANIMA to smoke-test a change. Off by default:
   # as implemented it shares the live DB + secrets and can self-evolve (a second
   # brain). Enable only with an isolated-DB sandbox profile.

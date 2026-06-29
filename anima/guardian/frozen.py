@@ -21,6 +21,7 @@ FROZEN_PATHS: tuple[str, ...] = (
     "anima/core/governance.py",  # the evolution gate itself
     "anima/core/boot_health.py",  # known-good anchor + boot self-test + auto-revert
     "anima/evolution/",       # evolution may not rewrite the evolution engine/sandbox/deploy
+    "anima/skills/",          # the L0 skill permission model (env scrub + install gate)
     "anima/main.py",          # startup + restart loop
     "anima/__main__.py",
 )

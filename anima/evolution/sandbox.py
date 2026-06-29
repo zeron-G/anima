@@ -206,11 +206,18 @@ class TestRunner:
         """Level 3: Start ANIMA in sandbox, verify health after timeout."""
         log.info("Level 3 (sandbox): starting ANIMA instance...")
 
+        # Force the sandbox profile so the spawned instance can't itself evolve,
+        # join the mesh, or run autonomous cognition while under test (a second
+        # brain that self-evolves was the review's concern). NOTE: this does NOT
+        # isolate the DB — see config/profiles/sandbox.yaml; Level-3 stays gated
+        # off until DATABASE_URL points at a throwaway Postgres.
+        sandbox_env = {**os.environ, "ANIMA_PROFILE": "sandbox", "PYTHONIOENCODING": "utf-8"}
         proc = subprocess.Popen(
             [_PYTHON, "-m", "anima", "--headless"],
             cwd=self._cwd,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
+            env=sandbox_env,
         )
 
         try:
