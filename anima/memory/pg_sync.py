@@ -16,6 +16,7 @@ are intentionally NOT synced — they're a per-machine filesystem cache.
 from __future__ import annotations
 
 import asyncio
+import json
 
 import psycopg
 from psycopg.rows import dict_row
@@ -24,6 +25,14 @@ from anima.memory.pg_db import PgDatabaseManager
 from anima.utils.logging import get_logger
 
 log = get_logger("pg_sync")
+
+# Re-examine this many seconds below the destination watermark on each reconcile.
+# A pure `ts >= MAX(ts)` window can permanently skip a row that exists on src but
+# not dst when the two nodes' clocks differ (the row's ts lands below the dst max
+# but it was never copied) — a silent lost write on failback (CODE_REVIEW P0-9).
+# ON CONFLICT DO NOTHING dedups the re-examined rows, so the only cost is rescanning
+# a bounded recent window; the margin is generous enough to cover real clock skew.
+_RECONCILE_SAFETY_MARGIN_S = 86400  # 24h
 
 
 def _adapt(value):
@@ -277,6 +286,10 @@ class PgSyncManager:
         with dst.cursor() as c:
             c.execute(f"SELECT COALESCE(MAX({ts}), 0) AS w FROM {t}")
             watermark = c.fetchone()["w"]
+        # Drop below the watermark by a safety margin so clock skew can't silently
+        # skip a src-only row (CODE_REVIEW P0-9). ON CONFLICT DO NOTHING dedups.
+        if watermark:
+            watermark = max(0, watermark - _RECONCILE_SAFETY_MARGIN_S)
 
         with src.cursor() as c:
             c.execute(f"SELECT * FROM {t} WHERE {ts} >= %s", (watermark,))

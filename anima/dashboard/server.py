@@ -166,7 +166,22 @@ class DashboardServer:
     async def start(self) -> None:
         self._runner = web.AppRunner(self._app)
         await self._runner.setup()
-        site = web.TCPSite(self._runner, self._host, self._port)
+
+        # Fail safe: never expose the control plane (restart/shutdown/config/
+        # skill-install) on a non-loopback interface without auth. If no password
+        # is set, downgrade the bind to loopback rather than open it to the
+        # network (CODE_REVIEW P0-5). Override with dashboard.allow_insecure_bind.
+        host = self._host
+        if host not in ("127.0.0.1", "::1", "localhost"):
+            from anima.api.auth import auth_enabled
+            if not auth_enabled() and not get("dashboard.allow_insecure_bind", False):
+                log.critical(
+                    "Refusing to expose the control plane on %s without auth "
+                    "(no dashboard.auth.password set) — binding to 127.0.0.1 instead. "
+                    "Set a password, or dashboard.allow_insecure_bind=true to override.",
+                    host)
+                host = "127.0.0.1"
+        site = web.TCPSite(self._runner, host, self._port)
         await site.start()
         if self._voice_bridge:
             try:

@@ -90,8 +90,31 @@ async def import_document(request: web.Request) -> web.Response:
     if not _document_store:
         return web.json_response({"error": "document store not initialized"}, status=503)
 
+    # Confine file_path to the configured import directory. Previously any path
+    # was accepted → arbitrary server-side file read (.env, ~/.codex/auth.json,
+    # credentials) via this network endpoint, then exfiltrable through
+    # documents/search (CODE_REVIEW P0-6).
+    from pathlib import Path
+    from anima.config import data_dir, get
+    from anima.utils.path_safety import validate_path_within
+    from anima.utils.errors import PathTraversalBlocked
+
+    raw = (data.get("file_path", "") or "").strip()
+    if not raw:
+        return web.json_response({"error": "file_path required"}, status=400)
+    import_base = Path(get("memory.import_dir", "") or (data_dir() / "imports"))
+    import_base.mkdir(parents=True, exist_ok=True)
+    try:
+        safe_path = validate_path_within(import_base / raw, import_base)
+    except PathTraversalBlocked:
+        return web.json_response(
+            {"error": "file_path must be inside the import directory"}, status=403)
+    if not safe_path.is_file():
+        return web.json_response(
+            {"error": "file not found in import directory"}, status=404)
+
     result = await _document_store.import_document(
-        data.get("file_path", ""),
+        str(safe_path),
         data.get("description", ""),
     )
     return web.json_response(result)

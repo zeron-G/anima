@@ -74,6 +74,13 @@ def verify_token(token: str) -> bool:
         return False
     return True
 
+def auth_enabled() -> bool:
+    """True if a dashboard password is configured (the control plane is gated).
+    When False, check_auth() passes everything — so a non-loopback bind without
+    a password exposes restart/shutdown/config/skill-install to the network."""
+    return bool(_resolve_secret(get("dashboard.auth.password", "")))
+
+
 def check_auth(request: web.Request) -> bool:
     """Check if request is authenticated. Returns True if auth passes."""
     password = _resolve_secret(get("dashboard.auth.password", ""))

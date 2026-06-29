@@ -242,7 +242,6 @@ class LLMRouter:
             except _aio.TimeoutError:
                 log.warning("%s timeout (tier=%d), trying next", model, tier)
                 failed_models.append(model)
-                self._on_failure()
                 continue
             except Exception as e:
                 err = str(e)
@@ -254,12 +253,14 @@ class LLMRouter:
                             "overloaded" if is_overload else "timeout" if is_timeout else "failed",
                             err[:200])
                 failed_models.append(model)
-                if not is_local:
-                    self._on_failure()
                 if is_transient and not is_local:
                     await _aio.sleep(2)
                 continue
 
+        # Count ONE failure per top-level call(), not one per cascade member.
+        # Previously each failed provider AND this trailing line called
+        # _on_failure(), so a single transient blip across the cascade added
+        # 4-5 and tripped the breaker instantly (CODE_REVIEW P0-7).
         log.error("All models exhausted (cloud + local, tier=%d, tried=%s)",
                   tier, ", ".join(failed_models) or "none")
         self._on_failure()

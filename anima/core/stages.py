@@ -15,6 +15,7 @@ import asyncio
 from typing import TYPE_CHECKING
 
 from anima.core.pipeline import PipelineContext, PipelineStage
+from anima.models.decision import ActionType
 from anima.models.event import EventType
 from anima.utils.logging import get_logger
 
@@ -63,6 +64,7 @@ class EventRoutingStage(PipelineStage):
 
         if decision.handled:
             pctx.handled = True
+            await self._execute_rule_decision(pctx, event, ctx, decision)
             return pctx
 
         pctx.user_message = decision.message
@@ -99,6 +101,48 @@ class EventRoutingStage(PipelineStage):
             asyncio.ensure_future(ctx.summarizer.add_message("user", pctx.user_message))
 
         return pctx
+
+    async def _execute_rule_decision(self, pctx, event, ctx, decision) -> None:
+        """Deliver + persist a rule-engine fast-path decision.
+
+        The fast path short-circuits the pipeline (handled=True), so if we don't
+        act on the decision here NOTHING does — previously a greeting like "hi"
+        produced no reply and wasn't saved at all (CODE_REVIEW P0-8).
+        """
+        rd = getattr(decision, "rule_decision", None)
+        if rd is None or getattr(rd, "action", None) != ActionType.RESPOND or not rd.content:
+            return  # NOOP/TOOL_CALL fast-path decisions have no user-facing output
+
+        user_text = (event.payload or {}).get("text", "") or ""
+        try:
+            ctx.emit_output(rd.content, source=decision.source)
+        except Exception as e:  # noqa: BLE001
+            log.warning("rule-path emit_output failed: %s", e)
+
+        # Conversation buffer: keep both sides so context isn't lost.
+        try:
+            if user_text:
+                ctx.conversation.append({"role": "user", "content": user_text})
+            ctx.conversation.append({"role": "assistant", "content": rd.content})
+            ctx.trim_conversation()
+        except Exception as e:  # noqa: BLE001
+            log.debug("rule-path conversation persist failed: %s", e)
+
+        # Persist to memory for USER_MESSAGE turns (mirrors the LLM path).
+        if event.type == EventType.USER_MESSAGE:
+            sid = event.source or "local"
+            try:
+                if user_text:
+                    await ctx.memory_store.save_memory_async(
+                        content=user_text, type="chat", importance=0.5,
+                        metadata={"role": "user"}, session_id=sid,
+                    )
+                await ctx.memory_store.save_memory_async(
+                    content=rd.content, type="chat", importance=0.5,
+                    metadata={"role": "assistant", "rule_engine": True}, session_id=sid,
+                )
+            except Exception as e:  # noqa: BLE001
+                log.debug("rule-path memory persist failed: %s", e)
 
 
 class EmotionPerceptionStage(PipelineStage):
