@@ -13,6 +13,10 @@ from pathlib import Path
 
 from anima.config import skills_dir
 from anima.models.tool_spec import ToolSpec, RiskLevel
+from anima.skills.permissions import (
+    SkillPermissions, build_skill_env, is_skill_approved,
+    requires_install_approval, skill_approvals_dir,
+)
 from anima.utils.logging import get_logger
 
 log = get_logger("skills")
@@ -35,6 +39,7 @@ class SkillMeta:
         self.entry_point = data.get("entry_point", "")
         self.commands = data.get("commands", {})
         self.cron = data.get("cron", {})
+        self.permissions = SkillPermissions.from_meta(data)
         self.path = path
         self.state: SkillState = SkillState.LOADED
         self.error: str = ""
@@ -87,6 +92,7 @@ class SkillLoader:
         return [
             {"name": s.name, "version": s.version, "description": s.description,
              "commands": list(s.commands.keys()), "path": str(s.path),
+             "permissions": s.permissions.summary(),
              "state": s.state.value, "error": s.error}
             for s in self._skills.values()
         ]
@@ -106,11 +112,13 @@ class SkillLoader:
             return {"success": False, "error": "No usage string defined for this command"}
 
         try:
-            import os
+            # Default-deny env: a skill never receives ANIMA secrets (DB URL,
+            # provider keys, dashboard creds), so "install a skill" can't become
+            # "exfiltrate everything". See skills/permissions.py.
             result = subprocess.run(
                 usage, shell=True, capture_output=True, text=True,
                 timeout=timeout, cwd=str(skill.path),
-                env={**os.environ, "PYTHONIOENCODING": "utf-8"},
+                env=build_skill_env(skill.path),
             )
             return {
                 "success": result.returncode == 0,
@@ -148,6 +156,31 @@ class SkillLoader:
 
         if target_dir.exists():
             return {"success": False, "error": f"Skill '{skill_name}' already exists"}
+
+        # ── Install approval gate ──
+        # Remote code, elevated permissions, or an undeclared permission set all
+        # require an out-of-band human approval token before any code is fetched
+        # (mirrors the evolution core-module gate). Local low-permission skills
+        # install freely. Without this, Eva could `install_skill(<any git url>)`
+        # and run arbitrary remote code.
+        src_perms = SkillPermissions()
+        is_remote = source.startswith(("http://", "https://", "git@", "ssh://"))
+        if not is_remote:
+            src_meta = Path(source) / "_meta.json"
+            if src_meta.exists():
+                try:
+                    src_perms = SkillPermissions.from_meta(
+                        json.loads(src_meta.read_text(encoding="utf-8")))
+                except Exception:  # noqa: BLE001
+                    pass
+        need_approval, why = requires_install_approval(source, src_perms)
+        if need_approval and not is_skill_approved(skill_name):
+            token = skill_approvals_dir() / f"{skill_name}.approved"
+            return {
+                "success": False, "needs_approval": True,
+                "error": (f"Install of '{skill_name}' needs human approval ({why}). "
+                          f"Approve out-of-band, then retry: create {token}"),
+            }
 
         try:
             if source.startswith(("http://", "https://", "git@")):
@@ -226,6 +259,11 @@ class SkillLoader:
                 async def _handler(skill_name=skill.name, command=cmd_name, timeout: int = 120):
                     return self.run_skill_command(skill_name, command, timeout)
 
+                _risk_map = {
+                    "safe": RiskLevel.SAFE, "low": RiskLevel.LOW,
+                    "medium": RiskLevel.MEDIUM, "high": RiskLevel.HIGH,
+                }
+                risk = _risk_map.get((skill.permissions.risk or "").lower(), RiskLevel.MEDIUM)
                 tools.append(ToolSpec(
                     name=tool_name,
                     description=f"[{skill.name}] {cmd_spec.get('description', cmd_name)}",
@@ -235,7 +273,7 @@ class SkillLoader:
                             "timeout": {"type": "integer", "default": 120, "description": "Timeout in seconds"},
                         },
                     },
-                    risk_level=RiskLevel.MEDIUM,
+                    risk_level=risk,
                     handler=_handler,
                 ))
         return tools

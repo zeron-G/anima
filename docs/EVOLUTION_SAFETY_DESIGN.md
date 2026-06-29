@@ -101,6 +101,10 @@ baseline pytest 崩溃/超时（失败计数 0）被当通过。目标：
   回滚不再 `--force` 推共享分支）；限流真拦截 + 拒绝计入冷却；worktree add 前 prune；
   **level-3 沙盒默认关闭**（`evolution.sandbox_level3_enabled: false`——现实现会起共享 DB/密钥且可自进化的第二个脑，
   待隔离 DB profile 后再开）。
-- **第三期**：L0 能力 manifest + 权限模型（加性成长安全化）。
-- **第四期**：L2 硬进化收窄（模块白名单）+ 真隔离 level-3 沙盒（独立进程/DB/不可推送 .git）。
+- **第三期（部分完成 ✅）**：L0 能力 manifest + 权限模型。已做：`anima/skills/permissions.py`
+  —技能 `_meta.json` 声明 `permissions`(shell/network/filesystem/risk)；运行时**默认拒绝密钥环境**
+  （`build_skill_env` 剥离全部 ANIMA 密钥，闭合"装技能=读全部密钥"）；**安装审批门**（远程源/高权限/未声明
+  权限的技能需带外审批 `data/.guardian/skill_approvals/<name>.approved`，本地低权限可装）；工具风险按 manifest。
+  待做：network/filesystem 的**硬隔离**（容器/命名空间），现仅为声明+审批依据。
+- **第四期**：L2 硬进化收窄（模块白名单）+ 真隔离 level-3 沙盒（独立进程/DB/不可推送 .git）+ 技能 network/fs 硬隔离。
 - **第五期**：自修复 Fixer（最后，约束最重，复用沙盒+测试门，回滚兜底，DEFEATED 终态）。
