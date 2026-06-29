@@ -23,7 +23,6 @@ def _make_identity(nid, peer_ids):
 
 
 @pytest.mark.asyncio
-@pytest.mark.skipif(sys.platform == "win32", reason="Thread-based gossip timing flaky on localhost; passes on real two-machine test")
 async def test_two_node_gossip():
     """Two nodes discover each other via gossip."""
     id_a = _make_identity("A", ["A", "B"])
@@ -32,16 +31,29 @@ async def test_two_node_gossip():
     sb = NodeState(node_id="B", hostname="pc2", ip="127.0.0.1", port=19461)
     ma = GossipMesh(id_a, sa, network_secret="s", listen_port=19460)
     mb = GossipMesh(id_b, sb, network_secret="s", listen_port=19461)
-    await ma.start()
-    await mb.start()
+    # Peers MUST be registered before start(): the gossip thread snapshots
+    # _peer_addresses once at startup and dials its SUB socket then — addresses
+    # added afterwards are never connected. This matches production order
+    # (configure_peers() -> start()). Adding them after start() (the old order)
+    # left both SUB sockets unconnected, so neither node ever saw the other.
     ma.add_peer("127.0.0.1:19461")
     mb.add_peer("127.0.0.1:19460")
-    await asyncio.sleep(18)
-    assert "B" in ma.get_peers()
-    assert "A" in mb.get_peers()
-    assert ma.get_alive_count() == 2
-    await ma.stop()
-    await mb.stop()
+    await ma.start()
+    await mb.start()
+    try:
+        # Poll for mutual discovery instead of a fixed sleep — robust to
+        # localhost ZMQ slow-joiner timing (typically discovers in ~10s).
+        deadline = time.monotonic() + 30.0
+        while time.monotonic() < deadline:
+            if "B" in ma.get_peers() and "A" in mb.get_peers():
+                break
+            await asyncio.sleep(0.5)
+        assert "B" in ma.get_peers()
+        assert "A" in mb.get_peers()
+        assert ma.get_alive_count() == 2
+    finally:
+        await ma.stop()
+        await mb.stop()
 
 
 # NOTE: peer-to-peer memory sync between nodes was removed with the SQLite
