@@ -59,11 +59,14 @@ llm:
   #   "codex/..."           → Codex OAuth (ChatGPT subscription, free)
   #   "claude-opus-4-8"     → Anthropic API (OAuth/API key)
   #   "deepseek/..."        → DeepSeek API (OpenAI-compatible; key via DEEPSEEK_API_KEY in .env)
+  #   "openrouter/<slug>"   → OpenRouter (OpenAI-compatible; key via OPENROUTER_API_KEY),
+  #                           e.g. "openrouter/anthropic/claude-opus-4.8"
   #   "local/"              → local server (llama.cpp/ollama/vLLM)
   #   "openai/gpt-4o"       → OpenAI cloud API
   # Hot-switch: POST /api/config {"key":"llm.tier1.model","value":"local/"}
-  # Fallback cascade: codex → deepseek → claude(if key) → openai → local
+  # Fallback cascade: codex → openrouter → deepseek → claude(if key) → openai → local
   codex_fallback: { model: "", max_tokens: 16384 }
+  openrouter_fallback: { model: "", max_tokens: 8192 }  # set model in local/env.yaml; key in .env
   deepseek_fallback: { model: "", max_tokens: 8192 }   # set model in local/env.yaml; key in .env
   openai_fallback: { model: "", max_tokens: 16384 }
   local: { model: "local/", base_url: "http://localhost:8080", max_tokens: 4096, max_context: 32768 }

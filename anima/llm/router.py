@@ -47,6 +47,8 @@ class LLMRouter:
         codex_max_tokens: int = 16384,
         deepseek_fallback: str = "",
         deepseek_max_tokens: int = 8192,
+        openrouter_fallback: str = "",
+        openrouter_max_tokens: int = 8192,
     ) -> None:
         self._tier1_model = tier1_model
         self._tier2_model = tier2_model
@@ -60,6 +62,8 @@ class LLMRouter:
         self._codex_max_tokens = codex_max_tokens
         self._deepseek_fallback = deepseek_fallback  # e.g. "deepseek/deepseek-v4-flash"
         self._deepseek_max_tokens = deepseek_max_tokens
+        self._openrouter_fallback = openrouter_fallback  # e.g. "openrouter/anthropic/claude-opus-4.8"
+        self._openrouter_max_tokens = openrouter_max_tokens
         self._daily_budget = daily_budget
         self._usage: list[dict] = []
         self._day_start = self._today()
@@ -179,6 +183,10 @@ class LLMRouter:
         # Same-provider (Codex/OAuth) backup first — still free, no Claude key needed.
         if self._codex_fallback:
             cascade.append((self._codex_fallback, self._codex_max_tokens, 90))
+        # OpenRouter backup (OpenAI-compatible aggregator, one key → many models,
+        # e.g. Claude Opus). The primary paid safety net when Codex/OAuth is down.
+        if self._openrouter_fallback:
+            cascade.append((self._openrouter_fallback, self._openrouter_max_tokens, 120))
         # DeepSeek API fallback (OpenAI-compatible, real key) — the live safety net
         # when Codex is down, ahead of the API-key-gated (and keyless) Claude route.
         if self._deepseek_fallback:

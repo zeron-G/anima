@@ -3,7 +3,9 @@ from __future__ import annotations
 
 import os
 
-from anima.llm.providers.constants import _LOCAL_LLM_BASE, _OPENAI_API_BASE, _DEEPSEEK_API_BASE
+from anima.llm.providers.constants import (
+    _LOCAL_LLM_BASE, _OPENAI_API_BASE, _DEEPSEEK_API_BASE, _OPENROUTER_API_BASE,
+)
 from anima.llm.providers.anthropic_sdk import _get_anthropic_client, _anthropic_sdk_completion
 from anima.llm.providers.anthropic_http import _anthropic_completion
 from anima.llm.providers.openai_compat import _openai_completion
@@ -59,6 +61,19 @@ async def completion(
         model_id = model.removeprefix("deepseek/").strip()
         from anima.secret_store import get_secret
         api_key = get_secret("DEEPSEEK_API_KEY")
+        return await _openai_completion(
+            base_url=base, model_id=model_id, api_key=api_key,
+            messages=messages, max_tokens=max_tokens,
+            temperature=temperature, tools=tools,
+        )
+
+    if model.startswith("openrouter/"):
+        # OpenRouter is OpenAI-compatible. Model id is the full slug after the
+        # prefix, e.g. "openrouter/anthropic/claude-opus-4.8" → "anthropic/claude-opus-4.8".
+        base = os.environ.get("OPENROUTER_API_BASE", _OPENROUTER_API_BASE)
+        model_id = model.removeprefix("openrouter/").strip()
+        from anima.secret_store import get_secret
+        api_key = get_secret("OPENROUTER_API_KEY")
         return await _openai_completion(
             base_url=base, model_id=model_id, api_key=api_key,
             messages=messages, max_tokens=max_tokens,

@@ -12,7 +12,7 @@ import httpx
 from anima.llm.providers.constants import (
     ANTHROPIC_API_BASE, ANTHROPIC_VERSION, CLAUDE_CODE_IDENTITY,
     CLAUDE_CODE_VERSION, OAUTH_BETA_HEADERS,
-    _LOCAL_LLM_BASE, _OPENAI_API_BASE, _DEEPSEEK_API_BASE,
+    _LOCAL_LLM_BASE, _OPENAI_API_BASE, _DEEPSEEK_API_BASE, _OPENROUTER_API_BASE,
 )
 from anima.llm.providers.auth import _get_anthropic_token, _is_oauth_token
 from anima.llm.providers.message_convert import _fix_api_messages
@@ -137,6 +137,19 @@ async def completion_stream(
         model_id = model.removeprefix("openai/").strip()
         from anima.secret_store import get_secret
         api_key = get_secret("OPENAI_API_KEY")
+        async for event in _openai_completion_stream(
+            base_url=base, model_id=model_id, api_key=api_key,
+            messages=messages, max_tokens=max_tokens,
+            temperature=temperature, tools=tools,
+        ):
+            yield event
+        return
+
+    if model.startswith("openrouter/"):
+        base = os.environ.get("OPENROUTER_API_BASE", _OPENROUTER_API_BASE)
+        model_id = model.removeprefix("openrouter/").strip()
+        from anima.secret_store import get_secret
+        api_key = get_secret("OPENROUTER_API_KEY")
         async for event in _openai_completion_stream(
             base_url=base, model_id=model_id, api_key=api_key,
             messages=messages, max_tokens=max_tokens,

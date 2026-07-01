@@ -65,6 +65,10 @@ def _check_llm_credentials(issues: list, config: dict | None = None) -> None:
         has_openai_model or tier1_model.startswith("openai/") or tier2_model.startswith("openai/")
     )
 
+    # OpenRouter (OpenAI-compatible aggregator) — a valid route when used as the
+    # tier/fallback model, driven by OPENROUTER_API_KEY.
+    has_openrouter = bool(get_secret("OPENROUTER_API_KEY"))
+
     has_key = bool(get_secret("ANTHROPIC_API_KEY"))
     has_oauth = bool(get_secret("ANTHROPIC_OAUTH_TOKEN"))
     # Non-OAuth Anthropic proxy token (ANTHROPIC_AUTH_TOKEN + ANTHROPIC_BASE_URL):
@@ -74,7 +78,8 @@ def _check_llm_credentials(issues: list, config: dict | None = None) -> None:
     has_creds = _has_claude_code_credentials()
     has_codex = _has_codex_credentials()
 
-    if has_key or has_oauth or has_auth_token or has_creds or has_codex or has_openai_route:
+    if (has_key or has_oauth or has_auth_token or has_creds or has_codex
+            or has_openai_route or has_openrouter):
         return
 
     if require_llm:

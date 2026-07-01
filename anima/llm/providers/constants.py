@@ -29,3 +29,10 @@ _DEEPSEEK_API_BASE = (
     os.environ.get("DEEPSEEK_API_BASE", "").strip()
     or "https://api.deepseek.com"
 ).rstrip("/")
+
+# ── OpenRouter (OpenAI-compatible aggregator; key via OPENROUTER_API_KEY) ──
+# The client appends "/v1/chat/completions", so the base stops at ".../api".
+_OPENROUTER_API_BASE = (
+    os.environ.get("OPENROUTER_API_BASE", "").strip()
+    or "https://openrouter.ai/api"
+).rstrip("/")
