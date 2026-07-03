@@ -593,6 +593,23 @@ class PgMemoryStore:
         import asyncio
         return await asyncio.to_thread(self._unconsolidated_sync, limit)
 
+    def _salient_unconsolidated_sync(self, min_importance: float, limit: int) -> list[dict]:
+        # Salient (importance encodes salience-at-save = base * emotion multiplier),
+        # not-yet-promoted, non-archive rows — candidates to promote to cloud long-term.
+        rows = self._db.fetch_sync(
+            "SELECT * FROM episodic_memories WHERE importance >= %s "
+            "AND (metadata_json->>'consolidated') IS DISTINCT FROM 'true' "
+            "AND type <> 'archive' ORDER BY created_at ASC LIMIT %s",
+            (min_importance, limit))
+        return [self._normalize(r) for r in rows]
+
+    def get_salient_unconsolidated(self, min_importance: float = 0.6, limit: int = 200) -> list[dict]:
+        return self._salient_unconsolidated_sync(min_importance, limit)
+
+    async def get_salient_unconsolidated_async(self, min_importance: float = 0.6, limit: int = 200) -> list[dict]:
+        import asyncio
+        return await asyncio.to_thread(self._salient_unconsolidated_sync, min_importance, limit)
+
     def batch_update_decay_scores(self, updates: list[tuple[str, float]]) -> None:
         if not updates:
             return

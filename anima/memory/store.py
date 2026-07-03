@@ -73,7 +73,13 @@ async def create_memory_store(db_path: str = ""):
         from anima.secret_store import get_secret
         working_dsn = (get_secret("LOCAL_DATABASE_URL") or "").strip()
         cloud_dsn = (get_secret("DATABASE_URL") or "").strip()
-        if working_dsn and cloud_dsn and working_dsn != cloud_dsn:
+        # Fold common host aliases so two DSNs that point at the SAME physical DB
+        # (localhost vs 127.0.0.1) aren't treated as distinct tiers — that would make
+        # the promoter write self-referential archive churn into one DB. Not a full
+        # URL parse, just enough to catch the realistic misconfig.
+        def _norm(dsn: str) -> str:
+            return dsn.lower().replace("127.0.0.1", "localhost").replace("[::1]", "localhost")
+        if working_dsn and cloud_dsn and _norm(working_dsn) != _norm(cloud_dsn):
             long_term = await PgMemoryStore.create(dsn=cloud_dsn)
             working = await PgMemoryStore.create(dsn=working_dsn)
             log.info("Memory backend: TIERED (working=local Postgres, long_term=cloud)")

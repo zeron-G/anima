@@ -367,6 +367,12 @@ class MemoryRetriever:
             log.warning("Tier 2 semantic search failed: %s", exc)
             knowledge_hits = []
 
+        # Drop promoted (consolidated) originals: search_memories_async does NOT filter
+        # them, so without this a memory promoted to the cloud tier surfaces both here
+        # (local original) AND below (its cloud copy) — the same fact injected twice.
+        # Mirrors the Tier-3 recency filter (see _stage_recent).
+        knowledge_hits = [m for m in knowledge_hits if not _is_consolidated(m)]
+
         # Tiered recall: also search the shared CLOUD long-term store (consolidated
         # salient memories + cross-node experience). Cloud-down degrades gracefully
         # to local-only. Merge by id so a memory present in both isn't double-counted.
@@ -374,7 +380,9 @@ class MemoryRetriever:
             try:
                 cloud_hits = await self._long_term.search_memories_async(query=query, limit=5)
                 seen = {m.get("id", "") for m in knowledge_hits}
-                knowledge_hits = list(knowledge_hits) + [m for m in cloud_hits if m.get("id", "") not in seen]
+                knowledge_hits = list(knowledge_hits) + [
+                    m for m in cloud_hits
+                    if m.get("id", "") not in seen and not _is_consolidated(m)]
             except Exception as exc:
                 log.warning("Tier 2 cloud semantic search failed (local-only): %s", exc)
 
@@ -497,3 +505,21 @@ def _find_candidate(
         if cand.get("id") == candidate_id:
             return cand
     return None
+
+
+def _is_consolidated(mem: dict[str, Any]) -> bool:
+    """True if a memory row is flagged consolidated in metadata_json.
+
+    A consolidated memory has been promoted to the shared long-term tier; its
+    verbatim/summarised copy lives there. Every recall stage must skip it on the
+    working tier or the same fact surfaces twice (local original + cloud copy).
+    """
+    meta_raw = mem.get("metadata_json", "{}")
+    if isinstance(meta_raw, str):
+        try:
+            meta = json.loads(meta_raw)
+        except (json.JSONDecodeError, TypeError):
+            return False
+    else:
+        meta = meta_raw or {}
+    return bool(meta.get("consolidated"))

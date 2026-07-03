@@ -1450,6 +1450,17 @@ async def run() -> bool:
     pg_sync = core.get("pg_sync")
     if pg_sync:
         await pg_sync.stop()
+    # Tiered memory: flush any pending SALIENT local memories up to the shared cloud
+    # long-term store before we go down (best-effort; never blocks shutdown).
+    _ms = core.get("memory_store")
+    if getattr(_ms, "tiered", False):
+        try:
+            from anima.memory.decay import MemoryDecay
+            n = await MemoryDecay().flush_promote(_ms, llm_router=None)
+            if n:
+                log.info("Shutdown flush: promoted %d salient memories to long-term", n)
+        except Exception as e:  # noqa: BLE001
+            log.debug("shutdown promote-flush skipped: %s", e)
     await core["memory_store"].close()
 
     if restart_requested:

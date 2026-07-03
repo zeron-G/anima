@@ -231,7 +231,7 @@ def _default_task_pool() -> list[IdleTask]:
         IdleTask(
             id="memory_deep_consolidation",
             name="深度记忆整合",
-            description="Run MemoryDecay.consolidate() — merge similar memories, prune stale entries, compress episodic chains",
+            description="Run MemoryDecay.consolidate() — promote salient local memories to the shared long-term tier (summarise clusters, copy singletons verbatim)",
             weight=TaskWeight.HEAVY, min_idle_level="deep",
             cooldown_s=3600, max_duration_s=600, priority=7,
             handler="memory.deep_consolidation",
@@ -537,30 +537,32 @@ class IdleScheduler:
             self.mark_task_done(task_id)
 
     async def _run_memory_consolidation(self, task_id: str) -> None:
-        """Execute decay score update + deep memory consolidation.
+        """Execute decay score update + salience-gated promotion to long-term.
 
         Step 1: Recompute decay_score for all memories (time-weighted importance).
-        Step 2: Consolidate stale memories (decay_score < threshold) into archives.
+        Step 2: Promote SALIENT local working memories into the shared cloud
+                long-term tier (tiered memory). Promotion is a durability /
+                cross-node-visibility operation and MUST run regardless of LLM
+                budget — the budget only decides summary QUALITY (LLM prose vs
+                rule-based), and standalone memories are copied verbatim anyway.
         """
         try:
-            if not self._memory_decay or not self._llm_router or not self._memory_store:
-                log.debug("Memory consolidation skipped — MemoryDecay/LLMRouter/MemoryStore not wired")
+            if not self._memory_decay or not self._memory_store:
+                log.debug("Memory consolidation skipped — MemoryDecay/MemoryStore not wired")
                 return
 
             # Step 1: Update all decay scores (MUST run before consolidation)
             updated = await self._memory_decay.update_all_scores(self._memory_store)
             log.info("Decay scores updated: %d memories recomputed", updated)
 
-            # Step 2: Consolidate stale memories
-            budget_ok = self._llm_router.check_budget(estimated_cost=0.005)
-            if not budget_ok:
-                log.info("Memory consolidation skipped — LLM budget exceeded (decay scores still updated)")
-                return
-            log.info("Running deep memory consolidation")
-            consolidated = await self._memory_decay.consolidate(self._memory_store, self._llm_router, budget_ok)
-            log.info("Memory consolidation completed: %d memories archived", consolidated or 0)
+            # Step 2: Promote salient memories. budget_ok only tunes summary quality;
+            # promotion itself is never skipped on a tight budget.
+            budget_ok = bool(self._llm_router and self._llm_router.check_budget(estimated_cost=0.005))
+            log.info("Running salient-memory promotion (budget_ok=%s)", budget_ok)
+            promoted = await self._memory_decay.consolidate(self._memory_store, self._llm_router, budget_ok)
+            log.info("Memory promotion completed: %d memories promoted to long-term", promoted or 0)
         except Exception as e:
-            log.warning("Deep memory consolidation failed: %s", e)
+            log.warning("Salient-memory promotion failed: %s", e)
         finally:
             self.mark_task_done(task_id)
 

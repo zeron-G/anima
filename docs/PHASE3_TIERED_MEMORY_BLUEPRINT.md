@@ -184,9 +184,10 @@ retriever 现在只有 `self._store`。改动集中在 `retriever.py` 这一个 
 - 写路由（§2）：episodic/emotion/observation → working；`get_session_conversation`/`load_conversation_from_db` 读 working。
 - 验证：app 启动、聊天正常；原始行只落**本地** docker PG；云 PG 仍空；召回 = 本地（union 云空 = 本地）。断开云 PG，聊天与召回不受影响。
 
-### P3c — consolidation 变 promoter（本地→云、显著性闸门、flush-on-shutdown）
-- 触碰：`decay.py consolidate`（新签名 `(local, cloud, ...)`、显著性闸门、写云 `archive_to_knowledge`、标本地 consolidated）、`idle_scheduler.py:539`（双传 store）、shutdown/reconnect flush hook【新建】。
-- 验证：本地灌高显著性 + 低价值混合行，触发整理 → **只有显著簇的摘要出现在云 PG**（带 origin_node/locus），本地源被标 consolidated，低价值行留本地；召回能取到云摘要且不与本地原始行重复计数。
+### P3c — consolidation 变 promoter（本地→云、显著性闸门、flush-on-shutdown）✅ 已完成
+- 触碰：`decay.py consolidate`（改成 promoter：`min_salience` 闸门、`local/cloud` 内部解析、非分层 `local is cloud` no-op、簇≥2 摘要/孤立逐字写云 `archive_to_knowledge`、云写在标 consolidated 之前）、`decay.py get_salient_unconsolidated[_async]`【新增于 pg_store：排除 archive+已整理】、`decay.py flush_promote`【新增 shutdown 用】、`idle_scheduler.py:539`（promotion 不再被 LLM budget 门控，budget 只决定摘要质量）、`main.py` shutdown flush hook（仅 tiered，best-effort）。
+- 验证：双 docker PG（55432 working / 55433 cloud）跑 `verify_p3c.py`——4 条显著记忆促进（1 摘要 + 1 逐字，均 origin-tagged），低价值留本地，重跑 promote 0（不重复促进），非分层 no-op（0 归档）。
+- **对抗式复审（workflow wf_3c459e53）抓到并已修 4 个 confirmed**：① MEDIUM 召回重复计数——Tier-2 语义搜索不过滤 consolidated → 本地原始 + 云副本双出（修：`retriever._is_consolidated` 过滤两层语义结果，与 Tier-3 recency 对齐）② MEDIUM embedder 停机时促进=永久丢失——被标 consolidated 的原始离开本地召回，而云副本 embedding 为 NULL 不可召回（修：促进前 `embedder.openai_available()` + 一次 `embed_openai` 探活，停机则整轮跳过；无 key 走 ILIKE 不受影响）③ LOW 并发双促进——idle 整理与 shutdown flush 并发读同批未标行写重复归档（修：模块级 `_PROMOTE_LOCK`，flush 见锁则跳过）④ LOW `local is cloud` 对象身份挡不住别名 DSN（localhost vs 127.0.0.1）（修：`store.py` 比较前折叠 host 别名）。复审后 `verify_p3c.py` 增补三项断言（召回不泄漏 consolidated 原始 / embedder 停机门 / 非分层 no-op）全过；89 单测无回归。
 
 ### P3d — 情绪 per-locus 本地 + node 过滤（+ baseline fold）
 - 触碰：`pg_sync.py:51`（摘除 emotion_log）、`pg_schema.sql:35-41`（加 node_id）、`pg_store.py:250-264`（盖 origin + node 过滤 + async 修复）、`cognitive.py:181-195`（node 串入 restore）。baseline fold 可再拆为 P3d-2。

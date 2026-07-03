@@ -9,6 +9,7 @@ allows, rule-truncated otherwise).
 
 from __future__ import annotations
 
+import asyncio
 import math
 import time
 from typing import Any
@@ -16,6 +17,11 @@ from typing import Any
 from anima.utils.logging import get_logger
 
 log = get_logger("memory_decay")
+
+# Serialises promotion across invocations (idle consolidation task vs the shutdown
+# flush) on one node — without it both could read the same not-yet-marked salient
+# rows and write duplicate archives to the shared cloud tier.
+_PROMOTE_LOCK = asyncio.Lock()
 
 
 class MemoryDecay:
@@ -138,63 +144,93 @@ class MemoryDecay:
         store: Any,
         llm_router: Any,
         budget_ok: bool,
-        threshold: float = 0.1,
+        min_salience: float = 0.6,
     ) -> int:
-        """Consolidate stale memories whose effective score < *threshold*.
+        """PROMOTE salient local working memories into the shared CLOUD long-term
+        store (tiered memory, DISTRIBUTED_DESIGN v0.3 §3). Policy is promote-the-
+        important, NOT forget-the-stale:
 
-        Steps
-        -----
-        1. Fetch memories below the threshold that are not yet consolidated.
-        2. Cluster them by type + 6-hour time windows.
-        3. Summarise each cluster:
-           - If *budget_ok*, use the LLM (``tier=2``) for a concise summary.
-           - Otherwise, rule-truncate: first 50 characters of each memory.
-        4. Archive the summary as a new ``knowledge`` memory.
-        5. Mark the originals as consolidated.
+        1. Fetch SALIENT (importance ≥ ``min_salience``), not-yet-promoted local rows.
+        2. Cluster by type + 6h window.
+        3. A cluster of ≥2 related salient events → one LLM/rule summary; a standalone
+           salient memory → copied VERBATIM (a lone important memory must not be lost
+           to a 50-char truncation).
+        4. Write to the CLOUD long-term store (append-only, origin-tagged).
+        5. Mark the local originals consolidated so they leave local recall — recall
+           then finds them via the cloud tier (no double-count). Low-value memories
+           are left local to decay out of recall naturally.
 
-        Returns
-        -------
-        Number of original memories consolidated.
+        Tiered: local = ``store.working``, cloud = ``store.long_term``. Non-tiered:
+        local IS cloud → no-op (nothing to promote to). Cloud write happens BEFORE
+        the local mark — a crash between them re-promotes (rare duplicate) rather
+        than loses the memory (accepted tradeoff). Marking consolidated drops the
+        local original from BOTH recall stages (recency and — see retriever
+        _is_consolidated — semantic), so recall of a promoted memory comes from the
+        cloud copy; the embedder gate below keeps that copy recallable.
+
+        Returns the number of local memories promoted.
         """
-        now = time.time()
-        # Below-threshold, not-yet-consolidated rows via the PG-correct primitive
-        # (was raw `?` SQL → silent no-op). decay_score must be fresh, so the idle
-        # scheduler runs update_all_scores() first.
-        stale = await store.get_memories_below_threshold_async(threshold)
-        if not stale:
+        local = getattr(store, "working", store)
+        cloud = getattr(store, "long_term", store)
+
+        # Promotion only means something across TWO distinct tiers. In the default
+        # single-store (non-tiered) path local IS cloud — promoting would just create
+        # archive duplicates and hide the originals (churn, no benefit). Passive decay
+        # (recall's decay_score floor) already handles forgetting there, so no-op.
+        if local is cloud:
             return 0
 
-        clusters = self._cluster_by_topic(stale)
-        total_consolidated = 0
+        # A promoted memory is recalled from its CLOUD copy only. When embeddings are
+        # ON (key present), that copy must carry a non-NULL embedding to be findable
+        # via pgvector — so if the embedder is momentarily down we must NOT promote,
+        # or the memory becomes unrecallable from every tier (local original is about
+        # to be marked consolidated). One cheap probe gates the whole cycle. With no
+        # key, recall uses ILIKE and a NULL-embedding cloud copy is still findable.
+        from anima.memory import embedder
+        if embedder.openai_available() and await embedder.embed_openai("healthcheck") is None:
+            log.warning("Promotion skipped this cycle — embedder key present but unavailable")
+            return 0
 
-        for cluster in clusters:
-            if len(cluster) < 2:
-                # Clean up very old singletons (effective < 0.05) by marking them
-                # consolidated so they stop being re-scanned.
-                ids = [m["id"] for m in cluster
-                       if self.compute_effective_score(m, now) < 0.05]
-                if ids:
-                    await store.mark_consolidated_async(ids)
-                continue
+        async with _PROMOTE_LOCK:
+            salient = await local.get_salient_unconsolidated_async(min_salience, limit=200)
+            if not salient:
+                return 0
 
-            summary = await self._summarise_cluster(cluster, llm_router, budget_ok)
-            mem_type = cluster[0].get("type", "observation")
-            ids = [m["id"] for m in cluster]
+            clusters = self._cluster_by_topic(salient)
+            promoted = 0
+            for cluster in clusters:
+                ids = [m["id"] for m in cluster]
+                if len(cluster) >= 2:
+                    content = await self._summarise_cluster(cluster, llm_router, budget_ok)
+                    meta = {"promoted": True, "cluster_type": cluster[0].get("type", "observation")}
+                else:
+                    content = cluster[0].get("content", "")
+                    meta = {"promoted": True, "verbatim": True, "orig_type": cluster[0].get("type", "")}
+                if not content:
+                    continue
+                await cloud.archive_to_knowledge_async(content, ids, metadata=meta)  # cloud, origin-tagged
+                await local.mark_consolidated_async(ids)                            # then mark local
+                promoted += len(cluster)
 
-            # Archive the summary (append-only; origin-tagged via save_memory), then
-            # mark the originals consolidated (metadata flag; content_hash preserved).
-            await store.archive_to_knowledge_async(
-                summary, ids, metadata={"consolidated_type": mem_type})
-            await store.mark_consolidated_async(ids)
-            total_consolidated += len(cluster)
+        if promoted:
+            log.info("Promoted %d salient memories to long-term (%d entries)",
+                     promoted, len(clusters))
+        return promoted
 
-        if total_consolidated:
-            log.info(
-                "Consolidated %d memories into %d summaries",
-                total_consolidated,
-                sum(1 for c in clusters if len(c) >= 2),
-            )
-        return total_consolidated
+    async def flush_promote(self, store: Any, llm_router: Any = None) -> int:
+        """Best-effort promotion flush (e.g. on shutdown): push any pending salient
+        local memories to the shared cloud tier before the node goes down."""
+        # If an idle consolidation is mid-flight, don't run a second concurrent
+        # promoter (it would double-write archives) and don't block shutdown waiting
+        # on it — just skip; the in-flight run covers the pending memories.
+        if _PROMOTE_LOCK.locked():
+            log.debug("flush_promote skipped — consolidation already running")
+            return 0
+        try:
+            return await self.consolidate(store, llm_router, budget_ok=False)
+        except Exception as exc:  # noqa: BLE001 — flush must never block shutdown
+            log.debug("flush_promote skipped: %s", exc)
+            return 0
 
     # ------------------------------------------------------------------ #
     #  Clustering                                                          #
