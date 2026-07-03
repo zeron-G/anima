@@ -59,10 +59,14 @@ class PgMemoryStore:
         return m
 
     @classmethod
-    async def create(cls, db_path: str = "", dsn: str = "") -> "PgMemoryStore":
+    async def create(cls, db_path: str = "", dsn: str = "",
+                     allow_local_failover: bool = True) -> "PgMemoryStore":
         """Connect and apply the schema. dsn overrides DATABASE_URL (tests / a
-        specific instance); default = Neon primary + local fallback."""
-        db = PgDatabaseManager(dsn=dsn) if dsn else PgDatabaseManager()
+        specific instance); default = Neon primary + local fallback.
+        allow_local_failover=False → cloud-only (no local-DB failover); used for the
+        tiered long-term tier so a cloud outage can't strand shared data locally."""
+        db = (PgDatabaseManager(dsn=dsn, allow_local_failover=allow_local_failover)
+              if dsn else PgDatabaseManager(allow_local_failover=allow_local_failover))
         schema = (Path(__file__).parent / "pg_schema.sql").read_text(encoding="utf-8")
         await db.init(schema)
         log.info("PgMemoryStore ready (backend=Postgres%s)",

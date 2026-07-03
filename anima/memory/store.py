@@ -80,7 +80,10 @@ async def create_memory_store(db_path: str = ""):
         def _norm(dsn: str) -> str:
             return dsn.lower().replace("127.0.0.1", "localhost").replace("[::1]", "localhost")
         if working_dsn and cloud_dsn and _norm(working_dsn) != _norm(cloud_dsn):
-            long_term = await PgMemoryStore.create(dsn=cloud_dsn)
+            # Cloud tier is cloud-only: no local-DB failover (its default failover DSN
+            # is LOCAL_DATABASE_URL = the working tier's DB, which would silently strand
+            # shared global/long-term data on a cloud outage). Callers degrade instead.
+            long_term = await PgMemoryStore.create(dsn=cloud_dsn, allow_local_failover=False)
             working = await PgMemoryStore.create(dsn=working_dsn)
             log.info("Memory backend: TIERED (working=local Postgres, long_term=cloud)")
             return TieredMemoryStore(working, long_term)

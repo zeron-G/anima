@@ -30,13 +30,20 @@ log = get_logger("pg_db")
 class PgDatabaseManager:
     """Thread-safe, async-first Postgres manager with Neon→local failover."""
 
-    def __init__(self, dsn: str = "", local_dsn: str = "") -> None:
+    def __init__(self, dsn: str = "", local_dsn: str = "", allow_local_failover: bool = True) -> None:
         # On Windows, "localhost" resolves to IPv6 ::1 first; if Postgres only
         # listens on IPv4 the connect SILENTLY hangs the full connect_timeout
         # (~15s) before falling back to 127.0.0.1. That would stall every
         # offline failover. Pin local hosts to 127.0.0.1 to dodge it.
         self._dsn = self._ipv4_localhost(dsn or get_secret("DATABASE_URL"))
-        self._local_dsn = self._ipv4_localhost(local_dsn or get_secret("LOCAL_DATABASE_URL"))
+        # allow_local_failover=False is used for the tiered CLOUD tier: its failover
+        # DSN would otherwise default to LOCAL_DATABASE_URL — the SAME physical DB as
+        # the working tier — so a cloud-down write would silently land in the local
+        # tier and strand shared/global data. A cloud-only store must instead raise so
+        # callers can degrade explicitly (read local-only, write local fallback).
+        self._local_dsn = (
+            self._ipv4_localhost(local_dsn or get_secret("LOCAL_DATABASE_URL"))
+            if allow_local_failover else "")
         self._conn: psycopg.Connection | None = None
         self._using_local = False
         self._sync_write_lock = threading.Lock()

@@ -279,7 +279,8 @@ async def _init_llm(config: dict, tool_registry, tool_executor, memory_store) ->
         from anima.network.node import NodeIdentity
         _ni = NodeIdentity()
         node_id_str = _ni.node_id
-    static_store = StaticKnowledgeStore(memory_store, node_id=node_id_str)
+    static_store = StaticKnowledgeStore(memory_store, node_id=node_id_str,
+                                        long_term=getattr(memory_store, "long_term", None))
 
     # Populate Tier 1 static knowledge from environment.md (if exists)
     from anima.config import data_dir
