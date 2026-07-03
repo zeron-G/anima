@@ -20,6 +20,12 @@
 
 **安全前提（Phase 1 入场券，见 §7）**：关两个 live P0（空 `network.secret` / 远程进化自动批准）、Azure 上 Tailscale、Ed25519 控制平面 + 能力矩阵、`boot_health` CANDIDATE/KNOWN_GOOD 拆分。
 
+**信任层残余风险（对抗式复审 GO 后已知并接受，commit 7466aaf + fast-follow）**：
+1. **数据面信任 = PSK 持有者信任**：任何持 `network.secret` 的节点可伪造 `session_lock/release`、`task_result`、gossip 状态、心跳（这些是数据面，只 PSK 校验，无 Ed25519）。安全下限 = "PSK 不泄露"。保护好 PSK，疑似节点被攻陷即轮换。
+2. **被攻陷的"已 pin 控制节点"保留其角色权限**，直到 operator 从 `network.trust` 吊销其 pubkey。EMBODIED 持 `converse`+`delegate` = 能向 peer 的认知循环注入带工具的 prompt（PiDog 是物理设备，若被盗/篡改是真实威胁面）——缓解靠 operator 吊销 + 未来的下游能力收敛（委派任务降权 token，尚未建）。
+3. **`task_result` 回程半只 PSK**（可被 PSK 持有者伪造以 resolve 请求方的 task Future）——LOW，后续给 task_result 也签 Ed25519。
+控制面（危险指令）已双层门控（Ed25519 身份 + pin 角色）；无 PSK 的外部攻击者被完全挡住。
+
 ---
 
 # 附：设计依据全文（讨论稿 v0.1）

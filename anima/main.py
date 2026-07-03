@@ -529,7 +529,11 @@ async def _init_gossip(config: dict, core: dict, heartbeat_deps: dict) -> dict:
         # authenticated sender, else any PSK member could release a peer's locks
         # (finding #2).
         if etype in ("session_lock", "session_release"):
-            if source_node and event_data.get("node_id") != source_node:
+            # Require a non-empty authenticated source that matches the acting
+            # node_id. The `not source_node` guard is essential — otherwise an
+            # empty source_node short-circuits the binding and any PSK holder can
+            # release a victim's lock (re-review still-open finding #2).
+            if not source_node or event_data.get("node_id") != source_node:
                 log.warning("dropping %s: node_id %r != authenticated source %r",
                             etype, event_data.get("node_id"), source_node)
                 return
@@ -807,8 +811,10 @@ async def _init_channels(config: dict, core: dict, gossip_result: dict) -> dict:
                     priority=EventPriority.HIGH,
                     source="discord",
                 ))
-                # Also broadcast to network so other nodes see it
-                await gossip_mesh.broadcast_event(data)
+                # (No cross-node relay: the old broadcast_event(data) sent a
+                # typeless payload that now fail-closes at receivers — and pre-fix
+                # it was an ungated injection path. If cross-node channel relay is
+                # wanted, add it as an authz-gated control event, not a raw payload.)
 
         dc.set_message_handler(on_discord_message)
         await dc.start()
@@ -832,7 +838,7 @@ async def _init_channels(config: dict, core: dict, gossip_result: dict) -> dict:
                     priority=EventPriority.HIGH,
                     source="telegram",
                 ))
-                await gossip_mesh.broadcast_event(data)
+                # (No cross-node relay — see the discord handler note above.)
 
         tg.set_message_handler(on_telegram_message)
         await tg.start()

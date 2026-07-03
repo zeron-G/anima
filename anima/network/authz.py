@@ -154,14 +154,15 @@ class MeshAuthorizer:
         if abs(now - ts) > CONTROL_MAX_AGE_S:
             return False, f"stale control message ({abs(now - ts):.0f}s old)"
         mid = getattr(msg, "id", "")
-        if mid:
-            if mid in self._seen_ctrl:
-                return False, "replayed control message (id already seen)"
-            # prune expired ids, then record this one
-            if len(self._seen_ctrl) > 256:
-                cutoff = now - CONTROL_MAX_AGE_S
-                self._seen_ctrl = {k: v for k, v in self._seen_ctrl.items() if v > cutoff}
-            self._seen_ctrl[mid] = now
+        if not mid:
+            return False, "control message missing id (cannot dedup)"
+        if mid in self._seen_ctrl:
+            return False, "replayed control message (id already seen)"
+        # prune expired ids, then record this one
+        if len(self._seen_ctrl) > 256:
+            cutoff = now - CONTROL_MAX_AGE_S
+            self._seen_ctrl = {k: v for k, v in self._seen_ctrl.items() if v > cutoff}
+        self._seen_ctrl[mid] = now
 
         return True, "ok"
 

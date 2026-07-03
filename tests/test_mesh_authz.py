@@ -213,6 +213,16 @@ def test_strip_provenance_recursive():
     assert payload["task"]["cmd"] == "rm -rf"          # non-prov keys preserved
 
 
+def test_empty_control_id_rejected(tmp_path):
+    # a control frame with a blank id can't be replay-deduped → reject
+    coord, pidog, dev = _keys(tmp_path, "c"), _keys(tmp_path, "p"), _keys(tmp_path, "d")
+    a = _authorizer(coord, pidog, dev)
+    m = NetworkMessage(type="task_delegate", source_node="azure", payload={}, id="")
+    m.sign_control(coord)
+    ok, reason = a.authorize(m)
+    assert ok is False and "id" in reason
+
+
 def test_tag_provenance_stamps_nested_task(tmp_path):
     coord, pidog, dev = _keys(tmp_path, "c"), _keys(tmp_path, "p"), _keys(tmp_path, "d")
     a = _authorizer(coord, pidog, dev)
