@@ -23,12 +23,15 @@ class UsageTracker:
         auth_mode: str = "apikey",
         event_type: str = "",
         success: bool = True,
+        provider: str = "",
     ) -> None:
         """Record a single LLM call.
 
-        Detects the provider from the model name and delegates to the store.
+        Uses the caller-supplied *provider* when given (the router knows the exact
+        cascade tier it dispatched, incl. codex/openrouter prefixes that the name-based
+        guess mislabels); otherwise falls back to detecting it from the model name.
         """
-        provider = self._detect_provider(model)
+        provider = provider or self._detect_provider(model)
         self._store.log_llm_usage(
             model=model,
             provider=provider,
@@ -56,6 +59,10 @@ class UsageTracker:
         """
         model_lower = model.lower()
         # Prefix-based (explicit) — fast O(1) checks first
+        if model_lower.startswith("codex/"):
+            return "codex"
+        if model_lower.startswith("openrouter/"):
+            return "openrouter"
         if model_lower.startswith("claude-") or model_lower.startswith("claude_"):
             return "anthropic"
         if model_lower.startswith("local/"):

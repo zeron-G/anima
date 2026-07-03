@@ -316,41 +316,48 @@ class PgMemoryStore:
 
     _COST_PER_1M = {"opus": (15.0, 75.0), "sonnet": (3.0, 15.0), "haiku": (0.25, 1.25),
                     "gpt-4o": (2.5, 10.0), "deepseek": (0.3, 1.2), "codex": (0.0, 0.0),
-                    "local": (0.0, 0.0)}
+                    "mini": (0.15, 0.60), "local": (0.0, 0.0)}
 
-    def _est_cost(self, model: str, pt: int, ct: int) -> float:
+    def _est_cost(self, model: str, pt: int, ct: int,
+                  provider: str = "", auth_mode: str = "") -> float:
+        # OAuth (ChatGPT/Codex subscription), codex, and local carry no marginal
+        # per-token cost — pricing them as API models is what fabricated the earlier
+        # "$347" (Codex OAuth gpt-5.4-mini mislabeled + billed at Opus rates).
+        if auth_mode == "oauth" or provider in ("codex", "local"):
+            return 0.0
         m = model.lower()
         for k, (i, o) in self._COST_PER_1M.items():
             if k in m:
                 return (pt * i + ct * o) / 1_000_000
-        return (pt * 3.0 + ct * 15.0) / 1_000_000
+        # Unknown model → conservative mini-class default, NOT the old Opus default.
+        return (pt * 0.15 + ct * 0.60) / 1_000_000
+
+    def _usage_node(self) -> str | None:
+        return getattr(self, "origin_node", "") or None
 
     async def log_llm_usage_async(self, model: str, provider: str, auth_mode: str, tier: str,
                                   prompt_tokens: int, completion_tokens: int,
                                   event_type: str = "", success: bool = True) -> None:
         self._db.write_sync(
             "INSERT INTO llm_usage (id,timestamp,model,provider,auth_mode,tier,prompt_tokens,"
-            "completion_tokens,total_tokens,estimated_cost_usd,event_type,success) "
-            "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+            "completion_tokens,total_tokens,estimated_cost_usd,event_type,success,node_id) "
+            "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
             (gen_id("llm"), time.time(), model, provider, auth_mode, tier, prompt_tokens,
              completion_tokens, prompt_tokens + completion_tokens,
-             self._est_cost(model, prompt_tokens, completion_tokens), event_type, int(success)))
+             self._est_cost(model, prompt_tokens, completion_tokens, provider, auth_mode),
+             event_type, int(success), self._usage_node()))
 
     def log_llm_usage(self, model: str, provider: str, auth_mode: str, tier: str,
                       prompt_tokens: int, completion_tokens: int,
                       event_type: str = "", success: bool = True) -> None:
-        import asyncio
-        try:
-            asyncio.get_running_loop()
-        except RuntimeError:
-            pass
         self._db.write_sync(
             "INSERT INTO llm_usage (id,timestamp,model,provider,auth_mode,tier,prompt_tokens,"
-            "completion_tokens,total_tokens,estimated_cost_usd,event_type,success) "
-            "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+            "completion_tokens,total_tokens,estimated_cost_usd,event_type,success,node_id) "
+            "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
             (gen_id("llm"), time.time(), model, provider, auth_mode, tier, prompt_tokens,
              completion_tokens, prompt_tokens + completion_tokens,
-             self._est_cost(model, prompt_tokens, completion_tokens), event_type, int(success)))
+             self._est_cost(model, prompt_tokens, completion_tokens, provider, auth_mode),
+             event_type, int(success), self._usage_node()))
 
     async def get_usage_history_async(self, limit: int = 100) -> list[dict]:
         return await self._db.fetch(

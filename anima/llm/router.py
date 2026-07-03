@@ -242,7 +242,7 @@ class LLMRouter:
                 # providers.py already has: Anthropic read=90s, OpenAI read=180s,
                 # Local read=180s — these are more appropriate than a flat timeout.
                 resp = await completion(**kwargs)
-                self._record_usage(resp, tier=tier)
+                self._record_usage(resp, tier=tier, dispatched_model=model)
                 self._on_success()
                 # Track degradation/recovery
                 self._notify_model_change(primary, model, failed_models)
@@ -318,7 +318,7 @@ class LLMRouter:
             if tools:
                 kwargs["tools"] = tools
             resp = await _aio.wait_for(completion(**kwargs), timeout=300)
-            self._record_usage(resp, tier=0)  # tier 0 = local
+            self._record_usage(resp, tier=0, dispatched_model=self._local_model)  # tier 0 = local
             return resp
         except Exception as e:
             log.warning("Local LLM failed: %s", str(e)[:200])
@@ -399,7 +399,7 @@ class LLMRouter:
                         self._record_usage(
                             {"content": event.content, "tool_calls": event.tool_calls,
                              "usage": event.usage, "model": model},
-                            tier=tier,
+                            tier=tier, dispatched_model=model,
                         )
                         self._on_success()
                     yield event
@@ -528,23 +528,44 @@ class LLMRouter:
             "total_tokens": total_prompt + total_completion,
         }
 
-    def _record_usage(self, resp: dict, tier: int) -> None:
+    @staticmethod
+    def _provider_auth(model: str) -> tuple[str, str]:
+        """Derive (provider, auth_mode) from the DISPATCHED model string's prefix —
+        the reliable signal for what actually ran. The old code detected the provider
+        from the response's prefix-stripped name (codex/gpt-5.4-mini → "gpt-5.4-mini"
+        → misread as openai) and read auth_mode off the Anthropic token regardless of
+        the provider used, so every Codex-OAuth call logged as openai/apikey."""
+        m = (model or "").lower()
+        if m.startswith("codex/"):
+            return ("codex", "oauth")            # ChatGPT/Codex subscription
+        if m.startswith("openrouter/"):
+            return ("openrouter", "apikey")
+        if m.startswith("openai/"):
+            return ("openai", "apikey")
+        if m.startswith("deepseek/"):
+            return ("deepseek", "apikey")
+        if m.startswith("local/"):
+            return ("local", "local")
+        # Bare name → Anthropic; auth depends on the kind of Anthropic token present.
+        from anima.llm.providers import _get_token, _is_oauth_token
+        return ("anthropic", "oauth" if _is_oauth_token(_get_token()) else "apikey")
+
+    def _record_usage(self, resp: dict, tier: int, dispatched_model: str = "") -> None:
         usage = resp.get("usage", {})
         usage["tier"] = tier
         usage["timestamp"] = time.time()
-        usage["model"] = resp.get("model", "")
+        model = dispatched_model or resp.get("model", "") or (
+            self._tier1_model if tier == 1 else self._tier2_model)
+        usage["model"] = model
         self._usage.append(usage)
         if self._usage_tracker:
-            from anima.llm.providers import _get_token, _is_oauth_token
-            token = _get_token()
-            auth = "oauth" if _is_oauth_token(token) else "apikey"
-            model = resp.get("model", self._tier1_model if tier == 1 else self._tier2_model)
+            provider, auth = self._provider_auth(model)
             try:
                 self._usage_tracker.record(
                     model=model, tier=f"tier{tier}",
                     prompt_tokens=usage.get("prompt_tokens", 0),
                     completion_tokens=usage.get("completion_tokens", 0),
-                    auth_mode=auth,
+                    auth_mode=auth, provider=provider,
                 )
             except Exception as e:
                 log.debug("Usage tracking: %s", e)

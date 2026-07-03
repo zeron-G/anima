@@ -99,8 +99,11 @@ CREATE TABLE IF NOT EXISTS state_snapshots (
 CREATE TABLE IF NOT EXISTS llm_usage (
     id TEXT PRIMARY KEY, timestamp DOUBLE PRECISION, model TEXT, provider TEXT,
     auth_mode TEXT, tier TEXT, prompt_tokens INTEGER, completion_tokens INTEGER,
-    total_tokens INTEGER, estimated_cost_usd REAL, event_type TEXT, success INTEGER DEFAULT 1
+    total_tokens INTEGER, estimated_cost_usd REAL, event_type TEXT, success INTEGER DEFAULT 1,
+    node_id TEXT   -- which node spent these tokens (global per-node attribution)
 );
+ALTER TABLE llm_usage ADD COLUMN IF NOT EXISTS node_id TEXT;  -- migrate existing DBs
+CREATE INDEX IF NOT EXISTS idx_llm_usage_node ON llm_usage(node_id, timestamp);
 CREATE INDEX IF NOT EXISTS idx_llm_usage_ts    ON llm_usage(timestamp);
 CREATE INDEX IF NOT EXISTS idx_llm_usage_model ON llm_usage(model);
 
