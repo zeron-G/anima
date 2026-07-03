@@ -470,12 +470,20 @@ async def _init_gossip(config: dict, core: dict, heartbeat_deps: dict) -> dict:
         capabilities=[t.name for t in core["tool_registry"].list_tools()],
     )
     from anima.secret_store import resolve as _resolve_secret
+    # Control-plane trust: this node's Ed25519 identity + the authorizer that
+    # verifies + role-authorizes inbound control messages (DISTRIBUTED_DESIGN §6).
+    from anima.network.keys import NodeKeys
+    from anima.network.authz import MeshAuthorizer
+    _node_keys = NodeKeys.load_or_create()
+    _authorizer = MeshAuthorizer.from_config()
     gossip_mesh = GossipMesh(
         identity=node_identity,
         local_state=node_state,
         network_secret=_resolve_secret(get("network.secret", "")),
         listen_port=get("network.listen_port", 9420),
         bind_host=get("network.bind_host", "*"),
+        node_keys=_node_keys,
+        authorizer=_authorizer,
     )
     # Configure peers
     peers = get("network.peers", [])
@@ -507,23 +515,39 @@ async def _init_gossip(config: dict, core: dict, heartbeat_deps: dict) -> dict:
     _cognitive_ref: dict[str, Any] = {"cognitive": None}
     _cognitive_lock = threading.Lock()
 
-    def on_network_event_with_sessions(event_data):
-        # Handle session lock/release events from other nodes
+    def on_network_event_with_sessions(event_data, source_node=""):
+        # FAIL-CLOSED wire dispatcher (DISTRIBUTED_DESIGN §6, CRITICAL finding #1):
+        # inbound mesh events are handled ONLY by the explicit branches below.
+        # Control events (evolution_*/node_discussion) must carry the authorizer's
+        # _mesh_trusted stamp (set only after Ed25519 + role authz). Session ops are
+        # data-plane but source-bound. ANY unrecognized type is DROPPED — it must
+        # never fall through to a tool-enabled USER_MESSAGE.
         etype = event_data.get("type", "")
-        if etype == "session_lock":
-            session_router.handle_remote_lock(
-                event_data.get("session_id", ""),
-                event_data.get("node_id", ""),
-                event_data.get("channel", ""),
-                event_data.get("timestamp", 0),
-            )
+        trusted = bool(event_data.get("_mesh_trusted"))
+
+        # Session ownership (data-plane): the acting node_id MUST equal the
+        # authenticated sender, else any PSK member could release a peer's locks
+        # (finding #2).
+        if etype in ("session_lock", "session_release"):
+            if source_node and event_data.get("node_id") != source_node:
+                log.warning("dropping %s: node_id %r != authenticated source %r",
+                            etype, event_data.get("node_id"), source_node)
+                return
+            if etype == "session_lock":
+                session_router.handle_remote_lock(
+                    event_data.get("session_id", ""), event_data.get("node_id", ""),
+                    event_data.get("channel", ""), event_data.get("timestamp", 0))
+            else:
+                session_router.handle_remote_release(
+                    event_data.get("session_id", ""), event_data.get("node_id", ""))
             return
-        if etype == "session_release":
-            session_router.handle_remote_release(
-                event_data.get("session_id", ""),
-                event_data.get("node_id", ""),
-            )
-            return
+
+        # ── Control events: require the authorizer's trust stamp ──
+        if etype in ("evolution_propose", "evolution_vote", "evolution_deployed", "node_discussion"):
+            if not trusted:
+                log.warning("dropping control event '%s' from %s: not authorized "
+                            "(no _mesh_trusted)", etype, source_node)
+                return
         # Evolution voting protocol
         if etype == "evolution_propose":
             # Remote node proposed an evolution. We DO NOT auto-approve — blindly
@@ -602,8 +626,10 @@ async def _init_gossip(config: dict, core: dict, heartbeat_deps: dict) -> dict:
             # Reply to our discussion — log it
             log.info("Discussion reply from %s: %s", event_data.get("from_node", "?")[:8], event_data.get("reply", "")[:80])
             return
-        # Regular event — forward to ANIMA if we own the session or it's unowned
-        on_network_event(event_data)
+        # FAIL-CLOSED: an unrecognized inbound mesh event does NOT reach the
+        # cognitive loop. Previously this fell through to on_network_event →
+        # tool-enabled USER_MESSAGE (HIGH), a critical ungated-injection vector.
+        log.debug("dropping unclassified mesh event '%s' from %s (fail-closed)", etype, source_node)
 
     def on_node_alive(node_id, state):
         on_network_event({
@@ -1144,6 +1170,17 @@ async def run() -> bool:
     llm = await _init_llm(config, core["tool_registry"], core["tool_executor"], core["memory_store"])
     hb = await _init_heartbeat(config, core, llm)
     net = await _init_network(config, core, llm, hb)
+    # Stamp this node's identity onto the memory store so every memory is
+    # origin-tagged for the distributed self (DISTRIBUTED_DESIGN §3).
+    try:
+        _ms = core.get("memory_store")
+        _ident = net.get("node_identity")
+        if _ms is not None:
+            import socket as _socket
+            _ms.origin_node = getattr(_ident, "node_id", "") or _socket.gethostname()
+            _ms.locus = get("runtime.role", "") or getattr(_ident, "runtime_role", "") or ""
+    except Exception as _e:  # noqa: BLE001 — tagging must never block startup
+        log.debug("origin-tag wiring skipped: %s", _e)
     cog = await _init_cognitive(config, core, llm, hb, net)
     hub, dashboard = _init_dashboard(core, llm, hb, cog, net, config)
     _wire_callbacks(cog["cognitive"], cog["terminal"], hub, core["agent_manager"], hb["heartbeat"], net)

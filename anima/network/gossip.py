@@ -18,6 +18,7 @@ from typing import Callable, Any
 import zmq
 
 from anima.network.protocol import NetworkMessage
+from anima.network.authz import strip_provenance
 from anima.network.node import NodeState, NodeIdentity
 from anima.utils.logging import get_logger
 
@@ -91,6 +92,8 @@ class GossipMesh:
         suspect_phi: float = 8.0,
         dead_phi: float = 16.0,
         recv_batch_limit: int = 50,
+        node_keys=None,
+        authorizer=None,
     ):
         self._identity = identity
         self._local_state = local_state
@@ -101,6 +104,10 @@ class GossipMesh:
         # IP (100.x) via network.bind_host so the mesh never listens on the public
         # NIC (DISTRIBUTED_DESIGN §6.5).
         self._bind_host = bind_host or "*"
+        # Control-plane trust: this node's Ed25519 signing identity + the
+        # authorizer that verifies+authorizes inbound control messages.
+        self._node_keys = node_keys
+        self._authorizer = authorizer
 
         # L-24: configurable gossip params (were class constants)
         self.GOSSIP_INTERVAL = gossip_interval
@@ -437,8 +444,7 @@ class GossipMesh:
                         target_node="*",
                         payload=self._local_state.to_dict(),
                     )
-                    if self._secret:
-                        msg.sign(self._secret)
+                    self._sign(msg)
                     pub.send(msg.pack())
 
                 # 3. Send any pending events (always — not just on gossip ticks)
@@ -449,8 +455,7 @@ class GossipMesh:
                         target_node="*",
                         payload=evt,
                     )
-                    if self._secret:
-                        emsg.sign(self._secret)
+                    self._sign(emsg)
                     pub.send(emsg.pack())
 
                 # 3b. Send pending task messages (task_delegate / task_result / task_cancel)
@@ -471,8 +476,7 @@ class GossipMesh:
                         target_node=target,
                         payload=task_msg,
                     )
-                    if self._secret:
-                        tmsg.sign(self._secret)
+                    self._sign(tmsg)
                     pub.send(tmsg.pack())
                     sent_task_count += 1
                     log.debug("Sent %s to %s", msg_type, target)
@@ -501,6 +505,9 @@ class GossipMesh:
                         rmsg = NetworkMessage.unpack(data)
                         if rmsg.source_node == self._identity.node_id:
                             continue
+                        # Strip attacker-preset provenance tags on ingest — only the
+                        # authorizer may (re)add _mesh_* on a message it authorized.
+                        strip_provenance(rmsg.payload)
                         if self._secret and not rmsg.verify(self._secret):
                             log.debug("Rejected unsigned/invalid msg %s from %s", rmsg.id, rmsg.source_node)
                             continue
@@ -513,11 +520,24 @@ class GossipMesh:
                             if self._dedup_check(rmsg.id):
                                 continue
 
+                        # Control-plane gate: dangerous message types must carry a
+                        # valid per-node Ed25519 signature AND the source's pinned
+                        # role must permit the action. PSK (above) proved membership;
+                        # this proves WHICH member + authority. Data-plane messages
+                        # pass straight through. Fail-closed: deny → drop.
+                        if self._authorizer is not None and self._authorizer.is_control(rmsg):
+                            ok, reason = self._authorizer.authorize(rmsg)
+                            if not ok:
+                                log.warning("mesh authz DENIED %s from %s: %s",
+                                            rmsg.type, rmsg.source_node, reason)
+                                continue
+                            self._authorizer.tag_provenance(rmsg)
+
                         if rmsg.type == "gossip":
                             self._handle_gossip(rmsg, sub, connected_peers)
                         elif rmsg.type == "event":
                             if self._on_event:
-                                self._on_event(rmsg.payload)
+                                self._on_event(rmsg.payload, rmsg.source_node)
                         elif rmsg.type == "task_delegate":
                             if self._on_task_delegate:
                                 self._handle_task_delegate(rmsg)
@@ -556,6 +576,15 @@ class GossipMesh:
         pub.close()
         sub.close()
         ctx.term()
+
+    def _sign(self, msg) -> None:
+        """PSK-sign every message (membership); additionally Ed25519-sign control
+        messages (identity) so peers can authenticate WHICH node sent them."""
+        if self._secret:
+            msg.sign(self._secret)
+        if (self._node_keys is not None and self._authorizer is not None
+                and self._authorizer.is_control(msg)):
+            msg.sign_control(self._node_keys)
 
     def _safe_callback(self, cb: Callable | None, *args: Any) -> None:
         """Invoke a node-state callback safely from the gossip thread.

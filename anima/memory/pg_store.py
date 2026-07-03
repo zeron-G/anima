@@ -42,6 +42,21 @@ class PgMemoryStore:
 
     def __init__(self, db: PgDatabaseManager) -> None:
         self._db = db
+        # Which node/locus produced a memory. Set by main from the node identity;
+        # stamped into every memory's metadata so the distributed self can later
+        # reconcile origin-tagged rows and recall "what I did AS pidog / at desktop"
+        # (DISTRIBUTED_DESIGN §3, Phase-1 no-migration: lives in metadata_json).
+        self.origin_node: str = ""
+        self.locus: str = ""
+
+    def _tag_origin(self, metadata: dict | None) -> dict:
+        """Stamp origin_node + locus into a memory's metadata (non-destructive)."""
+        m = dict(metadata or {})
+        if self.origin_node:
+            m.setdefault("origin_node", self.origin_node)
+        if self.locus:
+            m.setdefault("locus", self.locus)
+        return m
 
     @classmethod
     async def create(cls, db_path: str = "", dsn: str = "") -> "PgMemoryStore":
@@ -99,6 +114,7 @@ class PgMemoryStore:
         mid = gen_id("mem")
         now = time.time()
         emb = await self._embed(content, type)
+        metadata = self._tag_origin(metadata)
         self._db.write_sync(
             "INSERT INTO episodic_memories "
             "(id,type,content,importance,access_count,created_at,last_accessed,"
@@ -106,7 +122,7 @@ class PgMemoryStore:
             "VALUES (%s,%s,%s,%s,0,%s,%s,%s::jsonb,%s::jsonb,%s,%s,%s,%s,"
             + ("%s::vector" if emb else "NULL") + ")",
             (mid, type, content, importance, now, now,
-             json.dumps(metadata or {}, ensure_ascii=False),
+             json.dumps(metadata, ensure_ascii=False),
              json.dumps(tags or [], ensure_ascii=False),
              self._next_sync_seq(), self._content_hash(content, type),
              importance, session_id or "local", *( (emb,) if emb else () )),
@@ -119,13 +135,14 @@ class PgMemoryStore:
         """Sync save (no embedding — sync path can't await OpenAI)."""
         mid = gen_id("mem")
         now = time.time()
+        metadata = self._tag_origin(metadata)
         self._db.write_sync(
             "INSERT INTO episodic_memories "
             "(id,type,content,importance,access_count,created_at,last_accessed,"
             "metadata_json,tags_json,sync_seq,content_hash,decay_score,session_id) "
             "VALUES (%s,%s,%s,%s,0,%s,%s,%s::jsonb,%s::jsonb,%s,%s,%s,%s)",
             (mid, type, content, importance, now, now,
-             json.dumps(metadata or {}, ensure_ascii=False),
+             json.dumps(metadata, ensure_ascii=False),
              json.dumps(tags or [], ensure_ascii=False),
              self._next_sync_seq(), self._content_hash(content, type),
              importance, session_id or "local"),

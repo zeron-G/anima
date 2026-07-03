@@ -212,6 +212,17 @@ network:
   bind_host: "*"
   # Escape hatch: run the mesh WITHOUT a secret (unauthenticated). Never in prod.
   allow_insecure: false
+  # Control-plane trust: pin each peer's Ed25519 pubkey + role. Dangerous control
+  # messages (task_delegate / evolution_* / rollback / repair / quarantine) are
+  # accepted ONLY from a pinned node whose role permits the action. A node logs
+  # its own pubkey at startup ("PIN this pubkey ..."). Roles: coordinator | dev |
+  # embodied. Empty = no peer may issue control messages (fail-closed). Real values
+  # go in local/env.yaml per node. Example:
+  #   trust:
+  #     - { node_id: "azure-abc123", role: coordinator, pubkey: "<hex>" }
+  #     - { node_id: "pidog",        role: embodied,    pubkey: "<hex>" }
+  #     - { node_id: "desktop-xyz",  role: dev,         pubkey: "<hex>" }
+  trust: []
   peers: []
   gossip_interval_s: 5
   suspect_phi: 8
