@@ -247,21 +247,37 @@ class PgMemoryStore:
 
     # ── Emotion ──
 
+    # Emotion is PER-LOCUS: stamp this node on write, and on restore prefer THIS
+    # node's mood (self.origin_node). Unset ("") → global latest.
+    def _emotion_node(self) -> str | None:
+        return self.origin_node or None
+
     async def log_emotion_async(self, engagement: float, confidence: float, curiosity: float,
                                 concern: float, trigger: str = "") -> None:
         self._db.write_sync(
-            "INSERT INTO emotion_log (id,engagement,confidence,curiosity,concern,trigger,timestamp) "
-            "VALUES (%s,%s,%s,%s,%s,%s,%s)",
-            (gen_id("emo"), engagement, confidence, curiosity, concern, trigger, time.time()))
+            "INSERT INTO emotion_log (id,engagement,confidence,curiosity,concern,trigger,node_id,timestamp) "
+            "VALUES (%s,%s,%s,%s,%s,%s,%s,%s)",
+            (gen_id("emo"), engagement, confidence, curiosity, concern, trigger, self._emotion_node(), time.time()))
 
     def log_emotion(self, engagement: float, confidence: float, curiosity: float,
                     concern: float, trigger: str = "") -> None:
         self._db.write_sync(
-            "INSERT INTO emotion_log (id,engagement,confidence,curiosity,concern,trigger,timestamp) "
-            "VALUES (%s,%s,%s,%s,%s,%s,%s)",
-            (gen_id("emo"), engagement, confidence, curiosity, concern, trigger, time.time()))
+            "INSERT INTO emotion_log (id,engagement,confidence,curiosity,concern,trigger,node_id,timestamp) "
+            "VALUES (%s,%s,%s,%s,%s,%s,%s,%s)",
+            (gen_id("emo"), engagement, confidence, curiosity, concern, trigger, self._emotion_node(), time.time()))
 
     def get_latest_emotion(self) -> dict | None:
+        node = self._emotion_node()
+        if node is not None:
+            row = self._db.fetch_one_sync(
+                "SELECT engagement,confidence,curiosity,concern,timestamp FROM emotion_log "
+                "WHERE node_id = %s ORDER BY timestamp DESC LIMIT 1", (node,))
+            if row is not None:
+                return row
+            # No mood yet under this node's key (fresh node/locus, or pre-P3d rows whose
+            # node_id is NULL): seed continuity from the self's most recent mood rather
+            # than a cold baseline — S2 "mood survives ANY restart". In steady state a
+            # node has its own rows, so this fallback never fires (no cross-node bleed).
         return self._db.fetch_one_sync(
             "SELECT engagement,confidence,curiosity,concern,timestamp FROM emotion_log "
             "ORDER BY timestamp DESC LIMIT 1")

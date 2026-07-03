@@ -32,13 +32,20 @@ CREATE INDEX IF NOT EXISTS idx_episodic_embedding
     ON episodic_memories USING hnsw (embedding vector_cosine_ops);
 
 -- ── Emotion: numeric time-series, queried by recency. NO vectors. ──
+-- node_id makes emotion PER-LOCUS: each node restores only its own mood, so a
+-- shared/synced emotion_log never bleeds one node's feelings into another
+-- (DISTRIBUTED_DESIGN v0.3 §emotion — per-locus channel; slow shared baseline
+-- is a later P3d-2). NULL node_id = single-node / pre-migration rows.
 CREATE TABLE IF NOT EXISTS emotion_log (
     id         TEXT PRIMARY KEY,
     engagement REAL, confidence REAL, curiosity REAL, concern REAL,
     trigger    TEXT,
+    node_id    TEXT,
     timestamp  DOUBLE PRECISION
 );
+ALTER TABLE emotion_log ADD COLUMN IF NOT EXISTS node_id TEXT;  -- migrate existing DBs
 CREATE INDEX IF NOT EXISTS idx_emotion_ts ON emotion_log(timestamp);
+CREATE INDEX IF NOT EXISTS idx_emotion_node_ts ON emotion_log(node_id, timestamp);
 
 -- NOTE: persona prose (identity/*.md), feelings.md, growth_log.md, lorebook and
 -- golden_replies stay as FILES, not DB rows — they're human-authored and edited

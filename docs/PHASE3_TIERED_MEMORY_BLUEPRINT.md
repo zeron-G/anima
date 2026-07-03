@@ -189,9 +189,11 @@ retriever 现在只有 `self._store`。改动集中在 `retriever.py` 这一个 
 - 验证：双 docker PG（55432 working / 55433 cloud）跑 `verify_p3c.py`——4 条显著记忆促进（1 摘要 + 1 逐字，均 origin-tagged），低价值留本地，重跑 promote 0（不重复促进），非分层 no-op（0 归档）。
 - **对抗式复审（workflow wf_3c459e53）抓到并已修 4 个 confirmed**：① MEDIUM 召回重复计数——Tier-2 语义搜索不过滤 consolidated → 本地原始 + 云副本双出（修：`retriever._is_consolidated` 过滤两层语义结果，与 Tier-3 recency 对齐）② MEDIUM embedder 停机时促进=永久丢失——被标 consolidated 的原始离开本地召回，而云副本 embedding 为 NULL 不可召回（修：促进前 `embedder.openai_available()` + 一次 `embed_openai` 探活，停机则整轮跳过；无 key 走 ILIKE 不受影响）③ LOW 并发双促进——idle 整理与 shutdown flush 并发读同批未标行写重复归档（修：模块级 `_PROMOTE_LOCK`，flush 见锁则跳过）④ LOW `local is cloud` 对象身份挡不住别名 DSN（localhost vs 127.0.0.1）（修：`store.py` 比较前折叠 host 别名）。复审后 `verify_p3c.py` 增补三项断言（召回不泄漏 consolidated 原始 / embedder 停机门 / 非分层 no-op）全过；89 单测无回归。
 
-### P3d — 情绪 per-locus 本地 + node 过滤（+ baseline fold）
-- 触碰：`pg_sync.py:51`（摘除 emotion_log）、`pg_schema.sql:35-41`（加 node_id）、`pg_store.py:250-264`（盖 origin + node 过滤 + async 修复）、`cognitive.py:181-195`（node 串入 restore）。baseline fold 可再拆为 P3d-2。
-- 验证：两节点各写情绪，重启节点 A 只恢复 A 自己的 mood（今天会串到 B）；云 PG 不再有别节点原始情绪行。
+### P3d — 情绪 per-locus 本地 + node 过滤 ✅ 已完成（baseline fold = P3d-2 待做）
+- 触碰：`pg_schema.sql`（emotion_log 加 `node_id TEXT` + 幂等 `ALTER ... ADD COLUMN IF NOT EXISTS`（迁移旧库）+ `(node_id,timestamp)` 索引）、`pg_store.py`（`log_emotion[_async]` 盖 `origin_node`；`get_latest_emotion` 有 node 时按 `WHERE node_id` 严格取本节点、取不到再回落全局最新）、`pg_sync.py:_SPECS`（**摘除 emotion_log**——情绪是 per-locus 信号，不进共享/failover 库以免串味；取舍：Neon failover 时单节点 mood 回基线，最佳努力、很快重积）。**cognitive.py 无需改**（store 内部按 origin_node 过滤；origin_node 在 `restore_emotion_from_db` 前已设）。
+- 验证：docker working PG `verify_p3d.py`——node-A 只恢复自己 0.9（不串 node-B 更新的 0.1）、全局(未设)取最新、旧 NULL 行被严格过滤忽略/被全局拾取、迁移列生效。
+- **对抗式复审（workflow wf_c318c4ea）抓+修 3 confirmed（同一根因）**：① MED 情绪 node key 取自**可选的 mesh** `net["node_identity"]`——mesh 关闭时（默认 secret 空→fail-closed）回落裸 hostname，跨启动翻转 + 非唯一 → 严格过滤命中 0 行 mood 回基线（违反 S2）。修：`main.py` 改从**持久化 `NodeIdentity()`**（node.json，mesh 无关，稳定唯一 `anima-<host>-<rand8>`）取 origin_node。② ③ LOW 严格过滤无空回退 → P3d 升级首启（旧行 node_id=NULL）/ 新节点首启 mood 回基线。修：`get_latest_emotion` 严格取不到时**回落全局最新**做连续性种子（稳态每节点有自己的行→永不触发→无串味）。复审后 `verify_p3d.py` 增补回退 + 稳态无串味断言，全过；33 单测无回归。
+- **P3d-2 待做（baseline fold）**：慢共享情绪基线（跨节点缓慢趋同，止乒乓），与 per-locus 快通道分离。
 
 ### P3e — persona/soul 云权威 + 离线缓存 + 重连拉取
 - 触碰：persona/static_knowledge 读走 long_term、离线本地缓存表、重连 pull。

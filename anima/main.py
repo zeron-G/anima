@@ -1189,6 +1189,14 @@ async def run() -> bool:
     try:
         _ms = core.get("memory_store")
         _ident = net.get("node_identity")
+        if _ident is None:
+            # Mesh disabled (network.enabled=false, slim install, or fail-closed on a
+            # missing secret) → net has no node_identity. Load the PERSISTENT identity
+            # directly so origin_node is a STABLE, node-unique key regardless of mesh
+            # state — per-locus emotion restore keys off it; a bare hostname would flip
+            # across boots (mesh on/off) and reset mood (P3d review).
+            from anima.network.node import NodeIdentity
+            _ident = NodeIdentity()
         if _ms is not None:
             import socket as _socket
             _origin = getattr(_ident, "node_id", "") or _socket.gethostname()

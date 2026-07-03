@@ -48,7 +48,12 @@ def _adapt(value):
 # (table, timestamp/watermark column, conflict target, columns to skip on copy)
 _SPECS = [
     {"t": "episodic_memories", "ts": "created_at", "pk": "id"},
-    {"t": "emotion_log", "ts": "timestamp", "pk": "id"},
+    # emotion_log is intentionally NOT synced: emotion is a PER-LOCUS signal
+    # (DISTRIBUTED_DESIGN v0.3 §emotion). Each node stamps its own node_id and
+    # restores only its own mood (pg_store.get_latest_emotion), so a node's feelings
+    # must not propagate into a shared/failover store and bleed into another locus.
+    # Tradeoff: on a Neon-outage failover a single node's mood resets to baseline
+    # (best-effort restore, re-accumulates quickly) — accepted.
     {"t": "llm_usage", "ts": "timestamp", "pk": "id"},
     {"t": "audit_log", "ts": "timestamp", "pk": "id"},
     {"t": "state_snapshots", "ts": "timestamp", "pk": "id"},
