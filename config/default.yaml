@@ -77,13 +77,19 @@ decision:
   high_threshold: 0.7
 
 # ── Memory ──
-# Backend is Postgres + pgvector (Neon primary + local failover). Connection
-# strings live in .env: DATABASE_URL (primary) + LOCAL_DATABASE_URL (failover).
+# Backend is Postgres + pgvector. Connection strings live in .env.
+# Default (tiered=false): DATABASE_URL (Neon primary) + LOCAL_DATABASE_URL (failover),
+# one logical store with pg_sync failover-replay.
+# Tiered (DISTRIBUTED_DESIGN v0.3): DATABASE_URL = shared CLOUD long-term/persona,
+# LOCAL_DATABASE_URL = this node's LOCAL working store (distinct DB). High-frequency
+# raw writes stay local; consolidation promotes salient memories to the cloud. pg_sync
+# is skipped (the two tiers are independent, not a failover pair).
 memory:
   working_capacity: 20
   summary_interval: 20      # Compress conversation every N messages
   keep_recent: 10            # Keep last N raw messages after compression
-  sync_interval_s: 300       # Replica sync cadence: warm local while online; replay local→primary on reconnect
+  sync_interval_s: 300       # Replica sync cadence (non-tiered only)
+  tiered: false              # true → local working + cloud long-term (needs distinct LOCAL_DATABASE_URL)
 
 # ── Guardian / Sentinel (self-healing supervisor) ──
 # Detect + surface + (P2) safe reversible auto-repair. Per-component `mode`:

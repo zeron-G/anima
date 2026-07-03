@@ -104,10 +104,17 @@ async def _init_core(config: dict) -> dict:
     # Replica sync: warm the local failover DB while online, and replay
     # local-only writes back to the primary after an outage. No-op unless both
     # DATABASE_URL and LOCAL_DATABASE_URL are set (and distinct).
-    from anima.memory.pg_sync import PgSyncManager
-    pg_sync = PgSyncManager(memory_store._db,
-                            interval_s=get("memory.sync_interval_s", 300))
-    await pg_sync.start()
+    # Skip pg_sync in tiered mode: working + long_term are INDEPENDENT tiers, not a
+    # primary/local failover pair, so the failover-replay sync would be wrong there.
+    # (Tiered promotion local→cloud is the consolidation job, P3c.)
+    if getattr(memory_store, "tiered", False):
+        pg_sync = None
+        log.info("pg_sync skipped (tiered memory: working/long_term are independent tiers)")
+    else:
+        from anima.memory.pg_sync import PgSyncManager
+        pg_sync = PgSyncManager(memory_store._db,
+                                interval_s=get("memory.sync_interval_s", 300))
+        await pg_sync.start()
 
     # Register known remote nodes for cross-node communication
     from anima.tools.builtin.remote import register_node
@@ -310,6 +317,7 @@ async def _init_llm(config: dict, tool_registry, tool_executor, memory_store) ->
         static_store=static_store,
         lorebook=lorebook_engine,
         decay=memory_decay,
+        long_term=getattr(memory_store, "long_term", None),
     )
 
     # ── v3: Conversation Summarizer ──
@@ -1183,8 +1191,16 @@ async def run() -> bool:
         _ident = net.get("node_identity")
         if _ms is not None:
             import socket as _socket
-            _ms.origin_node = getattr(_ident, "node_id", "") or _socket.gethostname()
-            _ms.locus = get("runtime.role", "") or getattr(_ident, "runtime_role", "") or ""
+            _origin = getattr(_ident, "node_id", "") or _socket.gethostname()
+            _locus = get("runtime.role", "") or getattr(_ident, "runtime_role", "") or ""
+            # Set on BOTH tiers (a composite's __getattr__ is get-only, so setting on
+            # the composite wouldn't reach .working). getattr falls back to the plain
+            # store in the non-tiered case.
+            for _st in {id(getattr(_ms, "working", _ms)): getattr(_ms, "working", _ms),
+                        id(getattr(_ms, "long_term", None)): getattr(_ms, "long_term", None)}.values():
+                if _st is not None:
+                    _st.origin_node = _origin
+                    _st.locus = _locus
     except Exception as _e:  # noqa: BLE001 — tagging must never block startup
         log.debug("origin-tag wiring skipped: %s", _e)
     cog = await _init_cognitive(config, core, llm, hb, net)

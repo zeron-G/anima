@@ -132,11 +132,16 @@ class MemoryRetriever:
         static_store: StaticStoreProto | None = None,
         lorebook: LorebookProto | None = None,
         decay: DecayProto | None = None,
+        long_term: MemoryStoreProto | None = None,
     ) -> None:
         self._store = memory_store
         self._static = static_store
         self._lorebook = lorebook
         self._decay = decay
+        # Tiered memory: when set + distinct from the working store, semantic recall
+        # ALSO searches the shared cloud long-term store (consolidated memories +
+        # cross-node experience). None / same → single-tier behavior (unchanged).
+        self._long_term = long_term if (long_term is not None and long_term is not memory_store) else None
 
         # M-20: configurable RRF channel weights
         self._rrf_weights = {
@@ -360,7 +365,18 @@ class MemoryRetriever:
             knowledge_hits = await self._store.search_memories_async(query=query, limit=5)
         except Exception as exc:
             log.warning("Tier 2 semantic search failed: %s", exc)
-            return
+            knowledge_hits = []
+
+        # Tiered recall: also search the shared CLOUD long-term store (consolidated
+        # salient memories + cross-node experience). Cloud-down degrades gracefully
+        # to local-only. Merge by id so a memory present in both isn't double-counted.
+        if self._long_term is not None:
+            try:
+                cloud_hits = await self._long_term.search_memories_async(query=query, limit=5)
+                seen = {m.get("id", "") for m in knowledge_hits}
+                knowledge_hits = list(knowledge_hits) + [m for m in cloud_hits if m.get("id", "") not in seen]
+            except Exception as exc:
+                log.warning("Tier 2 cloud semantic search failed (local-only): %s", exc)
 
         for rank, mem in enumerate(knowledge_hits):
             mid = mem.get("id", "")
