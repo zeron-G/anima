@@ -9,7 +9,6 @@ allows, rule-truncated otherwise).
 
 from __future__ import annotations
 
-import json
 import math
 import time
 from typing import Any
@@ -113,31 +112,20 @@ class MemoryDecay:
         Number of memories updated.
         """
         now = time.time()
-        rows = await store._db.fetch(
-            "SELECT id, type, importance, created_at, access_count, "
-            "decay_score, metadata_json FROM episodic_memories"
-        )
+        # Use the PG-correct store primitives (were raw `?`-placeholder SQL on
+        # store._db, which Postgres rejects → this whole task was a silent no-op).
+        rows = await store.get_unconsolidated_memories_async(limit=5000)
 
-        updates: list[tuple[float, str]] = []
+        updates: list[tuple[str, float]] = []
         for row_dict in rows:
-            meta = _parse_meta(row_dict.get("metadata_json", "{}"))
-            if meta.get("consolidated"):
-                continue
-
             effective = self.compute_effective_score(row_dict, now)
-
-            # Only write if the score actually changed
             old = float(row_dict.get("decay_score") or row_dict.get("importance", 0))
             if abs(effective - old) < 1e-6:
                 continue
-
-            updates.append((effective, row_dict["id"]))
+            updates.append((row_dict["id"], effective))   # (id, score)
 
         if updates:
-            await store._db.execute_many(
-                "UPDATE episodic_memories SET decay_score = ? WHERE id = ?",
-                updates,
-            )
+            await store.batch_update_decay_scores_async(updates)
             log.info("Updated effective scores for %d memories", len(updates))
         return len(updates)
 
@@ -169,23 +157,10 @@ class MemoryDecay:
         Number of original memories consolidated.
         """
         now = time.time()
-        rows = await store._db.fetch(
-            "SELECT id, type, content, importance, created_at, access_count, "
-            "metadata_json FROM episodic_memories "
-            "ORDER BY created_at ASC"
-        )
-
-        # Filter to stale, unconsolidated memories
-        stale: list[dict[str, Any]] = []
-        for d in rows:
-            meta = _parse_meta(d.get("metadata_json", "{}"))
-            if meta.get("consolidated"):
-                continue
-            effective = self.compute_effective_score(d, now)
-            if effective < threshold:
-                d["_meta"] = meta
-                stale.append(d)
-
+        # Below-threshold, not-yet-consolidated rows via the PG-correct primitive
+        # (was raw `?` SQL → silent no-op). decay_score must be fresh, so the idle
+        # scheduler runs update_all_scores() first.
+        stale = await store.get_memories_below_threshold_async(threshold)
         if not stale:
             return 0
 
@@ -194,46 +169,23 @@ class MemoryDecay:
 
         for cluster in clusters:
             if len(cluster) < 2:
-                # L-06: Clean up very old singletons (effective_score < 0.05)
-                singleton_updates: list[tuple[str, str]] = []
-                for mem in cluster:
-                    eff = self.compute_effective_score(mem, now)
-                    if eff < 0.05:
-                        meta = mem.get("_meta", {})
-                        meta["consolidated"] = True
-                        meta["singleton_cleaned"] = True
-                        singleton_updates.append((json.dumps(meta), mem["id"]))
-                if singleton_updates:
-                    await store._db.execute_many(
-                        "UPDATE episodic_memories SET metadata_json = ? WHERE id = ?",
-                        singleton_updates,
-                    )
+                # Clean up very old singletons (effective < 0.05) by marking them
+                # consolidated so they stop being re-scanned.
+                ids = [m["id"] for m in cluster
+                       if self.compute_effective_score(m, now) < 0.05]
+                if ids:
+                    await store.mark_consolidated_async(ids)
                 continue
 
-            summary = await self._summarise_cluster(
-                cluster, llm_router, budget_ok,
-            )
+            summary = await self._summarise_cluster(cluster, llm_router, budget_ok)
             mem_type = cluster[0].get("type", "observation")
+            ids = [m["id"] for m in cluster]
 
-            # Archive the summary as a knowledge entry
-            store.save_memory(
-                content=summary,
-                type="knowledge",
-                importance=0.4,
-                metadata={"consolidated_from": [m["id"] for m in cluster]},
-                tags=["consolidated", mem_type],
-            )
-
-            # Mark originals as consolidated
-            consolidation_updates: list[tuple[str, str]] = []
-            for mem in cluster:
-                meta = mem.get("_meta", {})
-                meta["consolidated"] = True
-                consolidation_updates.append((json.dumps(meta), mem["id"]))
-            await store._db.execute_many(
-                "UPDATE episodic_memories SET metadata_json = ? WHERE id = ?",
-                consolidation_updates,
-            )
+            # Archive the summary (append-only; origin-tagged via save_memory), then
+            # mark the originals consolidated (metadata flag; content_hash preserved).
+            await store.archive_to_knowledge_async(
+                summary, ids, metadata={"consolidated_type": mem_type})
+            await store.mark_consolidated_async(ids)
             total_consolidated += len(cluster)
 
         if total_consolidated:
@@ -342,17 +294,3 @@ class MemoryDecay:
             for m in cluster
         ]
         return "\n".join(f"- {p}" for p in parts if p)
-
-
-# ------------------------------------------------------------------ #
-#  Helpers                                                             #
-# ------------------------------------------------------------------ #
-
-def _parse_meta(raw: str | dict) -> dict:
-    """Safely parse metadata_json (may already be a dict)."""
-    if isinstance(raw, dict):
-        return raw
-    try:
-        return json.loads(raw) if raw else {}
-    except (json.JSONDecodeError, TypeError):
-        return {}

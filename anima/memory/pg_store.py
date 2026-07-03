@@ -569,7 +569,7 @@ class PgMemoryStore:
     def _below_threshold_sync(self, threshold: float) -> list[dict]:
         rows = self._db.fetch_sync(
             "SELECT * FROM episodic_memories WHERE decay_score IS NOT NULL "
-            "AND decay_score < %s AND content_hash NOT LIKE 'consolidated:%%' "
+            "AND decay_score < %s AND (metadata_json->>'consolidated') IS DISTINCT FROM 'true' "
             "ORDER BY decay_score ASC LIMIT 200", (threshold,))
         return [self._normalize(r) for r in rows]
 
@@ -583,7 +583,7 @@ class PgMemoryStore:
     def _unconsolidated_sync(self, limit: int) -> list[dict]:
         return self._db.fetch_sync(
             "SELECT id,type,importance,created_at,last_accessed,access_count,decay_score "
-            "FROM episodic_memories WHERE content_hash NOT LIKE 'consolidated:%%' "
+            "FROM episodic_memories WHERE (metadata_json->>'consolidated') IS DISTINCT FROM 'true' "
             "ORDER BY created_at DESC LIMIT %s", (limit,))
 
     def get_unconsolidated_memories(self, limit: int = 500) -> list[dict]:
@@ -607,8 +607,12 @@ class PgMemoryStore:
     def mark_consolidated(self, ids: list[str]) -> None:
         if not ids:
             return
+        # Set a metadata flag rather than rewriting content_hash — content_hash is
+        # the stable G-Set dedup key for cross-node sync (DISTRIBUTED_DESIGN §3);
+        # rewriting it would break dedup. The retriever already reads this flag.
         self._db.write_sync(
-            "UPDATE episodic_memories SET content_hash='consolidated:'||content_hash "
+            "UPDATE episodic_memories SET metadata_json = "
+            "jsonb_set(COALESCE(metadata_json, '{}'::jsonb), '{consolidated}', 'true') "
             "WHERE id = ANY(%s)", (list(ids),))
 
     async def mark_consolidated_async(self, ids: list[str]) -> None:
