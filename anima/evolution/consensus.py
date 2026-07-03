@@ -78,15 +78,22 @@ class ConsensusEngine:
         if total == 0:
             return None
 
-        if approves / total >= 0.5:
+        # STRICT majority of the whole cluster (not ">= 0.5 of votes cast", which
+        # let a 1-1 tie PASS and a single approver carry a 3-node cluster —
+        # DISTRIBUTED_DESIGN P0). A proposal passes only if approvals exceed half
+        # of ALL nodes; rejects that make approval impossible fail it immediately.
+        need = total_nodes // 2 + 1          # strict majority of the cluster
+        if approves >= need:
             proposal.status = ProposalStatus.APPROVED
             self._pending_votes.pop(proposal.id, None)
-            log.info("Proposal %s APPROVED (%d/%d)", proposal.id, approves, total)
+            log.info("Proposal %s APPROVED (%d/%d approve, need %d/%d)",
+                     proposal.id, approves, total, need, total_nodes)
             return "approved"
-        elif rejects / total > 0.5:
+        if rejects > total_nodes - need:      # approval can no longer reach `need`
             proposal.status = ProposalStatus.REJECTED
             self._pending_votes.pop(proposal.id, None)
-            log.info("Proposal %s REJECTED (%d/%d reject)", proposal.id, rejects, total)
+            log.info("Proposal %s REJECTED (%d reject, majority unreachable)",
+                     proposal.id, rejects)
             return "rejected"
 
         return None

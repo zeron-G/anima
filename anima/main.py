@@ -475,6 +475,7 @@ async def _init_gossip(config: dict, core: dict, heartbeat_deps: dict) -> dict:
         local_state=node_state,
         network_secret=_resolve_secret(get("network.secret", "")),
         listen_port=get("network.listen_port", 9420),
+        bind_host=get("network.bind_host", "*"),
     )
     # Configure peers
     peers = get("network.peers", [])
@@ -525,19 +526,18 @@ async def _init_gossip(config: dict, core: dict, heartbeat_deps: dict) -> dict:
             return
         # Evolution voting protocol
         if etype == "evolution_propose":
-            # Remote node proposed an evolution — auto-vote approve (single reviewer)
+            # Remote node proposed an evolution. We DO NOT auto-approve — blindly
+            # voting "approve" let any peer (or a mesh injector) get arbitrary
+            # self-modifying code passed with zero real review (CODE_REVIEW /
+            # DISTRIBUTED_DESIGN P0). Real distributed review + quorum + epoch
+            # fencing is Phase 5; until then a remote proposal receives no
+            # automatic vote and times out (fail-closed → rejected).
             proposal_data = event_data.get("proposal", {})
             from_node = event_data.get("from_node", "")
-            log.info("Received evolution proposal from %s: %s", from_node[:8], proposal_data.get("title", "?"))
-            # Vote approve (can add smarter review logic later)
-            if gossip_mesh:
-                gossip_mesh.broadcast_event({
-                    "type": "evolution_vote",
-                    "proposal_id": proposal_data.get("id", ""),
-                    "node_id": node_identity.node_id,
-                    "vote": "approve",
-                    "reason": "auto-approved by peer",
-                })
+            log.warning(
+                "Received evolution proposal from %s: %s — NOT auto-voting "
+                "(distributed review is Phase 5; proposal will time out unless "
+                "a real review votes).", from_node[:8], proposal_data.get("title", "?"))
             return
         if etype == "evolution_vote":
             evolution_engine.consensus.handle_vote(
@@ -843,6 +843,19 @@ async def _init_network(config: dict, core: dict, llm: dict, heartbeat_deps: dic
         "_cognitive_lock": None,
     }
     if not get("network.enabled", False):
+        return disabled
+
+    # Fail-closed: the mesh signs/verifies gossip ONLY when a secret is set. An
+    # empty secret is fail-OPEN → any host reaching :9420 can inject task_delegate
+    # → USER_MESSAGE into the cognitive loop; on PiDog that is physical actuator
+    # command injection (DISTRIBUTED_DESIGN P0). Refuse to join an unauthenticated
+    # mesh — run SINGLE-NODE instead.
+    from anima.secret_store import resolve as _resolve_secret
+    if not _resolve_secret(get("network.secret", "")).strip() and not get("network.allow_insecure", False):
+        log.critical(
+            "network.enabled but network.secret is empty — refusing to join the mesh "
+            "(unauthenticated gossip = command injection). Running SINGLE-NODE. Set "
+            "ANIMA_NETWORK_SECRET, or network.allow_insecure=true to override.")
         return disabled
 
     try:

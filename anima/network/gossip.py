@@ -86,6 +86,7 @@ class GossipMesh:
         local_state: NodeState,
         network_secret: str = "",
         listen_port: int = 9420,
+        bind_host: str = "*",
         gossip_interval: float = 5.0,
         suspect_phi: float = 8.0,
         dead_phi: float = 16.0,
@@ -95,6 +96,11 @@ class GossipMesh:
         self._local_state = local_state
         self._secret = network_secret
         self._port = listen_port
+        # Interface to bind the PUB socket. Default "*" (all interfaces) is
+        # backward-compatible but publicly reachable; pin to the node's Tailscale
+        # IP (100.x) via network.bind_host so the mesh never listens on the public
+        # NIC (DISTRIBUTED_DESIGN §6.5).
+        self._bind_host = bind_host or "*"
 
         # L-24: configurable gossip params (were class constants)
         self.GOSSIP_INTERVAL = gossip_interval
@@ -375,7 +381,10 @@ class GossipMesh:
 
         pub = ctx.socket(zmq.PUB)
         pub.setsockopt(zmq.LINGER, 0)
-        pub.bind(f"tcp://*:{self._port}")
+        if self._bind_host in ("*", "0.0.0.0"):
+            log.warning("gossip PUB binding all interfaces (%s:%d) — pin network.bind_host "
+                        "to this node's Tailscale IP to avoid public exposure", self._bind_host, self._port)
+        pub.bind(f"tcp://{self._bind_host}:{self._port}")
 
         sub = ctx.socket(zmq.SUB)
         sub.setsockopt(zmq.SUBSCRIBE, b"")

@@ -202,7 +202,16 @@ idle_scheduler:
 network:
   enabled: true
   listen_port: 9420
-  secret: ""
+  # REQUIRED to join the mesh. Empty = fail-OPEN gossip (anyone on :9420 can
+  # inject task_delegate → USER_MESSAGE into the cognitive loop). When enabled
+  # with an empty secret the node refuses to join and runs SINGLE-NODE.
+  secret: "${ANIMA_NETWORK_SECRET}"
+  # Interface for the gossip PUB socket. Pin to this node's Tailscale IP (100.x)
+  # in the per-node profile so the mesh never listens on the public NIC.
+  # "*" = all interfaces (backward-compatible, warns).
+  bind_host: "*"
+  # Escape hatch: run the mesh WITHOUT a secret (unauthenticated). Never in prod.
+  allow_insecure: false
   peers: []
   gossip_interval_s: 5
   suspect_phi: 8
