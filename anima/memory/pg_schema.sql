@@ -48,11 +48,29 @@ CREATE INDEX IF NOT EXISTS idx_emotion_ts ON emotion_log(timestamp);
 CREATE INDEX IF NOT EXISTS idx_emotion_node_ts ON emotion_log(node_id, timestamp);
 
 -- NOTE: persona prose (identity/*.md), feelings.md, growth_log.md, lorebook and
--- golden_replies stay as FILES, not DB rows — they're human-authored and edited
--- (vim / Soulscape UI / SSH); a DB would turn "edit a file" into "write SQL".
--- Durability for them = the backup routine (cloud snapshot + local-on-startup),
--- not this schema. Only program-written, queried, or semantically-searched data
--- lives here.
+-- golden_replies stay as FILES (authoritative for reads), not DB rows — they're
+-- human-authored and edited (vim / Soulscape UI / SSH); a DB would turn "edit a
+-- file" into "write SQL". Their DURABILITY + cross-node convergence = the backup
+-- routine below (soul_snapshots: cloud snapshot on write/idle/shutdown, restore on
+-- startup). The files remain the read path; soul_snapshots is only the safety net.
+
+-- ── Soul snapshots: cloud copy of the per-node persona FILES (P3e). One row per
+-- (agent, rel_path) = the latest version, version-bumped on content change; a node
+-- pushes its changed soul files up and, on (re)provision/startup, pulls newer/
+-- missing files back down (SoulSync). This is the durability the NOTE promises. ──
+CREATE TABLE IF NOT EXISTS soul_snapshots (
+    id           TEXT PRIMARY KEY,
+    agent        TEXT NOT NULL,
+    rel_path     TEXT NOT NULL,          -- path under agent_dir, e.g. "identity/personality.md"
+    content      TEXT NOT NULL,
+    content_hash TEXT NOT NULL,          -- sha256[:16] — change detection + dedup
+    node_id      TEXT,                   -- origin node of this version
+    version      BIGINT NOT NULL DEFAULT 1,  -- monotonic per (agent, rel_path); merge tiebreak
+    updated_at   DOUBLE PRECISION NOT NULL,
+    is_deleted   INTEGER NOT NULL DEFAULT 0,
+    UNIQUE(agent, rel_path)
+);
+CREATE INDEX IF NOT EXISTS idx_soul_agent ON soul_snapshots(agent);
 
 -- ── Tier-1 static knowledge ──
 CREATE TABLE IF NOT EXISTS static_knowledge (

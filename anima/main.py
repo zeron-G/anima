@@ -1181,6 +1181,23 @@ async def run() -> bool:
     core = await _init_core(config)
     robotics = await _init_robotics(core)
     core.update(robotics)
+    # P3e: restore soul files from the shared cloud BEFORE the prompt compiler warms
+    # its caches from them — a freshly provisioned / disk-lost node pulls Eva's real
+    # persona back down instead of booting the generic seed. Then snapshot up so the
+    # cloud is seeded on first run and any edits unflushed by a prior crash are saved.
+    # Cloud unreachable → no-op; local files serve as the offline cache.
+    try:
+        from anima.memory.soul_sync import SoulSync
+        from anima.network.node import NodeIdentity
+        from anima.config import agent_dir as _agent_dir, agent_name as _agent_name
+        _ms0 = core.get("memory_store")
+        _cloud0 = getattr(_ms0, "long_term", _ms0)
+        _soul = SoulSync(_cloud0, _agent_dir(), _agent_name(), NodeIdentity().node_id)
+        core["soul_sync"] = _soul
+        await _soul.restore_all()
+        await _soul.snapshot_all()
+    except Exception as _e:  # noqa: BLE001 — soul sync must never block startup
+        log.warning("SoulSync startup skipped: %s", _e)
     llm = await _init_llm(config, core["tool_registry"], core["tool_executor"], core["memory_store"])
     hb = await _init_heartbeat(config, core, llm)
     net = await _init_network(config, core, llm, hb)
@@ -1458,6 +1475,16 @@ async def run() -> bool:
     pg_sync = core.get("pg_sync")
     if pg_sync:
         await pg_sync.stop()
+    # P3e: flush any soul-file edits made this session up to the shared cloud before
+    # we go down, so they survive a disk loss and are visible to other nodes.
+    _soul = core.get("soul_sync")
+    if _soul is not None:
+        try:
+            n = await _soul.snapshot_all()
+            if n:
+                log.info("Shutdown flush: snapshotted %d soul file(s) to cloud", n)
+        except Exception as e:  # noqa: BLE001
+            log.debug("shutdown soul snapshot skipped: %s", e)
     # Tiered memory: flush any pending SALIENT local memories up to the shared cloud
     # long-term store before we go down (best-effort; never blocks shutdown).
     _ms = core.get("memory_store")

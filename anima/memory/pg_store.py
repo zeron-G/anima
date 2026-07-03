@@ -429,6 +429,44 @@ class PgMemoryStore:
         import asyncio
         return await asyncio.to_thread(self.delete_static_knowledge, category, key, scope)
 
+    # ── Soul snapshots (P3e): cloud copy of per-node persona FILES ──
+
+    def _upsert_soul_snapshot_sync(self, agent, rel_path, content, content_hash, node_id) -> int:
+        # One row per (agent, rel_path); version bumps only when content actually
+        # changes (hash guard) so an idempotent re-push doesn't inflate the version
+        # and mistakenly look "newer" to another node's restore.
+        rows = self._db.fetch_sync(
+            "INSERT INTO soul_snapshots (id,agent,rel_path,content,content_hash,node_id,version,updated_at,is_deleted) "
+            "VALUES (%s,%s,%s,%s,%s,%s,1,%s,0) "
+            "ON CONFLICT (agent,rel_path) DO UPDATE SET content=EXCLUDED.content, "
+            "content_hash=EXCLUDED.content_hash, node_id=EXCLUDED.node_id, updated_at=EXCLUDED.updated_at, "
+            "is_deleted=0, version=soul_snapshots.version+1 "
+            "WHERE soul_snapshots.content_hash <> EXCLUDED.content_hash "
+            "RETURNING version",
+            (gen_id("soul"), agent, rel_path, content, content_hash, node_id, time.time()))
+        if rows:
+            return int(rows[0]["version"])
+        # No update happened → content already identical in cloud; return live version.
+        r = self._db.fetch_one_sync(
+            "SELECT version FROM soul_snapshots WHERE agent=%s AND rel_path=%s", (agent, rel_path))
+        return int(r["version"]) if r else 1
+
+    def upsert_soul_snapshot(self, agent, rel_path, content, content_hash, node_id=None) -> int:
+        return self._upsert_soul_snapshot_sync(agent, rel_path, content, content_hash, node_id)
+
+    async def upsert_soul_snapshot_async(self, agent, rel_path, content, content_hash, node_id=None) -> int:
+        import asyncio
+        return await asyncio.to_thread(self._upsert_soul_snapshot_sync, agent, rel_path, content, content_hash, node_id)
+
+    def get_soul_snapshots(self, agent: str) -> list[dict]:
+        return self._db.fetch_sync(
+            "SELECT rel_path,content,content_hash,version,updated_at,is_deleted,node_id "
+            "FROM soul_snapshots WHERE agent=%s", (agent,))
+
+    async def get_soul_snapshots_async(self, agent: str) -> list[dict]:
+        import asyncio
+        return await asyncio.to_thread(self.get_soul_snapshots, agent)
+
     # ── Environment catalog (filesystem scan cache) — real PG ──
 
     def _upsert_env_sync(self, entries: list[dict]) -> None:

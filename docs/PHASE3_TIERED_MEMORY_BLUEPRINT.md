@@ -195,9 +195,17 @@ retriever 现在只有 `self._store`。改动集中在 `retriever.py` 这一个 
 - **对抗式复审（workflow wf_c318c4ea）抓+修 3 confirmed（同一根因）**：① MED 情绪 node key 取自**可选的 mesh** `net["node_identity"]`——mesh 关闭时（默认 secret 空→fail-closed）回落裸 hostname，跨启动翻转 + 非唯一 → 严格过滤命中 0 行 mood 回基线（违反 S2）。修：`main.py` 改从**持久化 `NodeIdentity()`**（node.json，mesh 无关，稳定唯一 `anima-<host>-<rand8>`）取 origin_node。② ③ LOW 严格过滤无空回退 → P3d 升级首启（旧行 node_id=NULL）/ 新节点首启 mood 回基线。修：`get_latest_emotion` 严格取不到时**回落全局最新**做连续性种子（稳态每节点有自己的行→永不触发→无串味）。复审后 `verify_p3d.py` 增补回退 + 稳态无串味断言，全过；33 单测无回归。
 - **P3d-2 待做（baseline fold）**：慢共享情绪基线（跨节点缓慢趋同，止乒乓），与 per-locus 快通道分离。
 
-### P3e — persona/soul 云权威 + 离线缓存 + 重连拉取
-- 触碰：persona/static_knowledge 读走 long_term、离线本地缓存表、重连 pull。
-- 验证：云在线时 prompt 用云端 persona；断云后用本地缓存仍能编译 prompt；重连后拉到其它节点的整理产出。
+### P3e — persona/soul 云权威 + 离线缓存 + 重连拉取（架构 C：文件仍是读权威 + 云快照兜底）
+**关键现实**：persona/soul 全是**文件**（identity/*.md、rules、feelings、growth_log、golden_replies、lorebook，在 `home/agents/<name>/`），不是 DB 行；prompt 编译器直接读文件。所以不能像 P3b/c/d 那样改 DB 读路由。架构 C（主人选定）：文件保持读权威 + vim 可编辑；新增云端快照+恢复兜底（补上 schema NOTE 承诺但从未实现的备份例程）；static_knowledge 的 global 作用域在 tiered 下走云权威。
+
+#### P3e-1 灵魂快照+恢复（durability 核心）✅ 已完成（commit 待填）
+- 新表 `soul_snapshots`（每 (agent,rel_path) 一行=最新版本，content_hash 变才 version++）；`anima/memory/soul_sync.py` `SoulSync`：本地 manifest `.soul_sync.json`(原子写) 记录每文件 last-synced {version,hash}；`snapshot_all()` 推变更文件上云、`restore_all()` 启动时拉新/缺文件下来。`main.py` run() 在 **_init_core 后、_init_llm(编译器 warm) 前** restore_all()+snapshot_all()，shutdown 再 snapshot flush。云=`getattr(memory_store,'long_term',memory_store)`（非分层单 Neon 也得 durable 备份）。
+- **设计取向：灵魂神圣——绝不覆盖可能含真实未同步编辑的本地灵魂文件，绝不把垃圾(空/seed)推上共享云。** 唯三覆盖路径：①本地缺失→恢复 ②本地==出厂 seed 模板(确认匹配)→provision(备份 seed 后采纳云) ③云更新且本地==上次同步版本(manifest hash 一致=无未同步编辑)→安全拉取。其余一切(本地已改/无 manifest 的分歧/不可读)**保留本地**+journal。跨节点真冲突的 Eva-LLM 语义合并(决策#3)=后续。
+- **对抗式复审 workflow wf_3130c46c 抓 11 confirmed（多个 HIGH 灵魂损毁）+ 复审后二次 attack 再抓 1 fail-open，全修**：无 manifest 即当 seed 覆盖(丢真灵魂)→加 seed 模板比对；不可读文件误判缺失→覆盖无备份→显式 unreadable 分支不碰；空文件被推上云污染全网→`_blank` 闸门；单槽 .soulbak 覆盖旧备份→时间戳命名；写不等备份成功→`_safe_write` 备份失败拒写;循环无逐文件保护→per-file try;首启无脑 snapshot 用 seed 抢占云真相→snapshot 跳过 seed/空;seed 不可读时 `_is_seed` fail-open 推 seed→三态 `_seed_state`("unknown"+无 manifest→跳过)。双 docker cloud PG `verify_p3e1.py` 9 场景全过(含缺失恢复/seed provision+备份/**无-manifest 真灵魂保留本地/冲突保留本地/空不推**)。
+- **v1 已知取舍（后续）**：跨节点真冲突暂 LWW-保留本地(未做 LLM 合并)；本地删除不传播(缺失即恢复=durability 默认，且不自动删灵魂更安全)；云被清库降版本会冻结分歧。
+
+#### P3e-2 static_knowledge global 云权威（tiered）— 待做
+- global 作用域读写走 long_term（已是 DB+版本合并），node:<id> 留本地 working（per-locus）。跨节点知识收敛，mesh 起来才有真价值。
 
 ---
 
