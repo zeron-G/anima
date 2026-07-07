@@ -11,6 +11,7 @@ import aiohttp
 from anima.robotics.exploration import ExplorationController
 from anima.robotics.models import PIDOG_COMMANDS, RobotNodeConfig, RobotNodeSnapshot
 from anima.robotics.nlp_supervisor import RobotNlpSupervisor, match_pidog_command_text
+from anima.robotics.perception_source import EmbodiedPerceptionSource
 from anima.robotics.pidog import PiDogApiClient
 from anima.utils.logging import get_logger
 
@@ -33,6 +34,11 @@ class RoboticsManager:
         self._poll_interval_s = float(cfg.get("poll_interval_s", 2.0))
         self._exploration_defaults = dict(cfg.get("exploration") or {})
         self._safety = dict(cfg.get("safety") or {})
+        # Embodied perception → cognition (E2). Emits EMBODIED_PERCEPTION events into
+        # the cognitive event queue on significant sensor changes. event_sink is wired
+        # by main once the event queue exists; until then perception stays dashboard-only.
+        self._perception = EmbodiedPerceptionSource(cfg.get("perception") or {})
+        self._event_sink = None
         self._session = session
         self._owns_session = session is None
         self._poll_task: asyncio.Task | None = None
@@ -52,6 +58,11 @@ class RoboticsManager:
     @classmethod
     def from_config(cls, config: dict[str, Any] | None = None) -> "RoboticsManager":
         return cls(config=config)
+
+    def set_event_sink(self, sink) -> None:
+        """Wire the cognitive event queue so significant robot perception reaches
+        cognition. *sink* takes an Event; called best-effort from the poll loop."""
+        self._event_sink = sink
 
     @property
     def enabled(self) -> bool:
@@ -136,10 +147,22 @@ class RoboticsManager:
         try:
             status = await client.status()
             snapshot.update_from_status(status, connected_url=client.active_base_url, refresh_ts=now)
+            self._emit_perception(node_id, snapshot)
             return status
         except Exception as exc:
             snapshot.mark_error(str(exc), refresh_ts=now)
             return dict(snapshot.raw_status)
+
+    def _emit_perception(self, node_id: str, snapshot: RobotNodeSnapshot) -> None:
+        """Turn a fresh perception frame into a cognitive event on significant change.
+        Best-effort: never let perception plumbing break the poll loop."""
+        if self._event_sink is None:
+            return
+        try:
+            for event in self._perception.observe(node_id, snapshot.perception, snapshot.state):
+                self._event_sink(event)
+        except Exception as exc:  # noqa: BLE001
+            log.debug("embodied perception emit skipped: %s", exc)
 
     def list_nodes(self) -> list[dict[str, Any]]:
         return [self._snapshots[node_id].to_dict() for node_id in sorted(self._snapshots)]
@@ -147,31 +170,44 @@ class RoboticsManager:
     def get_node(self, node_id: str) -> dict[str, Any]:
         return self._require_snapshot(node_id).to_dict()
 
-    def _safety_gate(self, node_id: str, command: str) -> tuple[bool, str]:
-        """ANIMA-side pre-dispatch clamp for LOCOMOTION commands (a secondary net —
-        the authoritative real-time reflexes live in the on-chip :8888 firmware). Only
-        gates ground-locomotion so a safe response (stop/sit/emergency_stop/…) is never
-        blocked. Uses the latest polled perception; fail-safe when the robot is unseen."""
-        if not self._safety.get("enabled", True) or command not in _LOCOMOTION:
-            return (True, "")
+    def _locomotion_unsafe(self, node_id: str) -> tuple[bool, str]:
+        """Coarse 'no locomotion is safe right now' check (lifted / tilted past limit /
+        battery-critical / robot unseen) from the latest polled perception. Shared by the
+        discrete-command clamp AND the free-text NLP path so neither can walk the robot in
+        an unsafe state. A secondary net — the authoritative real-time reflexes are on-chip."""
+        if not self._safety.get("enabled", True):
+            return (False, "")
         snap = self._snapshots.get(node_id)
         if snap is None:
-            return (True, "")
+            return (False, "")
         if not snap.connected:
-            return (False, "no live status — refusing locomotion without sensor confirmation")
+            return (True, "no live status — refusing locomotion without sensor confirmation")
         p = snap.perception
         tilt = float(self._safety.get("tilt_limit_deg", 60.0))
         crit = float(self._safety.get("critical_battery_v", 6.0))
         if p.is_lifted:
-            return (False, "robot is lifted — refusing to walk in the air")
+            return (True, "robot is lifted — refusing to walk in the air")
         if abs(p.pitch_deg) > tilt or abs(p.roll_deg) > tilt:
-            return (False, f"unstable tilt (pitch={p.pitch_deg:.0f}deg roll={p.roll_deg:.0f}deg)")
+            return (True, f"unstable tilt (pitch={p.pitch_deg:.0f}deg roll={p.roll_deg:.0f}deg)")
         if 0.0 < p.battery_v < crit:   # 0.0 = battery unwired/unknown → don't block on it
-            return (False, f"battery critical ({p.battery_v:.1f}V)")
+            return (True, f"battery critical ({p.battery_v:.1f}V)")
+        return (False, "")
+
+    def _safety_gate(self, node_id: str, command: str) -> tuple[bool, str]:
+        """Pre-dispatch clamp for a discrete LOCOMOTION command. Only ground-locomotion is
+        gated so a safe response (stop/sit/emergency_stop/…) is never blocked."""
+        if not self._safety.get("enabled", True) or command not in _LOCOMOTION:
+            return (True, "")
+        unsafe, reason = self._locomotion_unsafe(node_id)
+        if unsafe:
+            return (False, reason)
         if command in _FORWARD:
-            hard_cm = float(self._safety.get("forward_block_distance_cm", 15.0))
-            if p.is_obstacle_near or (0.0 < p.distance_cm <= hard_cm):
-                return (False, f"obstacle ahead ({p.distance_cm:.0f}cm) — refusing forward motion")
+            snap = self._snapshots.get(node_id)
+            if snap is not None:
+                p = snap.perception
+                hard_cm = float(self._safety.get("forward_block_distance_cm", 15.0))
+                if p.is_obstacle_near or (0.0 < p.distance_cm <= hard_cm):
+                    return (False, f"obstacle ahead ({p.distance_cm:.0f}cm) — refusing forward motion")
         return (True, "")
 
     async def execute_command(self, node_id: str, command: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -187,6 +223,16 @@ class RoboticsManager:
 
     async def run_nlp(self, node_id: str, text: str) -> dict[str, Any]:
         client = self._require_client(node_id)
+        # Free-text NLP can't be pre-classified, and the robot-local /nlp path executes
+        # motion WITHOUT passing through execute_command's per-command clamp. So when no
+        # locomotion is safe (lifted/tilted/battery-critical/unseen), refuse the whole
+        # NLP request rather than risk walking the robot in the air. Discrete safe verbs
+        # (sit/stop/…) remain available via robot_dog_command.
+        unsafe, reason = self._locomotion_unsafe(node_id)
+        if unsafe:
+            log.warning("Safety clamp blocked NLP on %s (%s): %r", node_id, reason, text[:80])
+            return {"ok": False, "blocked": True, "reason": f"unsafe for motion: {reason}",
+                    "source": "anima_safety_clamp", "text": text}
         robot_result: dict[str, Any] | None = None
         robot_error = ""
 

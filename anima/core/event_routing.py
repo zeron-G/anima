@@ -74,14 +74,17 @@ _SELF_EVENT_TYPES: frozenset[EventType] = frozenset({
     EventType.FOLLOW_UP,
     EventType.FILE_CHANGE,
     EventType.SYSTEM_ALERT,
+    EventType.EMBODIED_PERCEPTION,
     EventType.SCHEDULED_TASK,
     EventType.IDLE_TASK,
 })
 
-# Event types that get tool access in the LLM call.
+# Event types that get tool access in the LLM call. EMBODIED_PERCEPTION is included so
+# Eva can RESPOND to what her body senses (move, look, express, explore) — not just
+# note it. Robot commands still pass through the E1 safety clamp.
 _TOOL_ENABLED_EVENTS: frozenset[str] = frozenset({
     "USER_MESSAGE", "STARTUP", "SELF_THINKING",
-    "SCHEDULED_TASK", "TASK_DELEGATE", "IDLE_TASK",
+    "SCHEDULED_TASK", "TASK_DELEGATE", "IDLE_TASK", "EMBODIED_PERCEPTION",
 })
 
 
@@ -305,6 +308,9 @@ class EventRouter:
         if t == EventType.SYSTEM_ALERT:
             return self._format_system_alert(p)
 
+        if t == EventType.EMBODIED_PERCEPTION:
+            return self._format_embodied_perception(p)
+
         if t == EventType.FOLLOW_UP:
             return p.get("text", "Continue your previous work.")
 
@@ -491,6 +497,32 @@ class EventRouter:
         return (
             f"[INTERNAL: SYSTEM_ALERT]\n"
             f"{json.dumps(p.get('diff', {}), ensure_ascii=False)[:200]}"
+        )
+
+    @staticmethod
+    def _format_embodied_perception(p: dict) -> str:
+        """Format an EMBODIED_PERCEPTION event — what Eva's robot body just sensed,
+        plus its body state, framed so she can respond as herself (move/look/express/
+        explore) or simply take note."""
+        perc = p.get("perception", {}) or {}
+        node = p.get("node_id", "robot")
+        summary = p.get("summary", "Something changed in my body's senses.")
+        bits: list[str] = []
+        if "distance_cm" in perc:
+            bits.append(f"obstacle distance ~{float(perc.get('distance_cm', 999)):.0f}cm")
+        if str(perc.get("touch", "N")) != "N":
+            bits.append(f"touch={perc.get('touch')}")
+        bits.append(f"tilt pitch={float(perc.get('pitch_deg', 0)):.0f}deg roll={float(perc.get('roll_deg', 0)):.0f}deg")
+        if perc.get("is_lifted"):
+            bits.append("lifted off ground")
+        if float(perc.get("battery_v", 0) or 0) > 0:
+            bits.append(f"battery {float(perc.get('battery_v', 0)):.1f}V")
+        return (
+            f"[Embodied perception · {node}] {summary}\n"
+            f"Body state: {', '.join(bits)}.\n"
+            "You are Eva, present right now in this robot body. Respond as yourself — you may move, "
+            "look around, express with light/tail/voice, explore your surroundings, or simply take note "
+            "of it. Keep physical safety in mind (unsafe motion is clamped)."
         )
 
     @staticmethod

@@ -362,6 +362,26 @@ async def _init_robotics(core: dict) -> dict:
     from anima.tools.builtin.robotics import get_robotics_tools, set_robotics_manager
 
     robotics_manager = RoboticsManager.from_config(get("robotics", {}))
+    # E2: route significant robot perception into cognition. Non-blocking put so a
+    # full cognitive queue never stalls the robot poll loop (perception is dropped,
+    # not backpressured). Wire BEFORE start() so the first poll establishes baseline.
+    _eq = core.get("event_queue")
+    if _eq is not None:
+        def _perception_sink(ev, _q=_eq):
+            try:
+                _q.put_nowait(ev)
+            except Exception as e:  # noqa: BLE001 — QueueFull etc. → drop, don't stall polling
+                # A full queue (256 deep) is itself an anomaly; a dropped HIGH/CRITICAL
+                # perception (battery-critical/emergency) is worth surfacing loudly, since
+                # asyncio.PriorityQueue can't prioritise on admission. Physical emergency
+                # handling is still on-chip; this is loss of cognitive awareness only.
+                from anima.models.event import EventPriority
+                if getattr(ev, "priority", EventPriority.NORMAL) >= EventPriority.HIGH:
+                    kind = (ev.payload or {}).get("kind", "?")
+                    log.warning("Dropped HIGH-priority embodied perception (%s) — cognitive queue full: %s", kind, e)
+                else:
+                    log.debug("embodied perception event dropped: %s", e)
+        robotics_manager.set_event_sink(_perception_sink)
     await robotics_manager.start()
     set_robotics_manager(robotics_manager)
 

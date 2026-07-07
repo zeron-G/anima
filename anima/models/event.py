@@ -14,6 +14,7 @@ class EventType(IntEnum):
     USER_MESSAGE = auto()
     FILE_CHANGE = auto()
     SYSTEM_ALERT = auto()
+    EMBODIED_PERCEPTION = auto()  # A robot body sensed something significant (touch, lift, obstacle, …)
     TIMER = auto()
     SHUTDOWN = auto()
     # Self-generated events — the agent drives itself
