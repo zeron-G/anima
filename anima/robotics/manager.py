@@ -39,6 +39,10 @@ class RoboticsManager:
         # by main once the event queue exists; until then perception stays dashboard-only.
         self._perception = EmbodiedPerceptionSource(cfg.get("perception") or {})
         self._event_sink = None
+        # E3: optional async hook (kind, perception) → embodied emotion coupling +
+        # expression. Fire-and-forget off the poll loop, in addition to the cognitive
+        # event sink. Set by main once the emotion state exists.
+        self._perception_hook = None
         self._session = session
         self._owns_session = session is None
         self._poll_task: asyncio.Task | None = None
@@ -63,6 +67,12 @@ class RoboticsManager:
         """Wire the cognitive event queue so significant robot perception reaches
         cognition. *sink* takes an Event; called best-effort from the poll loop."""
         self._event_sink = sink
+
+    def set_perception_hook(self, hook) -> None:
+        """Wire a fast async reflex on significant perception (E3 embodied emotion +
+        expression). *hook* is an async callable (kind, perception_dict); it runs
+        fire-and-forget so it never blocks the poll loop."""
+        self._perception_hook = hook
 
     @property
     def enabled(self) -> bool:
@@ -156,11 +166,18 @@ class RoboticsManager:
     def _emit_perception(self, node_id: str, snapshot: RobotNodeSnapshot) -> None:
         """Turn a fresh perception frame into a cognitive event on significant change.
         Best-effort: never let perception plumbing break the poll loop."""
-        if self._event_sink is None:
+        if self._event_sink is None and self._perception_hook is None:
             return
         try:
             for event in self._perception.observe(node_id, snapshot.perception, snapshot.state):
-                self._event_sink(event)
+                if self._event_sink is not None:
+                    self._event_sink(event)                 # → cognition (LLM path)
+                if self._perception_hook is not None:        # → fast emotion/expression reflex
+                    try:
+                        asyncio.get_running_loop().create_task(
+                            self._perception_hook(event.payload["kind"], event.payload["perception"]))
+                    except RuntimeError:
+                        pass  # no running loop (not from the poll) — skip the reflex
         except Exception as exc:  # noqa: BLE001
             log.debug("embodied perception emit skipped: %s", exc)
 

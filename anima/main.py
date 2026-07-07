@@ -382,6 +382,18 @@ async def _init_robotics(core: dict) -> dict:
                 else:
                     log.debug("embodied perception event dropped: %s", e)
         robotics_manager.set_event_sink(_perception_sink)
+    # E3: embodied emotion coupling — a sensation nudges Eva's mood fast (no LLM) and
+    # her body expresses it (be_* emote). Uses the SHARED emotion state so it shows in
+    # her real mood; expression is non-locomotion (never clamped).
+    try:
+        from anima.emotion.embodied import EmbodiedEmotionCoupler
+        _es = core.get("emotion_state")
+        _rnodes = list(getattr(robotics_manager, "_nodes", {}).keys())
+        if _es is not None and _rnodes:
+            _coupler = EmbodiedEmotionCoupler(_es, robotics_manager, _rnodes[0])
+            robotics_manager.set_perception_hook(_coupler.on_perception)
+    except Exception as _e:  # noqa: BLE001 — coupling is best-effort
+        log.debug("embodied emotion coupling skipped: %s", _e)
     await robotics_manager.start()
     set_robotics_manager(robotics_manager)
 
