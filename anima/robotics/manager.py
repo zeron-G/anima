@@ -16,6 +16,13 @@ from anima.utils.logging import get_logger
 
 log = get_logger("robotics.manager")
 
+# Commands that translate the body across the ground — the only class gated by the
+# ANIMA-side safety clamp. Everything else (postures, head, gestures, audio, emotes,
+# lights, power, and the safety verbs stop/sit/lie/sleep_mode/emergency_stop/resume)
+# is always allowed so a safe response can never be blocked.
+_LOCOMOTION = {"walk_forward", "walk_backward", "turn_left", "turn_right", "trot"}
+_FORWARD = {"walk_forward", "trot"}
+
 
 class RoboticsManager:
     """Tracks configured robot nodes, live status, and exploration state."""
@@ -25,6 +32,7 @@ class RoboticsManager:
         self._enabled = bool(cfg.get("enabled", False))
         self._poll_interval_s = float(cfg.get("poll_interval_s", 2.0))
         self._exploration_defaults = dict(cfg.get("exploration") or {})
+        self._safety = dict(cfg.get("safety") or {})
         self._session = session
         self._owns_session = session is None
         self._poll_task: asyncio.Task | None = None
@@ -79,6 +87,17 @@ class RoboticsManager:
             )
 
         await self.refresh_all()
+        # Boot liveness gate: make an unreachable robot VISIBLE (status errors are
+        # otherwise swallowed by read_status → a dead robot used to boot silently).
+        online = [nid for nid, s in self._snapshots.items() if s.connected]
+        down = [nid for nid, s in self._snapshots.items() if not s.connected]
+        if online:
+            log.info("Robotics: %d node(s) online: %s", len(online), ", ".join(online))
+        if down:
+            log.warning(
+                "Robotics: %d node(s) UNREACHABLE at boot: %s — running degraded, will keep polling",
+                len(down),
+                ", ".join(f"{nid} ({self._snapshots[nid].last_error[:60]})" for nid in down))
         self._poll_task = asyncio.create_task(self._poll_loop(), name="robotics_poll")
         log.info("Robotics manager started with %d node(s)", len(self._nodes))
 
@@ -128,8 +147,40 @@ class RoboticsManager:
     def get_node(self, node_id: str) -> dict[str, Any]:
         return self._require_snapshot(node_id).to_dict()
 
+    def _safety_gate(self, node_id: str, command: str) -> tuple[bool, str]:
+        """ANIMA-side pre-dispatch clamp for LOCOMOTION commands (a secondary net —
+        the authoritative real-time reflexes live in the on-chip :8888 firmware). Only
+        gates ground-locomotion so a safe response (stop/sit/emergency_stop/…) is never
+        blocked. Uses the latest polled perception; fail-safe when the robot is unseen."""
+        if not self._safety.get("enabled", True) or command not in _LOCOMOTION:
+            return (True, "")
+        snap = self._snapshots.get(node_id)
+        if snap is None:
+            return (True, "")
+        if not snap.connected:
+            return (False, "no live status — refusing locomotion without sensor confirmation")
+        p = snap.perception
+        tilt = float(self._safety.get("tilt_limit_deg", 60.0))
+        crit = float(self._safety.get("critical_battery_v", 6.0))
+        if p.is_lifted:
+            return (False, "robot is lifted — refusing to walk in the air")
+        if abs(p.pitch_deg) > tilt or abs(p.roll_deg) > tilt:
+            return (False, f"unstable tilt (pitch={p.pitch_deg:.0f}deg roll={p.roll_deg:.0f}deg)")
+        if 0.0 < p.battery_v < crit:   # 0.0 = battery unwired/unknown → don't block on it
+            return (False, f"battery critical ({p.battery_v:.1f}V)")
+        if command in _FORWARD:
+            hard_cm = float(self._safety.get("forward_block_distance_cm", 15.0))
+            if p.is_obstacle_near or (0.0 < p.distance_cm <= hard_cm):
+                return (False, f"obstacle ahead ({p.distance_cm:.0f}cm) — refusing forward motion")
+        return (True, "")
+
     async def execute_command(self, node_id: str, command: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
         client = self._require_client(node_id)
+        allowed, reason = self._safety_gate(node_id, command)
+        if not allowed:
+            log.warning("Safety clamp blocked '%s' on %s: %s", command, node_id, reason)
+            return {"ok": False, "blocked": True, "command": command,
+                    "reason": reason, "source": "anima_safety_clamp"}
         result = await client.command(command, params or {})
         await self.refresh_node(node_id)
         return result

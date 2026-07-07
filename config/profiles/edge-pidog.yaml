@@ -37,6 +37,14 @@ voice_bridge:
 robotics:
   enabled: true
   poll_interval_s: 1.5
+  # ANIMA-side safety clamp (E1): pre-dispatch gate on ground-locomotion commands
+  # (walk/turn/trot) — a secondary net; the authoritative real-time reflexes live in
+  # the on-chip :8888 firmware. Safe verbs (stop/sit/emergency_stop/…) are never gated.
+  safety:
+    enabled: true
+    tilt_limit_deg: 60.0            # |pitch| or |roll| above this blocks locomotion
+    critical_battery_v: 6.0         # below this blocks locomotion (0.0 = unwired → ignored)
+    forward_block_distance_cm: 15.0 # hard forward-collision block (obstacle_near also blocks)
   nlp_supervisor:
     enabled: false
     model: "codex/gpt-5.3-codex"
